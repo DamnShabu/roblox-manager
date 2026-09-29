@@ -172,7 +172,7 @@ modules:
         CC: clang
         CXX: clang++
         CARGO_HOME: /run/build/cordial/cargo
-        CORDIAL_GIT_SHA: ce31eec-mujo
+        CORDIAL_GIT_SHA: c297d56-mujo
     build-commands:
       # mcpelauncher-linker reaches bionic's headers through symlinks in
       # include/ (android -> ../bionic/libc/include/android/, and eight more).
@@ -206,7 +206,7 @@ modules:
       # with it.
       - type: git
         url: https://github.com/DamnShabu/stacked
-        commit: ce31eeccbb748407f2598c15b4cafbcec8464faf
+        commit: c297d56832bae8a5666eb04f17e10e7f61cd02e2
         disable-submodules: true
       - type: git
         url: https://github.com/ChristopherHX/libjnivm

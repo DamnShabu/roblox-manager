@@ -19,9 +19,10 @@
 # Patches (source.json's "patches", applied in order):
 #   0002  cordial-fetch. Commit it to the fork and this list is empty.
 #
-# Keeping the cursor inside a fullscreen window is the fork's own (commit
-# 4de9752, CORDIAL_NO_FULLSCREEN_CONFINE=1 turns it off); the patch this
-# repo carried for it before (0001, in git history) no longer applies.
+# Keeping the cursor inside a fullscreen window is the fork's own (4de9752,
+# with 8ed8332 re-asking when KWin drops it and keeping Hyprland's pointer
+# focus on the game); CORDIAL_NO_FULLSCREEN_CONFINE=1 turns it off. It
+# replaces the patch this repo carried for it (0001, in git history).
 {pkgs}: let
   inherit (pkgs) lib;
   source = lib.importJSON ./source.json;

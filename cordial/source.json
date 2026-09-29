@@ -1,8 +1,8 @@
 {
   "owner": "DamnShabu",
   "repo": "stacked",
-  "rev": "ce31eeccbb748407f2598c15b4cafbcec8464faf",
-  "hash": "sha256-kSCBvpp3TkVkPgoYjOF2UKtzoAKlhbzFzz7BRq/OTzI=",
+  "rev": "c297d56832bae8a5666eb04f17e10e7f61cd02e2",
+  "hash": "sha256-LEvDvI5gayfVtW+0n7TyQKSSjDyiVu5umTl6lm572uU=",
   "version": "0.20.1",
   "patches": [
     "0002-cordial-fetch-cli.patch"
