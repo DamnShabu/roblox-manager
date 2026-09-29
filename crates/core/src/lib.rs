@@ -5,8 +5,10 @@
 //! production adapter and the one the tests use.
 
 pub mod json_file;
+pub mod keyring;
 pub mod paths;
 pub mod types;
 
+pub use keyring::{Keyring, KeyringError};
 pub use paths::Paths;
 pub use types::{Cookie, InvalidId, InvalidLabel, Label, PlaceId, Profile, ServerId, User, UserId};
