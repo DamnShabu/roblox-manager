@@ -4,7 +4,7 @@
 use adw::prelude::*;
 use gtk::Align;
 
-use super::widgets::{Btn, Fluent, LabelFluent, icon, lbl};
+use super::widgets::{Btn, Fluent, LabelFluent, icon_tile, lbl};
 
 pub struct Modal {
     pub dialog: adw::Dialog,
@@ -27,7 +27,7 @@ impl Modal {
         let header = hbox!(
             14,
             "mhdr",
-            vbox!(0, "micon", icon(ic, 22, "")).valign(Align::Start),
+            icon_tile("micon", ic, 22).valign(Align::Start),
             heading,
             close.button.valign(Align::Start)
         );

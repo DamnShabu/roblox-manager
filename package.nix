@@ -27,9 +27,9 @@
   # in the window's title bar.
   mark = bg: ''
     <g transform="rotate(-14 50 50)">
-      <rect x="30" y="8" width="56" height="56" rx="7" fill="#6b5634"/>
-      <rect x="22" y="22" width="56" height="56" rx="7" fill="#b08c4c"/>
-      <rect x="14" y="36" width="56" height="56" rx="7" fill="#e9bd6a"/>
+      <rect x="30" y="8" width="56" height="56" rx="8" fill="#6b5634"/>
+      <rect x="22" y="22" width="56" height="56" rx="8" fill="#b08c4c"/>
+      <rect x="14" y="36" width="56" height="56" rx="8" fill="#e9bd6a"/>
       <rect x="35" y="57" width="14" height="14" rx="2" fill="${bg}"/>
     </g>'';
   appIcon = pkgs.writeText "roblox-manager.svg" ''

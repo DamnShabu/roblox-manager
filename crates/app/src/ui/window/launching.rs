@@ -325,12 +325,37 @@ impl Window {
     // -- stopping -----------------------------------------------------------
     pub fn stop_account(&self, id: UserId) {
         let Some(label) = self.state().accounts.get(id).map(|a| a.name.clone()) else { return };
+        self.stop_profiles(label.to_string(), [Profile::of(id)].into_iter().collect());
+    }
+
+    /// A group header's Shut down: every member's client at once.
+    pub fn stop_group(&self, gid: &str) {
+        let found = {
+            let s = self.state();
+            let a = &s.accounts;
+            a.groups().iter().find(|g| g.id == gid).map(|g| {
+                let name = if g.name.is_empty() { "group".to_owned() } else { g.name.clone() };
+                let members: HashSet<Profile> = a
+                    .accounts()
+                    .iter()
+                    .filter(|x| a.group_of(x) == Some(gid))
+                    .map(|x| Profile::of(x.user_id))
+                    .collect();
+                (name, members)
+            })
+        };
+        if let Some((name, members)) = found.filter(|f| !f.1.is_empty()) {
+            self.stop_profiles(name, members);
+        }
+    }
+
+    fn stop_profiles(&self, label: String, which: HashSet<Profile>) {
         let profiles = self.services().profiles.clone();
         let log = self.logger();
         crate::worker::run(
-            move || match profiles.stop(&[Profile::of(id)].into_iter().collect()) {
+            move || match profiles.stop(&which) {
                 Ok(0) => log.line(format!("{label}: was not running")),
-                Ok(_) => log.line(format!("{label}: stopped")),
+                Ok(_) => log.line(format!("Shut down {label}")),
                 Err(e) => log.line(format!("{label}: could not stop -- {e}")),
             },
             |()| {},

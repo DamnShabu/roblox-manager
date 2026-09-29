@@ -9,7 +9,7 @@ use rbxmgr_core::types::UserId;
 
 use super::settings;
 use crate::state::Chip;
-use crate::ui::widgets::{Btn, Fluent, LabelFluent, clear, dot, icon, icon_fill, lbl};
+use crate::ui::widgets::{Btn, Fluent, LabelFluent, clear, dot, icon, icon_fill, icon_tile, lbl};
 use crate::ui::window::Window;
 
 pub fn account_row(w: &Window, acct: &Account, first: bool) -> gtk::Box {
@@ -51,7 +51,7 @@ pub fn account_row(w: &Window, acct: &Account, first: bool) -> gtk::Box {
     }
     let note = acct.note.trim();
     if !note.is_empty() {
-        let n = vbox!(0, "noteic", icon("sticky_note_2", 16, "")).centered();
+        let n = icon_tile("noteic", "sticky_note_2", 16).centered();
         n.set_tooltip_markup(Some(&format!(
             "<span size='small' weight='bold' foreground='#e9bd6a'>NOTE</span>\n{}",
             glib::markup_escape_text(note)

@@ -53,7 +53,7 @@ pub fn group_card(w: &Window, group: Option<&Group>, members: &[Account]) -> gtk
                 ("folder_open", "Not in a group")
             };
             (
-                symbol_thumb(40, "none", ic, 20).0.upcast(),
+                symbol_thumb(40, "none", ic, 20, "").0.upcast(),
                 hbox!(
                     5,
                     "ggame",
@@ -105,21 +105,16 @@ pub fn group_card(w: &Window, group: Option<&Group>, members: &[Account]) -> gtk
         .hexpand()
         .centered()
     );
-    if let Some(gid) = &gid {
-        let launch = {
-            let gid = gid.clone();
-            Btn::new("glaunch")
-                .text("Launch")
-                .icon("play_arrow")
-                .fill()
-                .gap(4)
-                .tip(&game_name.as_ref().map_or_else(
-                    || "Assign a game to launch this group".to_owned(),
-                    |n| format!("Launch every account in this group into {n}"),
-                ))
-                .build(w.act(move |w| w.launch_group(&gid)))
-        };
-        launch.button.set_sensitive(game_name.is_some() && !members.is_empty());
+    // Launch while the group is idle, Shut down while any member is up or
+    // starting: the redraw below flips it, the click asks which.
+    let launch = gid.as_ref().map(|gid| {
+        let (gid, ids) = (gid.clone(), ids.clone());
+        Btn::new("glaunch").text("Launch").icon("play_arrow").fill().gap(4).build(w.act(move |w| {
+            let live = w.state().any_live(&ids);
+            if live { w.stop_group(&gid) } else { w.launch_group(&gid) }
+        }))
+    });
+    if let (Some(gid), Some(button)) = (&gid, &launch) {
         let gear = {
             let gid = gid.clone();
             Btn::new(if editing { "setb open" } else { "setb" })
@@ -128,7 +123,7 @@ pub fn group_card(w: &Window, group: Option<&Group>, members: &[Account]) -> gtk
                 .tip("Group settings")
                 .build(w.act(move |w| w.toggle_group_edit(&gid)))
         };
-        head.append(&hbox!(4, "", launch.button.centered(), gear.button.centered()));
+        head.append(&hbox!(4, "", button.button.clone().centered(), gear.button.centered()));
     }
     card.append(&head);
     if let (Some(g), true) = (group, editing) {
@@ -163,7 +158,28 @@ pub fn group_card(w: &Window, group: Option<&Group>, members: &[Account]) -> gtk
     });
     card.add_controller(drop);
 
+    let can_launch = game_name.is_some() && !members.is_empty();
+    let launch_tip = game_name.map_or_else(
+        || "Assign a game to launch this group".to_owned(),
+        |n| format!("Launch every account in this group into {n}"),
+    );
     w.add_chip(Box::new(move |s| {
+        if let Some(b) = &launch {
+            let live = s.any_live(&ids);
+            b.set_text(if live { "Shut down" } else { "Launch" });
+            b.set_icon(if live { "stop" } else { "play_arrow" });
+            if live {
+                b.button.add_css_class("stop");
+            } else {
+                b.button.remove_css_class("stop");
+            }
+            b.button.set_sensitive(live || can_launch);
+            b.button.set_tooltip_text(Some(if live {
+                "Close every account's client in this group"
+            } else {
+                &launch_tip
+            }));
+        }
         let n = ids.iter().filter(|id| s.running.contains(id)).count();
         clear(&runbox);
         if n > 0 {
@@ -245,7 +261,7 @@ fn game_option(
     b.set_cursor_from_name(Some("pointer"));
     let (pic, label): (gtk::Widget, String) = match tile {
         Some(t) => (thumb(t.icon.as_deref(), 28, "game").upcast(), t.game.name.clone()),
-        None => (symbol_thumb(28, "none", "block", 16).0.upcast(), "No game".to_owned()),
+        None => (symbol_thumb(28, "none", "block", 16, "").0.upcast(), "No game".to_owned()),
     };
     b.set_child(Some(&hbox!(8, "", pic, lbl(&label, "").ellipsize().chars(26))));
     let game = tile.map(|t| (t.game.place_id.clone(), t.game.name.clone()));
