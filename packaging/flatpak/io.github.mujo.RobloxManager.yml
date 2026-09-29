@@ -89,7 +89,7 @@ modules:
   - name: hwdata
     buildsystem: simple
     build-commands:
-      - ./configure --prefix=/app
+      - ./configure --prefix=/app --datadir=/app/share
       - make install
     # Read by wlroots' build only.
     cleanup:
