@@ -226,3 +226,10 @@ fn a_random_pick_stays_in_its_range() {
     }
     assert_eq!(random_pick(5.0, 5.0), 5.0);
 }
+
+#[test]
+fn a_stop_flag_knows_its_own_clones_from_another_flag() {
+    let a = StopFlag::default();
+    assert!(a.same_as(&a.clone()));
+    assert!(!a.same_as(&StopFlag::default()));
+}

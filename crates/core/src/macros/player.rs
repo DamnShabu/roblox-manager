@@ -34,6 +34,11 @@ impl StopFlag {
         *self.0.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// Whether `other` is this flag (or a clone of it), not merely another.
+    pub fn same_as(&self, other: &StopFlag) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+
     /// Wait up to `secs`; true when stopped meanwhile.
     pub fn wait(&self, secs: f64) -> bool {
         let (lock, wake) = &*self.0;
