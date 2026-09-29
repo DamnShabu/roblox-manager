@@ -52,5 +52,3 @@ nix develop -c cargo fmt --check
 
 No source file may pass 600 lines; `crates/core/tests/size_limit.rs` fails
 the build when one does.
-
-`design/` holds the app redesign mockups.
