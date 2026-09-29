@@ -15,8 +15,13 @@ fn world_with(runner: Recording) -> World {
     let runner = Arc::new(runner);
     let secrets = Arc::new(MemorySecrets::default());
     let keyring = Arc::new(Keyring::new(Box::new(Arc::clone(&secrets))));
-    let profiles =
-        CordialProfiles::new(keyring, &Paths::under(dir.path()), runner.clone(), Arc::new(|_| {}));
+    let profiles = CordialProfiles::new(
+        keyring,
+        &Paths::under(dir.path()),
+        runner.clone(),
+        ProcessView::Own,
+        Arc::new(|_| {}),
+    );
     World { dir, runner, secrets, profiles }
 }
 
@@ -187,6 +192,31 @@ fn stopping_signals_only_the_given_profiles_clients() {
     let n = w.profiles.stop(&HashSet::from([Profile::named("main")])).unwrap();
     assert_eq!(n, 2);
     assert_eq!(w.runner.ran()[1], ["kill", "1", "3"]);
+}
+
+#[test]
+fn from_a_flatpak_clients_are_found_and_stopped_on_the_host() {
+    // The host's pgrep also lists the flatpak-spawn asking it, which is no client.
+    let pgrep =
+        "7 /app/bin/cordial-run --profile main\n8 flatpak-spawn --host pgrep -a -f cordial-run\n";
+    let dir = tempfile::tempdir().unwrap();
+    let runner = Arc::new(Recording::default().answer(0, pgrep, ""));
+    let keyring = Arc::new(Keyring::new(Box::new(MemorySecrets::default())));
+    let profiles = CordialProfiles::new(
+        keyring,
+        &Paths::under(dir.path()),
+        runner.clone(),
+        ProcessView::Host,
+        Arc::new(|_| {}),
+    );
+    assert_eq!(profiles.stop(&HashSet::from([Profile::named("main")])).unwrap(), 1);
+    assert_eq!(
+        runner.ran(),
+        [
+            vec!["flatpak-spawn", "--host", "pgrep", "-a", "-f", "cordial-run"],
+            vec!["flatpak-spawn", "--host", "kill", "7"],
+        ]
+    );
 }
 
 #[test]

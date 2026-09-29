@@ -29,6 +29,33 @@ pub fn last_line(raw: &[u8]) -> String {
     String::from_utf8_lossy(raw).trim().lines().last().unwrap_or_default().to_owned()
 }
 
+/// Where the clients the manager looks for and stops can be seen. Inside a
+/// Flatpak each launch of the manager gets a process namespace of its own,
+/// so clients an earlier launch started are visible only from the host.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessView {
+    /// This process's own namespace: a native install.
+    Own,
+    /// The host's, reached through `flatpak-spawn --host`.
+    Host,
+}
+
+impl ProcessView {
+    /// The host's inside a Flatpak, else this process's own.
+    pub fn detect() -> Self {
+        if std::path::Path::new("/.flatpak-info").exists() { Self::Host } else { Self::Own }
+    }
+
+    /// `argv` as run where this view sees processes.
+    pub fn argv(self, argv: &[&str]) -> Vec<String> {
+        let prefix: &[&str] = match self {
+            Self::Own => &[],
+            Self::Host => &["flatpak-spawn", "--host"],
+        };
+        prefix.iter().chain(argv).map(|s| (*s).to_owned()).collect()
+    }
+}
+
 /// A program started to keep running.
 pub trait Child: Send {
     /// Its exit status once it has ended (None while it runs), without
@@ -206,7 +233,7 @@ pub(crate) mod recording {
     impl Runner for Recording {
         fn run(&self, argv: &[String], _timeout: Duration) -> Result<Output, CordialError> {
             self.ran.lock().unwrap().push(argv.to_vec());
-            if argv.first().is_some_and(|p| p == "pgrep") {
+            if argv.iter().any(|a| a == "pgrep") {
                 if let Some(clients) = self.pgrep.lock().unwrap().clone() {
                     return Ok(Output {
                         status: 0,
@@ -278,6 +305,15 @@ mod tests {
         };
         assert_eq!(status, 4);
         assert_eq!(std::fs::read_to_string(&log).unwrap(), "hi\n");
+    }
+
+    #[test]
+    fn the_host_view_runs_through_flatpak_spawn() {
+        assert_eq!(ProcessView::Own.argv(&["kill", "7"]), ["kill", "7"]);
+        assert_eq!(
+            ProcessView::Host.argv(&["kill", "7"]),
+            ["flatpak-spawn", "--host", "kill", "7"]
+        );
     }
 
     #[test]

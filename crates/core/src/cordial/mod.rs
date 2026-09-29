@@ -12,7 +12,7 @@ mod profiles;
 pub mod session;
 
 pub use build::{Build, roblox_build};
-pub use process::{Child, Output, Runner, SystemRunner};
+pub use process::{Child, Output, ProcessView, Runner, SystemRunner};
 pub use profiles::{ClientOpts, CordialProfiles, STARTUP_CHECK};
 
 use crate::keyring::KeyringError;
