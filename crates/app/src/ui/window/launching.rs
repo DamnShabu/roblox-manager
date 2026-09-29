@@ -215,9 +215,14 @@ impl Window {
                 Some((ids, place, name, game))
             })
         };
-        if let Some((ids, place, name, game)) = found.filter(|f| !f.0.is_empty()) {
-            self.log(&format!("Launching {name} · {game}"));
-            self.launch(ids, Mode::Each, Some((Some(place), None)));
+        match found {
+            Some((ids, place, name, game)) if !ids.is_empty() => {
+                self.log(&format!("Launching {name} · {game}"));
+                self.launch(ids, Mode::Each, Some((Some(place), None)));
+            }
+            Some((_, _, name, _)) => self.log(&format!("{name} has no accounts to launch")),
+            // No game: the group's settings are where one is picked.
+            None => self.log("Pick the group's game in its settings first"),
         }
     }
 
@@ -246,8 +251,10 @@ impl Window {
 
     /// Start a launch at once, whatever else is running. Only an account
     /// another launch is still starting is left out: starting it twice would
-    /// have its second client refused by Cordial's profile lock. With no
-    /// target, the game picked in the bar, remembered for next time.
+    /// have its second client refused by Cordial's profile lock -- and a group
+    /// whose leader is left out does not launch, or its first follower would
+    /// lead. With no target, the game picked in the bar. A launch into the
+    /// bar's pick remembers it for next time.
     pub fn launch(
         &self,
         ids: Vec<UserId>,
@@ -257,7 +264,7 @@ impl Window {
         let (accounts, joining, place, server) = {
             let mut s = self.state_mut();
             let mut accounts = Vec::new();
-            for id in ids {
+            for &id in &ids {
                 let Some(a) = s.accounts.get(id) else { continue };
                 if s.launching.contains(&id) {
                     let line = format!("{}: already launching -- skipped", a.name);
@@ -268,21 +275,23 @@ impl Window {
                     rbxmgr_core::cordial::ClientOpts { nested: a.nested, low_power: a.low_power };
                 accounts.push(LaunchAccount { id, label: a.name.clone(), opts });
             }
+            let leader_skipped = mode == Mode::Group
+                && ids.first().is_some_and(|l| accounts.first().is_none_or(|a| a.id != *l));
+            if leader_skipped {
+                drop(s);
+                return self.log("Its leader is still launching -- try again once it is up");
+            }
             let joining: HashSet<UserId> = if mode == Mode::Group {
                 accounts.iter().skip(1).map(|a| a.id).collect()
             } else {
                 HashSet::new()
             };
-            let (place, server) = match target {
-                Some(t) => t,
-                None => {
-                    let place = s.place.clone();
-                    if let Some(p) = &place {
-                        s.accounts.remember_place(p);
-                    }
-                    (place, None)
-                }
-            };
+            let (place, server) = target.unwrap_or_else(|| (s.place.clone(), None));
+            if let Some(p) =
+                place.as_ref().filter(|p| server.is_none() && s.place.as_ref() == Some(p))
+            {
+                s.accounts.remember_place(p);
+            }
             s.launching.extend(accounts.iter().map(|a| a.id));
             s.joining.extend(joining.iter().copied());
             (accounts, joining, place, server)

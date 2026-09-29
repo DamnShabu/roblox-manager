@@ -52,16 +52,19 @@ impl Keyring {
     }
 
     pub fn get(&self, attrs: &Attrs) -> Result<Option<String>, KeyringError> {
+        filed_under(attrs)?;
         self.secrets.unlock()?;
         self.secrets.lookup(attrs)
     }
 
     pub fn put(&self, attrs: &Attrs, label: &str, secret: &str) -> Result<(), KeyringError> {
+        filed_under(attrs)?;
         self.secrets.unlock()?;
         self.secrets.store(attrs, label, secret)
     }
 
     pub fn delete(&self, attrs: &Attrs) -> Result<(), KeyringError> {
+        filed_under(attrs)?;
         self.secrets.unlock()?;
         self.secrets.clear(attrs)
     }
@@ -71,7 +74,9 @@ impl Keyring {
     pub fn forget(&self, attrs: &Attrs) {
         // Deliberately unchecked: the entry is stale either way, and nobody
         // is waiting on this to succeed.
-        let _ = self.secrets.clear(attrs);
+        if filed_under(attrs).is_ok() {
+            let _ = self.secrets.clear(attrs);
+        }
     }
 
     /// The account's session. A missing one is an error that names the fix.
@@ -97,6 +102,16 @@ impl Keyring {
         self.set_cookie(new, &self.cookie(old)?)?;
         self.drop_cookie(old)
     }
+}
+
+/// The Secret Service matches a subset of attributes, so an empty set is
+/// every secret the user has: a store or delete with one would replace or
+/// wipe them all. Refused before it reaches any adapter.
+fn filed_under(attrs: &Attrs) -> Result<(), KeyringError> {
+    if attrs.is_empty() {
+        return Err(KeyringError::Service("a secret needs at least one attribute".into()));
+    }
+    Ok(())
 }
 
 /// Where an account's own cookie is filed.
@@ -137,15 +152,19 @@ mod tests {
         assert_eq!(mem.items(), vec![(attrs, "rbxmgr alt 1".to_string(), "c".to_string())]);
     }
 
+    fn some_attrs() -> Attrs {
+        [("app".to_owned(), "test".to_owned())].into()
+    }
+
     #[test]
     fn every_read_and_write_unlocks_first() {
         let (k, mem) = keyring();
         let l = label("x");
         k.set_cookie(&l, &Cookie::new("c")).unwrap();
         k.cookie(&l).unwrap();
-        k.put(&Attrs::new(), "l", "s").unwrap();
-        k.get(&Attrs::new()).unwrap();
-        k.delete(&Attrs::new()).unwrap();
+        k.put(&some_attrs(), "l", "s").unwrap();
+        k.get(&some_attrs()).unwrap();
+        k.delete(&some_attrs()).unwrap();
         k.drop_cookie(&l).unwrap();
         assert_eq!(mem.unlock_count(), 6);
     }
@@ -167,11 +186,23 @@ mod tests {
         assert_eq!(k.cookie(&l).unwrap_err(), refused);
         assert_eq!(k.set_cookie(&l, &Cookie::new("c")).unwrap_err(), refused);
         assert_eq!(k.drop_cookie(&l).unwrap_err(), refused);
-        assert_eq!(k.put(&Attrs::new(), "l", "s").unwrap_err(), refused);
-        assert_eq!(k.delete(&Attrs::new()).unwrap_err(), refused);
+        assert_eq!(k.put(&some_attrs(), "l", "s").unwrap_err(), refused);
+        assert_eq!(k.delete(&some_attrs()).unwrap_err(), refused);
         let before = mem.unlock_count();
-        k.forget(&Attrs::new());
+        k.forget(&some_attrs());
         assert_eq!(mem.unlock_count(), before, "forget must never prompt");
+    }
+
+    #[test]
+    fn no_attributes_is_refused_before_it_can_match_every_secret() {
+        let (k, mem) = keyring();
+        k.put(&some_attrs(), "l", "s").unwrap();
+        assert!(k.put(&Attrs::new(), "l", "s").is_err());
+        assert!(k.get(&Attrs::new()).is_err());
+        assert!(k.delete(&Attrs::new()).is_err());
+        k.forget(&Attrs::new());
+        assert_eq!(mem.items().len(), 1, "the other secret is untouched");
+        assert_eq!(mem.unlock_count(), 1, "refused without prompting");
     }
 
     #[test]

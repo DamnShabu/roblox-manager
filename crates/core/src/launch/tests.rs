@@ -283,3 +283,13 @@ fn a_started_client_gets_its_accounts_options() {
     assert_eq!(&argv[..2], ["cage", "--"]);
     assert!(argv.contains(&"nice".to_string()));
 }
+
+#[test]
+fn a_session_that_is_another_user_starts_nobodys_client() {
+    let w = world(2, &[("a1", "u2")], &[]);
+    let r = w.launch(request(&[1], Mode::Each, Some("77"), None));
+    assert!(r.launched.is_empty());
+    assert_eq!(r.failed.len(), 1);
+    assert!(r.failed[0].1.contains("belongs to user2"), "{:?}", r.failed);
+    assert!(w.started().is_empty());
+}

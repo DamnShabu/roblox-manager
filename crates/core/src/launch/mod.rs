@@ -196,6 +196,15 @@ impl Run<'_> {
             RobloxError::Expired => SignIn::Expired(e.to_string()),
             other => failed(&other),
         })?;
+        // The profile is named by the user the session really is. A cookie
+        // filed under this account that belongs to someone else would start
+        // that someone's profile, under this account's row.
+        if user.id != a.id {
+            return Err(SignIn::Failed(format!(
+                "its stored session belongs to {} (user {}), not this account -- sign in again",
+                user.name, user.id
+            )));
+        }
         let profile = l.profiles.seed(&user, &cookie).map_err(|e| failed(&e))?;
         l.profiles.launch(&profile, url, &self.build, a.opts).map_err(|e| failed(&e))?;
         Ok(user)

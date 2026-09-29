@@ -322,7 +322,7 @@ impl Window {
             },
             move |w, errors| {
                 for e in errors {
-                    w.log(&format!("{label}: could not clear its sessions from the keyring: {e}"));
+                    w.log(&format!("{label}: could not finish removing it: {e}"));
                 }
             },
         );

@@ -15,7 +15,7 @@ pub mod player;
 pub mod wayland;
 
 pub use grammar::{Macro, ParseError, Row, Step};
-pub use library::{MacroLibrary, migrate_legacy};
+pub use library::MacroLibrary;
 pub use player::{Input, Player, StopFlag, random_pick};
 pub use wayland::VirtualInput;
 

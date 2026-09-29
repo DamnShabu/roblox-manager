@@ -19,6 +19,8 @@ pub struct MacroLibrary {
     text: BTreeMap<String, String>,
     off: BTreeSet<String>,
     hotkeys: BTreeMap<String, String>,
+    /// Entries that are no macro this version reads, written back as found.
+    unread: Map<String, Value>,
     set_aside: Option<PathBuf>,
 }
 
@@ -29,6 +31,7 @@ impl MacroLibrary {
             text: BTreeMap::new(),
             off: BTreeSet::new(),
             hotkeys: BTreeMap::new(),
+            unread: Map::new(),
             set_aside: None,
         };
         let owned = json_file::read_owned::<Map<String, Value>>(path);
@@ -47,10 +50,16 @@ impl MacroLibrary {
                         }
                         text.clone()
                     }
-                    Some(_) => continue,
+                    Some(_) => {
+                        lib.unread.insert(name, entry);
+                        continue;
+                    }
                     None => migrate_legacy(e),
                 },
-                _ => continue,
+                _ => {
+                    lib.unread.insert(name, entry);
+                    continue;
+                }
             };
             lib.text.insert(name, text);
         }
@@ -121,6 +130,7 @@ impl MacroLibrary {
                 self.off.insert(new.to_owned());
             }
         }
+        self.unread.remove(new);
         self.text.insert(new.to_owned(), text.to_owned());
         match hotkey {
             Some(key) => self.hotkeys.insert(new.to_owned(), key.to_owned()),
@@ -162,6 +172,7 @@ impl MacroLibrary {
                 };
                 (name.clone(), entry)
             })
+            .chain(self.unread.iter().map(|(n, e)| (n.clone(), e.clone())))
             .collect();
         json_file::write(&self.path, &entries).map_err(|e| MacroError::Io(e.to_string()))
     }
@@ -170,7 +181,7 @@ impl MacroLibrary {
 /// The earlier macro manager's entry -- `{"script", "start_delay", ...}`,
 /// with `key K`, `wait range(A,B)` and a closing bare `loop` -- as this one's
 /// text. Its other fields (hidden, place) have no counterpart.
-pub fn migrate_legacy(old: &Map<String, Value>) -> String {
+fn migrate_legacy(old: &Map<String, Value>) -> String {
     let mut lines = Vec::new();
     if let Some(delay) = old.get("start_delay").filter(|d| d.as_f64().is_some_and(|d| d > 0.0)) {
         lines.push(format!("start {delay}"));
@@ -254,10 +265,14 @@ mod tests {
     }
 
     #[test]
-    fn loading_converts_old_entries_and_drops_what_cannot_be_text() {
-        let (_d, lib) = library(json!({"haki": legacy(), "new": "tap e\n", "junk": 5}));
+    fn loading_converts_old_entries_and_keeps_what_cannot_be_text_aside() {
+        let (dir, mut lib) =
+            library(json!({"haki": legacy(), "new": "tap e\n", "junk": 5, "odd": {"text": 1}}));
         assert_eq!(lib.names().collect::<Vec<_>>(), ["haki", "new"]);
         assert_eq!(lib.text("haki"), Some("start 45\nwait 60-70\ntap j\nwait 340-341\ntap j\n"));
+        lib.set_enabled("new", true).unwrap();
+        let saved = on_disk(&dir);
+        assert_eq!((&saved["junk"], &saved["odd"]), (&json!(5), &json!({"text": 1})));
     }
 
     #[test]

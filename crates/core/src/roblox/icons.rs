@@ -10,8 +10,7 @@ use serde::Deserialize;
 use super::RobloxError;
 use super::http::{self, Request, Transport};
 
-/// {universe id: icon url}, in one request, for the icons Roblox has finished
-/// rendering.
+/// {universe id: icon url} for the icons Roblox has finished rendering.
 pub(super) fn urls(
     t: &dyn Transport,
     universes: &[String],
@@ -28,22 +27,31 @@ pub(super) fn urls(
         #[serde(default)]
         data: Vec<Thumb>,
     }
-    let ids: Vec<&str> = universes.iter().map(String::as_str).filter(|u| !u.is_empty()).collect();
-    if ids.is_empty() {
-        return Ok(HashMap::new());
+    // Every account's favourites together repeat games, and the endpoint
+    // takes a bounded number of ids: each asked for once, in batches.
+    let mut ids: Vec<&str> =
+        universes.iter().map(String::as_str).filter(|u| !u.is_empty()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let mut found = HashMap::new();
+    for batch in ids.chunks(BATCH) {
+        let url = format!(
+            "https://thumbnails.roblox.com/v1/games/icons?universeIds={}&size=150x150&format=Png&isCircular=false",
+            batch.join(",")
+        );
+        let page: Page = http::ok(http::send(t, Request::get(url))?, false)?.json()?;
+        found.extend(
+            page.data
+                .into_iter()
+                .filter(|d| d.state.as_deref() == Some("Completed"))
+                .filter_map(|d| Some((d.target_id?.to_string(), d.image_url?))),
+        );
     }
-    let url = format!(
-        "https://thumbnails.roblox.com/v1/games/icons?universeIds={}&size=150x150&format=Png&isCircular=false",
-        ids.join(",")
-    );
-    let page: Page = http::ok(http::send(t, Request::get(url))?, false)?.json()?;
-    Ok(page
-        .data
-        .into_iter()
-        .filter(|d| d.state.as_deref() == Some("Completed"))
-        .filter_map(|d| Some((d.target_id?.to_string(), d.image_url?)))
-        .collect())
+    Ok(found)
 }
+
+/// The universe ids per request the icons endpoint takes.
+const BATCH: usize = 100;
 
 /// Icons on disk, one PNG per universe. Regenerable, so it lives in the cache.
 pub struct IconCache {
@@ -125,6 +133,21 @@ mod tests {
             "https://thumbnails.roblox.com/v1/games/icons?universeIds=1,2&size=150x150&format=Png&isCircular=false"
         );
         assert!(t.asked()[0].cookie.is_none());
+    }
+
+    #[test]
+    fn each_universe_is_asked_for_once_in_batches_of_100() {
+        let mut universes: Vec<String> = (1..=150).map(|n| n.to_string()).collect();
+        universes.extend(["1".to_string(), "2".to_string()]);
+        let t = Canned::new().answer(200, r#"{"data": []}"#).answer(200, r#"{"data": []}"#);
+        urls(&t, &universes).unwrap();
+        let asked: Vec<usize> = t
+            .asked()
+            .iter()
+            .map(|r| r.url.split("universeIds=").nth(1).unwrap().split('&').next().unwrap())
+            .map(|ids| ids.split(',').count())
+            .collect();
+        assert_eq!(asked, [100, 50]);
     }
 
     #[test]

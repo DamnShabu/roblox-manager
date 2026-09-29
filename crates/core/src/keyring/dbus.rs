@@ -150,10 +150,17 @@ impl Secrets for DbusSecrets {
         Ok(())
     }
 
+    /// A delete the service answers with a prompt has not happened: the item
+    /// is still there, so it is an error rather than a quiet success.
     fn clear(&self, attrs: &Attrs) -> Result<(), KeyringError> {
         for item in self.search(attrs)? {
-            let _prompt: OwnedObjectPath =
+            let prompt: OwnedObjectPath =
                 self.proxy(item.as_ref(), ITEM)?.call("Delete", &()).map_err(service)?;
+            if prompt.as_str() != "/" {
+                return Err(KeyringError::Locked(
+                    "the keyring is locked -- unlock it and try again".into(),
+                ));
+            }
         }
         Ok(())
     }
