@@ -85,11 +85,7 @@ impl Keyring {
     }
 
     pub fn set_cookie(&self, label: &Label, cookie: &Cookie) -> Result<(), KeyringError> {
-        self.put(
-            &account_attrs(label),
-            &format!("rbxmgr {label}"),
-            cookie.expose(),
-        )
+        self.put(&account_attrs(label), &format!("rbxmgr {label}"), cookie.expose())
     }
 
     pub fn drop_cookie(&self, label: &Label) -> Result<(), KeyringError> {
@@ -127,8 +123,7 @@ mod tests {
     #[test]
     fn a_cookie_round_trips_stripped() {
         let (k, _) = keyring();
-        k.set_cookie(&label("x"), &Cookie::new("  cookie-value \n"))
-            .unwrap();
+        k.set_cookie(&label("x"), &Cookie::new("  cookie-value \n")).unwrap();
         assert_eq!(k.cookie(&label("x")).unwrap().expose(), "cookie-value");
     }
 
@@ -139,10 +134,7 @@ mod tests {
         let attrs: Attrs = [("app", "rbxmgr"), ("account", "alt 1")]
             .map(|(a, b)| (a.to_string(), b.to_string()))
             .into();
-        assert_eq!(
-            mem.items(),
-            vec![(attrs, "rbxmgr alt 1".to_string(), "c".to_string())]
-        );
+        assert_eq!(mem.items(), vec![(attrs, "rbxmgr alt 1".to_string(), "c".to_string())]);
     }
 
     #[test]
@@ -188,10 +180,7 @@ mod tests {
         k.set_cookie(&label("old"), &Cookie::new("c")).unwrap();
         k.move_cookie(&label("old"), &label("new ✓")).unwrap();
         assert_eq!(k.cookie(&label("new ✓")).unwrap().expose(), "c");
-        assert!(matches!(
-            k.cookie(&label("old")),
-            Err(KeyringError::NoCookie(_))
-        ));
+        assert!(matches!(k.cookie(&label("old")), Err(KeyringError::NoCookie(_))));
         assert_eq!(mem.items().len(), 1);
     }
 }

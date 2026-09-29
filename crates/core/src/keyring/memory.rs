@@ -33,11 +33,7 @@ impl MemorySecrets {
 
     /// Every secret: (attributes, item label, secret).
     pub fn items(&self) -> Vec<(Attrs, String, String)> {
-        self.state()
-            .items
-            .iter()
-            .map(|(a, (l, s))| (a.clone(), l.clone(), s.clone()))
-            .collect()
+        self.state().items.iter().map(|(a, (l, s))| (a.clone(), l.clone(), s.clone())).collect()
     }
 
     fn state(&self) -> MutexGuard<'_, State> {
@@ -59,9 +55,7 @@ impl Secrets for MemorySecrets {
     }
 
     fn store(&self, attrs: &Attrs, label: &str, secret: &str) -> Result<(), KeyringError> {
-        self.usable()?
-            .items
-            .insert(attrs.clone(), (label.to_owned(), secret.to_owned()));
+        self.usable()?.items.insert(attrs.clone(), (label.to_owned(), secret.to_owned()));
         Ok(())
     }
 

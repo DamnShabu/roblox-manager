@@ -29,11 +29,7 @@ fn no_source_file_exceeds_the_line_limit() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut files = Vec::new();
     rust_files(&root, &mut files);
-    assert!(
-        !files.is_empty(),
-        "found no .rs files under {}",
-        root.display()
-    );
+    assert!(!files.is_empty(), "found no .rs files under {}", root.display());
     let over: Vec<String> = files
         .iter()
         .filter_map(|f| {

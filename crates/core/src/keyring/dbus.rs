@@ -54,23 +54,17 @@ impl DbusSecrets {
     }
 
     fn default_collection(&self) -> Result<OwnedObjectPath, KeyringError> {
-        let path: OwnedObjectPath = self
-            .service()?
-            .call("ReadAlias", &("default",))
-            .map_err(service)?;
+        let path: OwnedObjectPath =
+            self.service()?.call("ReadAlias", &("default",)).map_err(service)?;
         if path.as_str() == "/" {
-            return Err(KeyringError::Service(
-                "there is no default keyring collection".into(),
-            ));
+            return Err(KeyringError::Service("there is no default keyring collection".into()));
         }
         Ok(path)
     }
 
     fn session(&self) -> Result<OwnedObjectPath, KeyringError> {
-        let (_, session): (OwnedValue, OwnedObjectPath) = self
-            .service()?
-            .call("OpenSession", &("plain", Value::from("")))
-            .map_err(service)?;
+        let (_, session): (OwnedValue, OwnedObjectPath) =
+            self.service()?.call("OpenSession", &("plain", Value::from(""))).map_err(service)?;
         Ok(session)
     }
 
@@ -78,10 +72,8 @@ impl DbusSecrets {
     /// subset, so an entry secret-tool wrote with an extra xdg:schema is
     /// found too.
     fn search(&self, attrs: &Attrs) -> Result<Vec<OwnedObjectPath>, KeyringError> {
-        let (unlocked, _locked): (Vec<OwnedObjectPath>, Vec<OwnedObjectPath>) = self
-            .service()?
-            .call("SearchItems", &(as_dict(attrs),))
-            .map_err(service)?;
+        let (unlocked, _locked): (Vec<OwnedObjectPath>, Vec<OwnedObjectPath>) =
+            self.service()?.call("SearchItems", &(as_dict(attrs),)).map_err(service)?;
         Ok(unlocked)
     }
 
@@ -105,12 +97,10 @@ impl DbusSecrets {
         prompt.call::<_, _, ()>("Prompt", &("",)).map_err(service)?;
         match rx.recv_timeout(PROMPT_TIMEOUT) {
             Ok(Some(false)) => Ok(()),
-            Ok(Some(true)) => Err(KeyringError::Locked(
-                "the keyring unlock prompt was dismissed".into(),
-            )),
-            Ok(None) => Err(KeyringError::Locked(
-                "the keyring prompt went away unanswered".into(),
-            )),
+            Ok(Some(true)) => {
+                Err(KeyringError::Locked("the keyring unlock prompt was dismissed".into()))
+            }
+            Ok(None) => Err(KeyringError::Locked("the keyring prompt went away unanswered".into())),
             Err(_) => Err(KeyringError::Locked(format!(
                 "the keyring did not unlock within {}s",
                 PROMPT_TIMEOUT.as_secs()
@@ -128,9 +118,7 @@ impl Secrets for DbusSecrets {
             .service()?
             .call("GetSecrets", &(vec![item.clone()], self.session()?))
             .map_err(service)?;
-        Ok(secrets
-            .get(&item)
-            .map(|(_, _, value, _)| String::from_utf8_lossy(value).into_owned()))
+        Ok(secrets.get(&item).map(|(_, _, value, _)| String::from_utf8_lossy(value).into_owned()))
     }
 
     /// Existing matches are deleted first rather than left to CreateItem's
@@ -142,10 +130,7 @@ impl Secrets for DbusSecrets {
         let collection = self.default_collection()?;
         let props: HashMap<&str, Value> = HashMap::from([
             ("org.freedesktop.Secret.Item.Label", Value::from(label)),
-            (
-                "org.freedesktop.Secret.Item.Attributes",
-                Value::from(as_dict(attrs)),
-            ),
+            ("org.freedesktop.Secret.Item.Attributes", Value::from(as_dict(attrs))),
         ]);
         let value: Secret = (
             self.session()?,
@@ -167,10 +152,8 @@ impl Secrets for DbusSecrets {
 
     fn clear(&self, attrs: &Attrs) -> Result<(), KeyringError> {
         for item in self.search(attrs)? {
-            let _prompt: OwnedObjectPath = self
-                .proxy(item.as_ref(), ITEM)?
-                .call("Delete", &())
-                .map_err(service)?;
+            let _prompt: OwnedObjectPath =
+                self.proxy(item.as_ref(), ITEM)?.call("Delete", &()).map_err(service)?;
         }
         Ok(())
     }
@@ -181,17 +164,13 @@ impl Secrets for DbusSecrets {
     /// is asked for explicitly, which routes it through the desktop's prompter.
     fn unlock(&self) -> Result<(), KeyringError> {
         let collection = self.default_collection()?;
-        let locked: bool = self
-            .proxy(collection.as_ref(), COLLECTION)?
-            .get_property("Locked")
-            .map_err(service)?;
+        let locked: bool =
+            self.proxy(collection.as_ref(), COLLECTION)?.get_property("Locked").map_err(service)?;
         if !locked {
             return Ok(());
         }
-        let (unlocked, prompt): (Vec<OwnedObjectPath>, OwnedObjectPath) = self
-            .service()?
-            .call("Unlock", &(vec![collection],))
-            .map_err(service)?;
+        let (unlocked, prompt): (Vec<OwnedObjectPath>, OwnedObjectPath) =
+            self.service()?.call("Unlock", &(vec![collection],)).map_err(service)?;
         if !unlocked.is_empty() {
             return Ok(());
         }
@@ -205,10 +184,7 @@ impl Secrets for DbusSecrets {
 }
 
 fn as_dict(attrs: &Attrs) -> HashMap<&str, &str> {
-    attrs
-        .iter()
-        .map(|(k, v)| (k.as_str(), v.as_str()))
-        .collect()
+    attrs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
 }
 
 fn service(e: zbus::Error) -> KeyringError {
@@ -233,15 +209,9 @@ mod live {
             .map(|(k, v)| (k.to_owned(), v.to_owned()))
             .into();
         let found = secrets.lookup(&attrs).unwrap();
-        println!(
-            "cookie found: {}",
-            found.is_some_and(|c| !c.trim().is_empty())
-        );
+        println!("cookie found: {}", found.is_some_and(|c| !c.trim().is_empty()));
         assert!(
-            secrets
-                .lookup(&[("app".into(), "rbxmgr-no-such".into())].into())
-                .unwrap()
-                .is_none()
+            secrets.lookup(&[("app".into(), "rbxmgr-no-such".into())].into()).unwrap().is_none()
         );
     }
 }

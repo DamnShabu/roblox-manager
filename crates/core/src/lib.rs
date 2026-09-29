@@ -7,6 +7,7 @@
 pub mod json_file;
 pub mod keyring;
 pub mod paths;
+pub mod roblox;
 pub mod types;
 
 pub use keyring::{Keyring, KeyringError};

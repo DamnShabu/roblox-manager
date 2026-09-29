@@ -16,10 +16,7 @@ pub struct Paths {
 impl Paths {
     /// From this process's environment.
     pub fn from_env() -> Self {
-        Self::from_vars(
-            |k| std::env::var(k).ok(),
-            rustix::process::getuid().as_raw(),
-        )
+        Self::from_vars(|k| std::env::var(k).ok(), rustix::process::getuid().as_raw())
     }
 
     /// From any variable lookup, for the user `uid` (whose runtime directory
@@ -104,39 +101,24 @@ mod tests {
     use std::collections::HashMap;
 
     fn paths(vars: &[(&str, &str)]) -> Paths {
-        let vars: HashMap<String, String> = vars
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
+        let vars: HashMap<String, String> =
+            vars.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         Paths::from_vars(|k| vars.get(k).cloned(), 1000)
     }
 
     #[test]
     fn unset_directories_fall_back_to_their_defaults() {
         let p = paths(&[("HOME", "/home/u")]);
-        assert_eq!(
-            p.accounts(),
-            PathBuf::from("/home/u/.local/share/rbxmgr/accounts.json")
-        );
+        assert_eq!(p.accounts(), PathBuf::from("/home/u/.local/share/rbxmgr/accounts.json"));
         assert_eq!(p.icons(), PathBuf::from("/home/u/.cache/rbxmgr/_icons"));
-        assert_eq!(
-            p.cordial_shell_json(),
-            PathBuf::from("/home/u/.config/cordial/shell.json")
-        );
+        assert_eq!(p.cordial_shell_json(), PathBuf::from("/home/u/.config/cordial/shell.json"));
         assert_eq!(p.runtime_dir(), Path::new("/run/user/1000"));
     }
 
     #[test]
     fn an_empty_variable_counts_as_unset() {
-        let p = paths(&[
-            ("HOME", "/home/u"),
-            ("XDG_DATA_HOME", ""),
-            ("XDG_RUNTIME_DIR", ""),
-        ]);
-        assert_eq!(
-            p.cordial_profiles(),
-            PathBuf::from("/home/u/.local/share/cordial/profiles")
-        );
+        let p = paths(&[("HOME", "/home/u"), ("XDG_DATA_HOME", ""), ("XDG_RUNTIME_DIR", "")]);
+        assert_eq!(p.cordial_profiles(), PathBuf::from("/home/u/.local/share/cordial/profiles"));
         assert_eq!(p.runtime_dir(), Path::new("/run/user/1000"));
     }
 

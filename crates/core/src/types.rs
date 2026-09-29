@@ -26,11 +26,7 @@ impl Label {
             && !s.contains('/')
             && !s.starts_with(['.', '_'])
             && !s.chars().any(char::is_control);
-        if ok {
-            Ok(Label(s.to_owned()))
-        } else {
-            Err(InvalidLabel)
-        }
+        if ok { Ok(Label(s.to_owned())) } else { Err(InvalidLabel) }
     }
 
     pub fn as_str(&self) -> &str {
@@ -213,10 +209,7 @@ pub struct User {
 impl User {
     /// The display name, falling back to the username.
     pub fn display(&self) -> &str {
-        self.display_name
-            .as_deref()
-            .filter(|d| !d.is_empty())
-            .unwrap_or(&self.name)
+        self.display_name.as_deref().filter(|d| !d.is_empty()).unwrap_or(&self.name)
     }
 }
 
@@ -226,16 +219,7 @@ mod tests {
 
     #[test]
     fn labels_that_are_not_one_path_component_are_refused() {
-        for bad in [
-            "",
-            "a/b",
-            ".",
-            "..",
-            ".hidden",
-            "_icons",
-            "alt\n1",
-            "tab\there",
-        ] {
+        for bad in ["", "a/b", ".", "..", ".hidden", "_icons", "alt\n1", "tab\there"] {
             assert_eq!(Label::parse(bad), Err(InvalidLabel), "{bad:?}");
         }
     }
@@ -243,10 +227,7 @@ mod tests {
     #[test]
     fn ordinary_labels_are_accepted_as_written() {
         for good in ["alt 1", "ñame ✓", "Main"] {
-            assert_eq!(
-                Label::parse(good).map(|l| l.to_string()),
-                Ok(good.to_string())
-            );
+            assert_eq!(Label::parse(good).map(|l| l.to_string()), Ok(good.to_string()));
         }
     }
 
