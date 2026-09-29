@@ -30,12 +30,27 @@ NixOS: add this flake as an input and import `inputs.roblox-manager.nixosModules
 Data lives in `~/.local/share/rbxmgr`, `~/.local/share/cordial`,
 `~/.config/cordial` and (regenerable) `~/.cache/cordial`.
 
+## Layout
+
+A Rust workspace:
+
+- `crates/core` (`rbxmgr-core`): everything except drawing, one directory per
+  area -- `accounts`, `keyring`, `roblox`, `cordial`, `launch`, `macros`. No
+  GTK; every seam into the outside world (Secret Service, Roblox's web API,
+  processes, the Wayland display) is a trait with a production adapter and
+  the one the tests use.
+- `crates/app` (`roblox-manager`): the GTK4/libadwaita window on top of it.
+  Slow work runs on worker threads; results come back to the main loop.
+
 ## Checks
 
 ```bash
-nix shell nixpkgs#python3 -c python3 test-roblox-manager.py   # offline, stubs GTK
-# GTK paths can't be driven headlessly; pyflakes must stay silent.
-nix shell nixpkgs#python3Packages.pyflakes -c pyflakes roblox-manager.py test-roblox-manager.py
+nix develop -c cargo test                              # offline
+nix develop -c cargo clippy --all-targets -- -D warnings
+nix develop -c cargo fmt --check
 ```
+
+No source file may pass 600 lines; `crates/core/tests/size_limit.rs` fails
+the build when one does.
 
 `design/` holds the app redesign mockups.

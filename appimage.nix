@@ -1,4 +1,4 @@
-# roblox-manager as one file for other distros (Arch, ...): its GTK, python
+# roblox-manager as one file for other distros (Arch, ...): its GTK
 # and the Cordial fork (cordial-run, cordial-fetch) come from the bundled
 # closure; pgrep and a Secret Service (gnome-keyring, KWallet) come from the
 # host. Needs unprivileged user namespaces. It also runs on NixOS, though the
@@ -64,9 +64,9 @@
     export FONTCONFIG_FILE=${fontsConf}
     # nix glibc cannot read another distro's locale archive.
     export LOCALE_ARCHIVE=${pkgs.glibcLocalesUtf8}/lib/locale/locale-archive
-    # nix OpenSSL looks for CAs under its own store path, so Roblox's HTTPS
-    # fails with CERTIFICATE_VERIFY_FAILED. Prefer the host's bundle (it
-    # carries any CAs the user added); nixpkgs' cacert when there is none.
+    # Cordial's own downloads look for CAs under their store path, and fail
+    # verification without them. Prefer the host's bundle (it carries any CAs
+    # the user added); nixpkgs' cacert when there is none.
     if [ -z "''${SSL_CERT_FILE:-}" ]; then
       SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt
       for f in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/ca-bundle.pem; do

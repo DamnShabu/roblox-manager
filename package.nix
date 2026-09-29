@@ -1,7 +1,6 @@
 # The roblox-manager derivation, shared by the NixOS module (module.nix)
 # and the portable AppImage (appimage.nix).
 {pkgs}: let
-  pyEnv = pkgs.python3.withPackages (ps: [ps.pygobject3]);
   cordial = import ./cordial/package.nix {inherit pkgs;};
   # The icon font: Material Symbols Rounded alone, copied out of the package
   # so the other two families (~20 MB) stay out of the closure.
@@ -42,39 +41,46 @@
     pkgs.writeText "roblox-manager-mark.svg" ''
       <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 100 100">${mark "#1d1812"}</svg>'';
 in
-  # wrapGAppsHook4 rather than a hand-rolled GI_TYPELIB_PATH
-  # (as mujo's keyring prompter uses): a GTK4 + libadwaita app also
-  # needs gsettings schemas, icon themes and pixbuf loaders, and enumerating
-  # those by hand is how you get an app that starts and then draws nothing.
-  pkgs.stdenv.mkDerivation {
-    name = "mujo-roblox-manager";
-    src = ./roblox-manager.py;
-    dontUnpack = true;
+  # wrapGAppsHook4 rather than a hand-rolled GI_TYPELIB_PATH: a GTK4 +
+  # libadwaita app also needs gsettings schemas, icon themes and pixbuf
+  # loaders, and enumerating those by hand is how you get an app that starts
+  # and then draws nothing.
+  pkgs.rustPlatform.buildRustPackage {
+    pname = "mujo-roblox-manager";
+    version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+    src = pkgs.lib.fileset.toSource {
+      root = ./.;
+      fileset = pkgs.lib.fileset.unions [./Cargo.toml ./Cargo.lock ./clippy.toml ./crates];
+    };
+    cargoLock.lockFile = ./Cargo.lock;
     strictDeps = true;
 
-    nativeBuildInputs = [pkgs.wrapGAppsHook4 pkgs.gobject-introspection];
+    nativeBuildInputs = [pkgs.pkg-config pkgs.wrapGAppsHook4];
     # adwaita-icon-theme: libadwaita's symbolic icons, which a host outside
     # NixOS (the AppImage) is not guaranteed to have. librsvg: the pixbuf
     # loader that draws the app's own SVG icons.
     buildInputs = [pkgs.gtk4 pkgs.libadwaita pkgs.glib pkgs.adwaita-icon-theme pkgs.librsvg];
 
+    # The self-check runs real sh, sleep and Unix sockets; the one test that
+    # needs a session bus and a real keyring is ignored by default.
+    nativeCheckInputs = [pkgs.bash pkgs.coreutils];
+
+    postInstall = ''
+      install -Dm644 ${appIcon} $out/share/icons/hicolor/scalable/apps/roblox-manager.svg
+      install -Dm644 ${titleIcon} $out/share/icons/hicolor/scalable/apps/roblox-manager-mark.svg
+    '';
+
     # The fork of Cordial (cordial-run, cordial-fetch) is prepended, so it is
     # always the one run, whatever else is on PATH. cage is the macro engine's
     # display -- one nested compositor per macro-ready client, which the app
     # then types into itself -- and is appended, so a host's own copy wins.
-    # pgrep, kill, nice and cat come from the session.
-    installPhase = ''
-      runHook preInstall
-      mkdir -p $out/libexec $out/bin $out/share/icons/hicolor/scalable/apps
-      cp $src $out/libexec/roblox-manager.py
-      cp ${appIcon} $out/share/icons/hicolor/scalable/apps/roblox-manager.svg
-      cp ${titleIcon} $out/share/icons/hicolor/scalable/apps/roblox-manager-mark.svg
-      makeWrapper ${pyEnv}/bin/python3 $out/bin/roblox-manager \
-        --add-flags "$out/libexec/roblox-manager.py" \
-        --set-default FONTCONFIG_FILE ${fonts} \
-        --prefix PATH : ${pkgs.lib.makeBinPath [cordial]} \
+    # pgrep, kill and nice come from the session.
+    preFixup = ''
+      gappsWrapperArgs+=(
+        --set-default FONTCONFIG_FILE ${fonts}
+        --prefix PATH : ${pkgs.lib.makeBinPath [cordial]}
         --suffix PATH : ${pkgs.lib.makeBinPath [pkgs.cage]}
-      runHook postInstall
+      )
     '';
 
     # The AppImage writes its own fontconfig file; it adds these.
