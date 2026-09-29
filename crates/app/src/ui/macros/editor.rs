@@ -120,6 +120,7 @@ impl MacroDialog {
             }
         });
         dialog.assemble(w, new);
+        dialog.modal.keep_alive(dialog.clone());
         dialog.modal.present(w.gtk_window());
     }
 

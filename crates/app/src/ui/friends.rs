@@ -104,6 +104,7 @@ impl FriendsDialog {
             &hbox!(10, "mfoot", d.summary.clone(), close.button),
         );
         d.load(of);
+        d.modal.keep_alive(d.clone());
         d.modal.present(w.gtk_window());
     }
 

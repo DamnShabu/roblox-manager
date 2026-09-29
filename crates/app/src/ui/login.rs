@@ -111,12 +111,8 @@ impl AddAccountDialog {
             _ => glib::ControlFlow::Break,
         });
         let closed = d.closed.clone();
-        // The dialog lives as long as it shows: its own close handler holds it.
-        let keep = RefCell::new(Some(d.clone()));
-        d.modal.dialog.connect_closed(move |_| {
-            closed.store(true, Ordering::Relaxed);
-            keep.take();
-        });
+        d.modal.dialog.connect_closed(move |_| closed.store(true, Ordering::Relaxed));
+        d.modal.keep_alive(d.clone());
         d.request_code();
         d.modal.present(w.gtk_window());
     }

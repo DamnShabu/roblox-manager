@@ -23,7 +23,7 @@ impl Services {
         let paths = Paths::from_env();
         let secrets: Box<dyn Secrets> = match DbusSecrets::connect() {
             Ok(dbus) => Box::new(dbus),
-            Err(e) => Box::new(Unavailable(e.to_string())),
+            Err(e) => Box::new(Unavailable(e)),
         };
         let keyring = Arc::new(Keyring::new(secrets));
         let roblox = Arc::new(HttpRoblox::new(Arc::new(UreqTransport::default())));
@@ -49,7 +49,7 @@ impl Services {
 }
 
 /// The keyring when the session bus could not be reached: every use says so.
-struct Unavailable(String);
+struct Unavailable(KeyringError);
 
 impl Secrets for Unavailable {
     fn lookup(&self, _: &Attrs) -> Result<Option<String>, KeyringError> {
@@ -68,6 +68,6 @@ impl Secrets for Unavailable {
 
 impl Unavailable {
     fn error(&self) -> KeyringError {
-        KeyringError::Service(format!("no keyring: {}", self.0))
+        self.0.clone()
     }
 }

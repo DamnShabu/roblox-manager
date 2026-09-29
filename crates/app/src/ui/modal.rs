@@ -47,4 +47,13 @@ impl Modal {
     pub fn present(&self, parent: &impl IsA<gtk::Widget>) {
         self.dialog.present(Some(parent));
     }
+
+    /// Keep the dialog's own state alive while it shows: its widgets hold
+    /// only weak handles on it, so nothing else would.
+    pub fn keep_alive<T: 'static>(&self, state: std::rc::Rc<T>) {
+        let held = std::cell::RefCell::new(Some(state));
+        self.dialog.connect_closed(move |_| {
+            held.take();
+        });
+    }
 }
