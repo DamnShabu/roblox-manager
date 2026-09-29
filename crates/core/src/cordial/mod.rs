@@ -6,11 +6,14 @@
 pub mod build;
 pub mod clients;
 pub mod engine;
+mod migrate;
 pub mod process;
+mod profiles;
 pub mod session;
 
 pub use build::{Build, roblox_build};
 pub use process::{Child, Output, Runner, SystemRunner};
+pub use profiles::{ClientOpts, CordialProfiles, STARTUP_CHECK};
 
 use crate::keyring::KeyringError;
 

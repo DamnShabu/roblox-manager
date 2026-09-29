@@ -181,7 +181,6 @@ pub(crate) mod recording {
             self.ran.lock().unwrap().clone()
         }
 
-        #[allow(dead_code)] // TEMP(Task 7): the profile tests read it
         pub fn spawned(&self) -> Vec<Spawned> {
             self.spawned.lock().unwrap().clone()
         }
