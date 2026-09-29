@@ -1,0 +1,34 @@
+[
+  {
+    "name": "Main",
+    "user_id": 1001,
+    "display": "Main Account",
+    "note": "farm acct",
+    "last_launch": "2026-09-22T05:00:00+00:00",
+    "selected": true,
+    "last_place": "1730877806",
+    "favorites": [
+      {"universe_id": "648454481", "place_id": "1730877806", "name": "[🔥LEOPARD🐆] Grand Piece Online"},
+      {"universe_id": "6215986499", "place_id": "18335956021", "name": "Grand Blue [Early Access]"}
+    ],
+    "plays": {"1730877806": 12, "73903875561291": 1},
+    "nested": false,
+    "leader": true
+  },
+  {
+    "name": "alt 2",
+    "user_id": 1002,
+    "username": "alt_two",
+    "display": "alt_two",
+    "note": "",
+    "last_launch": null,
+    "selected": true,
+    "session_checked": "2026-09-20T10:00:00+00:00",
+    "session": "expired",
+    "follow": 1,
+    "macro": "Macro 1",
+    "nested": true,
+    "low_power": true,
+    "group": "g1727000000000"
+  }
+]

@@ -16,7 +16,7 @@ pub const LABEL_RULE: &str = "A label cannot be empty, start with '.' or '_', or
 #[serde(try_from = "String", into = "String")]
 pub struct Label(String);
 
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("{LABEL_RULE}")]
 pub struct InvalidLabel;
 

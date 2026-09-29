@@ -4,6 +4,7 @@
 //! Roblox's web API, processes, the Wayland display) is a trait with a
 //! production adapter and the one the tests use.
 
+pub mod accounts;
 pub mod cordial;
 pub mod json_file;
 pub mod keyring;
