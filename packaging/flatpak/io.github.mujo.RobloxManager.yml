@@ -81,14 +81,57 @@ modules:
         dest-filename: MaterialSymbolsRounded.ttf
 
   # -- cage: the nested compositor a macro-ready client runs in -------------
-  # wlroots with its Wayland backend alone: cage only ever runs inside the
-  # user's session, so the DRM and libinput backends (and the seat, input
-  # and display libraries they need, which the runtime lacks) stay out.
+  # cage only ever runs nested inside the user's session, but its sources
+  # include wlroots' DRM-lease and session headers unconditionally, and
+  # wlroots installs those only with its DRM backend and session support.
+  # So both are built, with the libraries they need that the runtime lacks
+  # (hwdata's PNP ids, libdisplay-info, libseat); libinput stays out.
+  - name: hwdata
+    buildsystem: simple
+    build-commands:
+      - ./configure --prefix=/app
+      - make install
+    # Read by wlroots' build only.
+    cleanup:
+      - '*'
+    sources:
+      - type: git
+        url: https://github.com/vcrhonek/hwdata
+        tag: v0.390
+
+  - name: libdisplay-info
+    buildsystem: meson
+    cleanup:
+      - /bin
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://gitlab.freedesktop.org/emersion/libdisplay-info
+        tag: 0.2.0
+
+  - name: seatd
+    buildsystem: meson
+    config-opts:
+      - -Dwerror=false
+      - -Dlibseat-logind=disabled
+      - -Dlibseat-seatd=enabled
+      - -Dlibseat-builtin=disabled
+      - -Dserver=disabled
+      - -Dman-pages=disabled
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://git.sr.ht/~kennylevinsen/seatd
+        tag: 0.9.1
+
   - name: wlroots
     buildsystem: meson
     config-opts:
-      - -Dbackends=
-      - -Dsession=disabled
+      - -Dbackends=drm
+      - -Dsession=enabled
       - -Dxwayland=disabled
       - -Dexamples=false
       - -Drenderers=gles2
