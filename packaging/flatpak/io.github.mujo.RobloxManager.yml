@@ -10,8 +10,11 @@
 #
 # Keep in step with the Nix build (package.nix, cordial/package.nix):
 #   - Cargo.lock changed  -> regenerate cargo-sources.json
-#   - Cordial bumped      -> regenerate cordial-cargo-sources.json from
-#                            cordial/Cargo.lock, and bump `commit` below
+#   - Cordial moved       -> the cordial module below takes the url, commit,
+#                            patches and CORDIAL_GIT_SHA from
+#                            cordial/source.json (`cargo test` fails until
+#                            it does), and cordial-cargo-sources.json is
+#                            regenerated from cordial/Cargo.lock
 #   - both with flatpak-builder-tools' cargo/flatpak-cargo-generator.py:
 #       flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
 
@@ -157,8 +160,9 @@ modules:
         sha256: 6dc1619665acd367e0174c93b234002549a66f55f1de9197d67f0305415babc8
 
   # -- mujō's fork of Cordial: cordial-run and cordial-fetch ----------------
-  # The same commit and patches as cordial/package.nix; see that file for
-  # what the patches do. Built with clang: AOSP bionic needs its extensions.
+  # The source, commit and patches of cordial/source.json; see
+  # cordial/package.nix for what the patches do. Built with clang: AOSP
+  # bionic needs its extensions.
   - name: cordial
     buildsystem: simple
     build-options:
@@ -244,7 +248,5 @@ modules:
           - roblox-manager.flatpak
           - target
           - result
-          - design
           - docs
-          - __pycache__
       - cargo-sources.json

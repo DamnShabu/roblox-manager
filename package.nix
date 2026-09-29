@@ -33,7 +33,15 @@ in
     version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
     src = pkgs.lib.fileset.toSource {
       root = ./.;
-      fileset = pkgs.lib.fileset.unions [./Cargo.toml ./Cargo.lock ./clippy.toml ./crates];
+      # The Cordial pin and the Flatpak manifest: a test checks they agree.
+      fileset = pkgs.lib.fileset.unions [
+        ./Cargo.toml
+        ./Cargo.lock
+        ./clippy.toml
+        ./crates
+        ./cordial/source.json
+        ./packaging/flatpak/io.github.mujo.RobloxManager.yml
+      ];
     };
     cargoLock.lockFile = ./Cargo.lock;
     strictDeps = true;

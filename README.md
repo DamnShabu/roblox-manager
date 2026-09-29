@@ -3,9 +3,10 @@
 Several Roblox accounts, launched into one server.
 
 Roblox runs in Cordial, an open-source runtime for Roblox's official Android
-build — this repo's fork of it (`cordial/`), built as two command-line tools
-the manager drives: `cordial-run` for each account's client and
-`cordial-fetch` for the Roblox build. One Cordial profile per account; the
+build — this repo's fork of it, built as two command-line tools the manager
+drives: `cordial-run` for each account's client and `cordial-fetch` for the
+Roblox build. `cordial/source.json` pins the source, and `cordial/README.md`
+says what the manager needs from it and how to move it. One Cordial profile per account; the
 manager gives each profile its session and starts it with the game's own deep
 link. Nothing is injected into the client. Auth is a `.ROBLOSECURITY` cookie
 kept in the Secret Service.
