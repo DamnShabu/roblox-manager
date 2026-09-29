@@ -29,6 +29,12 @@
       };
     };
 
+    # The Rust workspace (crates/): toolchain plus the GTK4/libadwaita
+    # headers the app crate links against.
+    devShells.${system}.default = pkgs.mkShell {
+      packages = with pkgs; [cargo rustc clippy rustfmt rust-analyzer pkg-config gtk4 libadwaita];
+    };
+
     nixosModules.default = ./module.nix;
   };
 }
