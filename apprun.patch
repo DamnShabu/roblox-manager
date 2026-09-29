@@ -1,0 +1,123 @@
+--- a/main.c
++++ b/main.c
+@@ -11,6 +11,7 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <sys/mount.h>
++#include <sys/syscall.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <sys/wait.h>
+@@ -72,6 +73,30 @@
+ 	return buf;
+ }
+ 
++// Symlink every entry of `from` into `to` as `target_prefix`/<name>, keeping
++// whatever is already there. Hidden entries (/nix/store/.links) are skipped.
++static void link_all(const char* from, const char* target_prefix, const char* to)
++{
++	DIR* dir = opendir(from);
++	if (!dir) {
++		return;
++	}
++	struct dirent* entry;
++	while ((entry = readdir(dir))) {
++		if (entry->d_name[0] == '.') {
++			continue;
++		}
++		const char* target = strprintf("%s/%s", target_prefix, entry->d_name);
++		const char* link = strprintf("%s/%s", to, entry->d_name);
++		if (symlink(target, link) < 0 && errno != EEXIST) {
++			fprintf(stderr, "symlink %s -> %s: %s\n", link, target, strerror(errno));
++		}
++		free((void*) target);
++		free((void*) link);
++	}
++	closedir(dir);
++}
++
+ static int write_to(const char* path, const char* fmt, ...)
+ {
+ 	int fd = open(path, O_WRONLY);
+@@ -122,6 +147,9 @@
+ 		die_if(write_to("/proc/self/gid_map", "%d %d 1\n", uid, gid), "cannot write gid_map");
+ 	}
+ 
++	// pivot_root (below) refuses a shared parent mount
++	die_if(mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL) < 0, "cannot make / private");
++
+ 	// Mountpoint ----------------------------------------------------------------
+ 
+ 	// tmpfs so we don't need to cleanup
+@@ -146,10 +174,17 @@
+ 		// we don't treat failure of the below bind as an actual failure, since
+ 		// our logic not robust enough to handle weird filesystem scenarios
+ 
+-		// TODO imitate symlinks as symlinks
+-
++		// Symlinks are recreated as symlinks: Arch's /lib -> usr/lib stays a
++		// link, and a dangling one (e.g. /lib32) is no longer an error.
++		char target[PATH_MAX + 1];
++		ssize_t target_len = readlink(from, target, PATH_MAX);
+ 		struct stat statbuf;
+-		if (stat(from, &statbuf) < 0) {
++		if (target_len >= 0) {
++			target[target_len] = 0;
++			if (symlink(target, to) < 0) {
++				fprintf(stderr, "%s: symlink %s -> %s: %s\n", argv0, to, target, strerror(errno));
++			}
++		} else if (stat(from, &statbuf) < 0) {
+ 			fprintf(stderr, "%s: stat %s: %s\n", argv0, from, strerror(errno));
+ 		} else {
+ 			if (S_ISDIR(statbuf.st_mode)) {
+@@ -180,7 +215,36 @@
+ 	const char* nix_to = strprintf("%s/nix", mountroot);
+ 
+ 	die_if(mkdir(nix_to, 0777) < 0, "mkdir %s", nix_to);
+-	die_if(mount(nix_from, nix_to, "none", MS_BIND | MS_REC, 0) < 0, "mount %s -> %s", nix_from, nix_to);
++
++	// A host with a store of its own (NixOS, or nix on another distro) keeps
++	// it: its PATH, icon themes and /etc all point into it. /nix/store becomes
++	// a directory of symlinks -- bundle entries first, then the host's -- over
++	// both stores bind-mounted beside it. Not an overlay: appimage-run (which
++	// NixOS routes every AppImage through) mounts inside /nix/store, and the
++	// kernel will not take a directory with a locked mount under it as a layer.
++	struct stat hoststore;
++	if (stat("/nix/store", &hoststore) == 0 && S_ISDIR(hoststore.st_mode)) {
++		const char* host_to = strprintf("%s/.host", nix_to);
++		const char* bundle_to = strprintf("%s/.bundle", nix_to);
++		const char* store_to = strprintf("%s/store", nix_to);
++		const char* bundle_store = strprintf("%s/store", nix_from);
++		die_if(mkdir(host_to, 0755) < 0, "mkdir %s", host_to);
++		die_if(mkdir(bundle_to, 0755) < 0, "mkdir %s", bundle_to);
++		die_if(mkdir(store_to, 0755) < 0, "mkdir %s", store_to);
++		die_if(mount("/nix", host_to, "none", MS_BIND | MS_REC, 0) < 0, "mount /nix -> %s", host_to);
++		die_if(mount(nix_from, bundle_to, "none", MS_BIND | MS_REC, 0) < 0, "mount %s -> %s", nix_from, bundle_to);
++		// a path in both stores is the same path by construction
++		link_all(bundle_store, "/nix/.bundle/store", store_to);
++		link_all("/nix/store", "/nix/.host/store", store_to);
++		// /nix/var and the rest, for profiles such as ~/.nix-profile
++		link_all("/nix", "/nix/.host", nix_to);
++		free((void*) host_to);
++		free((void*) bundle_to);
++		free((void*) store_to);
++		free((void*) bundle_store);
++	} else {
++		die_if(mount(nix_from, nix_to, "none", MS_BIND | MS_REC, 0) < 0, "mount %s -> %s", nix_from, nix_to);
++	}
+ 
+ 	free((void*) nix_from);
+ 	free((void*) nix_to);
+@@ -192,7 +256,11 @@
+ 	die_if(!getcwd(cwd, PATH_MAX), "cannot getcwd");
+ 
+ 	// chroot
+-	die_if(chroot(mountroot) < 0, "cannot chroot %s", mountroot);
++	// pivot_root, not chroot: the kernel refuses unshare(CLONE_NEWUSER) to a
++	// chrooted process, and pasta and bwrap both need it.
++	die_if(chdir(mountroot) < 0, "cannot chdir %s", mountroot);
++	die_if(syscall(SYS_pivot_root, ".", ".") < 0, "cannot pivot_root %s", mountroot);
++	die_if(umount2(".", MNT_DETACH) < 0, "cannot detach old root");
+ 
+ 	// cd back again
+ 	die_if(chdir(cwd) < 0, "cannot chdir %s", cwd);

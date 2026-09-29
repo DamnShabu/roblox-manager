@@ -1,0 +1,99 @@
+diff --git i/crates/cordial-update/src/bin/cordial-fetch.rs w/crates/cordial-update/src/bin/cordial-fetch.rs
+new file mode 100644
+index 0000000..daf0ca5
+--- /dev/null
++++ w/crates/cordial-update/src/bin/cordial-fetch.rs
+@@ -0,0 +1,93 @@
++//! mujo: the Roblox build, for a launcher that is not Cordial's own window.
++//!
++//! `cordial-shell`'s "Download Roblox" button is one call --
++//! [`cordial_update::provider::obtain_and_install`] -- and this is that call
++//! with no window around it: a copy already on this machine first, APKPure
++//! otherwise, installed only if Roblox's signing certificate signed it.
++//!
++//! ```text
++//! cordial-fetch            install a build if there is none usable yet
++//! cordial-fetch --newest   install the newest build any source has
++//! cordial-fetch --status   report the installed build; no network
++//! ```
++//!
++//! stdout is one JSON line, `{"version", "apk", "engine"}`: the paths
++//! `cordial-run --apk` and `--lib-dir` take. Progress goes to stderr, one line
++//! per step, and a failure is a message there and exit status 1.
++
++use cordial_update::{engine, install, provider};
++use std::path::Path;
++use std::process::ExitCode;
++
++fn report(version: Option<&str>, apk: &Path, engine: &Path) {
++    println!(
++        "{}",
++        serde_json::json!({
++            "version": version,
++            "apk": apk.to_string_lossy(),
++            "engine": engine.to_string_lossy(),
++        })
++    );
++}
++
++fn main() -> ExitCode {
++    let args: Vec<String> = std::env::args().skip(1).collect();
++    for a in &args {
++        if !matches!(a.as_str(), "--newest" | "--status") {
++            eprintln!("usage: cordial-fetch [--newest | --status]");
++            return ExitCode::from(2);
++        }
++    }
++
++    if args.iter().any(|a| a == "--status") {
++        let lib = install::engine_dir();
++        return match install::managed_base() {
++            Some(apk) if lib.join(engine::LIBRARY).is_file() => {
++                report(engine::installed_version(&lib).as_deref(), &apk, &lib);
++                ExitCode::SUCCESS
++            }
++            _ => ExitCode::FAILURE,
++        };
++    }
++
++    let want = if args.iter().any(|a| a == "--newest") {
++        provider::Want::Newest
++    } else {
++        provider::Want::Any
++    };
++    let cancel = provider::Cancel::new();
++    let mut last_percent = None;
++    let got = provider::obtain_and_install(
++        None,
++        want,
++        Some(&install::Store::live(Vec::new())),
++        &cancel,
++        &mut |step| match step {
++            provider::Progress::Asking { provider } => eprintln!("asking {provider}"),
++            provider::Progress::Verifying { file } => eprintln!("verifying {file}"),
++            provider::Progress::Fetching { file, done, total } => {
++                // One line per percent, not per chunk.
++                let percent = total.filter(|t| *t > 0).map(|t| done * 100 / t);
++                if percent != last_percent {
++                    last_percent = percent;
++                    match percent {
++                        Some(p) => eprintln!("fetching {file} {p}%"),
++                        None => eprintln!("fetching {file} {done} bytes"),
++                    }
++                }
++            }
++        },
++    );
++    match got {
++        Ok((_, installed)) => {
++            // `installed.engine` is the library itself; `--lib-dir` wants
++            // the directory it is in, which is what --status reports too.
++            report(installed.version.as_deref(), &installed.base, &install::engine_dir());
++            ExitCode::SUCCESS
++        }
++        Err(why) => {
++            eprintln!("cordial-fetch: {why}");
++            ExitCode::FAILURE
++        }
++    }
++}
