@@ -22,7 +22,7 @@ keyring, encrypted at rest under your login password). accounts.json holds names
 numeric user ids, notes, the leader's
 favourited games and timestamps -- no credentials; game icons are cached in
 ~/.cache/rbxmgr/_icons. Each account's Cordial profile gets a copy of its
-cookie, also in the keyring (seed_cordial_profile), and Cordial is started with
+cookie, also in the keyring (CordialProfiles.seed), and Cordial is started with
 CORDIAL_SECRET_STORE=keyring so it never writes one to a plaintext file.
 
 Self-check: test-roblox-manager.py
@@ -423,29 +423,69 @@ def keyring_clear(attrs, bus=None):
     _keyring_delete(bus, _keyring_search(bus, attrs))
 
 
-def _account_attrs(name):
-    return {"app": "rbxmgr", "account": name}
+class DBusSecrets:
+    """The Secret Service over D-Bus: the adapter Keyring uses outside the
+    self-check, which gives it a dict instead."""
+    lookup = staticmethod(keyring_lookup)
+    store = staticmethod(keyring_store)
+    clear = staticmethod(keyring_clear)
 
 
-def secret_store(name, cookie):
-    ensure_keyring_unlocked()
-    keyring_store(_account_attrs(name), f"rbxmgr {name}", cookie)
+class Keyring:
+    """Every secret the manager keeps: each account's session cookie, and the
+    sessions it gives Cordial profiles.
 
+    Worker threads only. Every read and write makes sure the keyring is
+    unlocked first, and that waits on the main loop to drive the prompt -- so
+    called on the main thread it would wait on itself.
+    """
 
-def secret_lookup(name):
-    ensure_keyring_unlocked()
-    out = (keyring_lookup(_account_attrs(name)) or "").strip()
-    if not out:
-        raise RuntimeError(f"no cookie in keyring for '{name}' -- use "
-                           "'Sign in again' on the account")
-    return out
+    def __init__(self, secrets=None, unlock=None):
+        self.secrets = secrets or DBusSecrets()
+        self.unlock = unlock or ensure_keyring_unlocked
 
+    def get(self, attrs):
+        self.unlock()
+        return self.secrets.lookup(attrs)
 
-def secret_clear(name):
-    try:
-        keyring_clear(_account_attrs(name))
-    except Exception:
-        pass    # a locked or absent keyring has nothing of ours to clear
+    def put(self, attrs, label, secret):
+        self.unlock()
+        self.secrets.store(attrs, label, secret)
+
+    def delete(self, attrs):
+        self.unlock()
+        self.secrets.clear(attrs)
+
+    def forget(self, attrs):
+        """delete, as a courtesy: never prompts, and a locked keyring simply
+        keeps the entry. For tidying up nobody asked for."""
+        try:
+            self.secrets.clear(attrs)
+        except Exception:
+            pass
+
+    # -- an account's own session, filed under its label ----------------------
+    @staticmethod
+    def _account(name):
+        return {"app": "rbxmgr", "account": name}
+
+    def cookie(self, name):
+        out = (self.get(self._account(name)) or "").strip()
+        if not out:
+            raise RuntimeError(f"no cookie in keyring for '{name}' -- use "
+                               "'Sign in again' on the account")
+        return out
+
+    def set_cookie(self, name, cookie):
+        self.put(self._account(name), f"rbxmgr {name}", cookie)
+
+    def drop_cookie(self, name):
+        self.delete(self._account(name))
+
+    def move_cookie(self, old, new):
+        """Re-key an account's cookie when its label changes."""
+        self.set_cookie(new, self.cookie(old))
+        self.drop_cookie(old)
 
 
 # --------------------------------------------------------------------------
@@ -828,7 +868,7 @@ def join_url(place_id, job_id=None):
     form it passes through untouched, and gameInstanceId is the engine's name
     for the server (v0.19 translates the website's gameId to it). There is no
     ticket in it: the engine signs in from the session seeded into the
-    account's profile, so no ticket is ever redeemed -- see launch_client.
+    account's profile, so no ticket is ever redeemed -- see CordialProfiles.launch.
     Both values come from Roblox's own APIs; they are checked anyway, since
     anything else in them would add parameters to the link.
     """
@@ -870,13 +910,6 @@ def unique_label(base, taken):
     return name
 
 
-def move_account_data(old, new):
-    """Re-key an account's keyring entry. Runs on a worker thread -- secret_*
-    need the main loop free to drive the keyring prompt."""
-    secret_store(new, secret_lookup(old))
-    secret_clear(old)
-
-
 # --------------------------------------------------------------------------
 # Cordial, the Roblox runtime: mujō's fork, as two command-line tools on PATH
 # (./cordial). `cordial-run` is one account's game client and
@@ -903,7 +936,7 @@ _XDG = {k: os.environ.get(f"XDG_{k}_HOME") or os.path.expanduser(d)
         for k, d in (("DATA", "~/.local/share"), ("CONFIG", "~/.config"))}
 CORDIAL_PROFILES = os.path.join(_XDG["DATA"], "cordial/profiles")
 # Settings in the format upstream's window saved them; nothing writes it now,
-# so it only exists when carried over (migrate_flatpak_cordial) or hand-written.
+# so it only exists when carried over (CordialProfiles.migrate_flatpak) or hand-written.
 CORDIAL_SHELL_JSON = os.path.join(_XDG["CONFIG"], "cordial/shell.json")
 LOGS = os.path.join(CACHE, "logs")
 
@@ -912,9 +945,9 @@ LOGS = os.path.join(CACHE, "logs")
 FLATPAK_CORDIAL = os.path.expanduser("~/.var/app/io.github.luohoa97.Cordial")
 
 
-def run_host(argv, timeout=60, input=None):
-    feed = {"input": input} if input is not None else {"stdin": subprocess.DEVNULL}
-    return subprocess.run(argv, timeout=timeout, capture_output=True, **feed)
+def run_host(argv, timeout=60):
+    return subprocess.run(argv, timeout=timeout, capture_output=True,
+                          stdin=subprocess.DEVNULL)
 
 
 def _last_line(raw):
@@ -932,15 +965,11 @@ def _detach(argv, out=subprocess.DEVNULL, env=None):
     return p
 
 
-def _read_host(path, run=run_host):
-    r = run(["cat", path], timeout=10)
-    return r.stdout.decode(errors="replace") if r.returncode == 0 else None
-
-
-def cordial_settings(run=run_host):
+def cordial_settings(path=None):
     try:
-        cfg = json.loads(_read_host(CORDIAL_SHELL_JSON, run) or "{}")
-    except json.JSONDecodeError:
+        with open(path or CORDIAL_SHELL_JSON) as f:
+            cfg = json.load(f)
+    except (OSError, json.JSONDecodeError):
         cfg = {}
     return cfg if isinstance(cfg, dict) else {}
 
@@ -976,44 +1005,6 @@ def roblox_build(log, run=run_host, newest=False):
             raise RuntimeError(f"could not install Roblox: "
                                f"{_last_line(r.stderr) or r.returncode}")
         return got
-
-
-def migrate_flatpak_cordial(log, clear=None, clients=None):
-    """Carry the manager's profiles and Cordial's settings over from the
-    Flatpak Cordial it used before the fork, once: the profiles hold each
-    account's Roblox storage and settings. Moved, not copied, and never over
-    something already here. The sessions the Flatpak profiles were given are
-    dropped from the keyring -- they are keyed by the old path, and the
-    manager gives every profile a fresh one before each launch. A profile a
-    client still has open (an old Flatpak one) waits for the next start."""
-    clear = clear or keyring_clear
-    in_use = set((clients or cordial_clients)().values())
-    old = os.path.join(FLATPAK_CORDIAL, "data/cordial/profiles")
-    try:
-        names = [n for n in os.listdir(old) if n.startswith("rbxmgr-")]
-    except OSError:
-        names = []
-    for name in names:
-        dest = os.path.join(CORDIAL_PROFILES, name)
-        if os.path.exists(dest) or name in in_use:
-            continue
-        os.makedirs(CORDIAL_PROFILES, exist_ok=True)
-        # shutil, not os.replace: under impermanence the two sides are
-        # separate bind mounts, and rename() refuses to cross those (EXDEV)
-        # even on one disk. It copies then deletes there.
-        shutil.move(os.path.join(old, name), dest)
-        for kind in ("identity", "cookies"):
-            try:
-                clear(dict(cordial_secret_attrs(name, kind),
-                           profile=os.path.join(old, name)))
-            except Exception:
-                pass    # a locked keyring keeps a stale copy; never fatal
-        log(f"Moved Cordial profile {name} out of the old Flatpak")
-    old_cfg = os.path.join(FLATPAK_CORDIAL, "config/cordial/shell.json")
-    if os.path.exists(old_cfg) and not os.path.exists(CORDIAL_SHELL_JSON):
-        os.makedirs(os.path.dirname(CORDIAL_SHELL_JSON), exist_ok=True)
-        with open(old_cfg, "rb") as src, open(CORDIAL_SHELL_JSON, "wb") as dst:
-            dst.write(src.read())
 
 
 def cordial_engine_env(cfg):
@@ -1081,25 +1072,6 @@ def low_power_flags(flags, on):
     return flags
 
 
-def apply_low_power(profile, on, run=run_host):
-    """Bring the profile's flags.json in line with its low-power switch,
-    leaving the file untouched when nothing changes."""
-    path = os.path.join(CORDIAL_PROFILES, profile, "flags.json")
-    text = _read_host(path, run)
-    try:
-        flags = json.loads(text) if text else {}
-    except json.JSONDecodeError:
-        return      # not ours to repair; Cordial reports it itself
-    if not isinstance(flags, dict):
-        return
-    new = low_power_flags(flags, on)
-    if new != flags:
-        r = run(["sh", "-c", 'cat > "$0.tmp" && mv "$0.tmp" "$0"', path],
-                input=json.dumps(new, indent=2).encode() + b"\n")
-        if r.returncode != 0:
-            raise RuntimeError(f"could not write {path}: {_last_line(r.stderr)}")
-
-
 def client_argv(profile, url, build):
     """One account's engine, with the arguments upstream's window starts it
     with (spawn() in crates/cordial-shell/src/launch.rs)."""
@@ -1109,38 +1081,6 @@ def client_argv(profile, url, build):
     if url:
         argv += ["--join-url", url]
     return argv
-
-
-def launch_client(profile, url, build, run=run_host, sleep=time.sleep, start=None,
-                  nested=False, low_power=False):
-    """Start one account's engine and check it survives its first seconds.
-
-    Its output goes to ~/.cache/rbxmgr/logs/<profile>.log -- the only account
-    of why a client ended -- with the previous launch kept as .log.1.
-    """
-    apply_low_power(profile, low_power, run)
-    env = cordial_engine_env(cordial_settings(run))
-    if low_power:
-        env.update(LOW_POWER_ENV)
-    os.makedirs(LOGS, exist_ok=True)
-    log_path = os.path.join(LOGS, f"{profile}.log")
-    if os.path.exists(log_path):
-        os.replace(log_path, log_path + ".1")
-    with open(log_path, "wb") as out:
-        argv = client_argv(profile, url, build)
-        if low_power:
-            argv = ["nice", "-n", "10", *argv]
-        p = (start or _detach)(nested_argv(profile, argv) if nested else argv, out, env)
-    sleep(STARTUP_CHECK)
-    if p.poll() is not None:
-        try:
-            with open(log_path, "rb") as f:
-                tail = _last_line(f.read()[-4096:])
-        except OSError:
-            tail = ""
-        raise RuntimeError(f"its client exited at once ({tail or p.returncode}); "
-                           f"log: {log_path}")
-    return p
 
 
 def parse_clients(pgrep_output):
@@ -1167,37 +1107,11 @@ def parse_clients(pgrep_output):
     return clients
 
 
-def cordial_clients(run=run_host):
-    """Every running Cordial game client, as {pid: profile}. pgrep exits 1
-    when nothing matches, which is an answer, not an error."""
-    r = run(["pgrep", "-a", "-f", "cordial-run"], timeout=10)
-    return parse_clients(r.stdout.decode(errors="replace"))
-
-
-def stop_profiles(profiles, clients=None, run=run_host):
-    """SIGTERM every client running one of `profiles`; cordial-run ends its
-    session cleanly on it. Returns how many were signalled. Clients of
-    profiles no account owns -- somebody playing from Cordial directly --
-    are left alone."""
-    clients = cordial_clients(run) if clients is None else clients
-    pids = [str(p) for p, prof in clients.items() if prof in profiles]
-    if pids:
-        run(["kill", *pids], timeout=10)
-    return len(pids)
-
-
 def cordial_profile(user_id):
     """The Cordial profile an account plays in. Keyed by the Roblox user id,
     so renaming the label never strands it, and within Cordial's name rule
     (letters, digits, - and _)."""
     return f"rbxmgr-{int(user_id)}"
-
-
-def cordial_secret_attrs(profile, kind):
-    """The keyring attributes Cordial files a profile's `kind` under, keyed
-    by the profile's full path."""
-    return {"xdg:schema": "org.cordial.Session", "application": "cordial",
-            "profile": os.path.join(CORDIAL_PROFILES, profile), "store": kind}
 
 
 def _escape_jar(jar):
@@ -1236,34 +1150,168 @@ def cordial_encode(body):
     return "cordial-secret-hex-v1:" + body.encode().hex()
 
 
-def seed_cordial_profile(user, cookie, run=run_host, store=None):
-    """Make the account's Cordial profile routable. Returns its name.
+# The two sessions the manager gives a profile, filed in the keyring.
+SECRET_KINDS = ("identity", "cookies")
 
-    Rewritten on every launch rather than once: the manager's cookie has just
-    been checked with Roblox (authenticated_user), so it is known good. The
-    keyring is the only place the session goes -- never a file in the
-    profile, whatever Cordial's own fallback would do.
+
+class CordialProfiles:
+    """Every account's Cordial profile, and the client that plays in it: where
+    the profile lives, the session it is given, its low-power flags, starting
+    its client, and which clients are up. Profiles are named by cordial_profile.
+
+    Worker threads only: seeding and clearing go through the keyring, and
+    finding clients runs pgrep.
     """
-    store = store or keyring_store
-    profile = cordial_profile(user["id"])
-    r = run(["mkdir", "-p", os.path.join(CORDIAL_PROFILES, profile)])
-    if r.returncode != 0:
-        raise RuntimeError(f"could not create Cordial profile {profile}: "
-                           f"{_last_line(r.stderr)}")
-    for kind, body in (("identity", cordial_identity(user)),
-                       ("cookies", cordial_cookie_store(cookie))):
-        store(cordial_secret_attrs(profile, kind),
-              f'Cordial: Roblox {kind} for profile "{profile}"',
-              cordial_encode(body))
-    return profile
 
+    def __init__(self, keyring, root=None, logs=None, run=run_host,
+                 start=None, sleep=time.sleep):
+        self.keyring = keyring
+        self.root = root or CORDIAL_PROFILES
+        self.logs = logs or LOGS
+        self.run = run
+        self.start = start or _detach
+        self.sleep = sleep
 
-def clear_cordial_profile(user_id, clear=None):
-    """Drop the session and identity the manager gave an account's profile.
-    The profile directory stays; it holds no credential."""
-    clear = clear or keyring_clear
-    for kind in ("identity", "cookies"):
-        clear(cordial_secret_attrs(cordial_profile(user_id), kind))
+    def path(self, profile):
+        return os.path.join(self.root, profile)
+
+    def secret_attrs(self, profile, kind, path=None):
+        """The keyring attributes Cordial files a profile's `kind` under, keyed
+        by the profile's full path."""
+        return {"xdg:schema": "org.cordial.Session", "application": "cordial",
+                "profile": path or self.path(profile), "store": kind}
+
+    # -- sessions ---------------------------------------------------------
+    def seed(self, user, cookie):
+        """Make the account's Cordial profile routable. Returns its name.
+
+        Rewritten on every launch rather than once: the manager's cookie has
+        just been checked with Roblox (authenticated_user), so it is known
+        good. The keyring is the only place the session goes -- never a file
+        in the profile, whatever Cordial's own fallback would do.
+        """
+        profile = cordial_profile(user["id"])
+        try:
+            os.makedirs(self.path(profile), exist_ok=True)
+        except OSError as e:
+            raise RuntimeError(f"could not create Cordial profile {profile}: "
+                               f"{e.strerror or e}") from None
+        for kind, body in zip(SECRET_KINDS, (cordial_identity(user),
+                                             cordial_cookie_store(cookie))):
+            self.keyring.put(self.secret_attrs(profile, kind),
+                             f'Cordial: Roblox {kind} for profile "{profile}"',
+                             cordial_encode(body))
+        return profile
+
+    def clear(self, user_id):
+        """Drop the session and identity the manager gave an account's profile.
+        The profile directory stays; it holds no credential."""
+        for kind in SECRET_KINDS:
+            self.keyring.delete(self.secret_attrs(cordial_profile(user_id), kind))
+
+    # -- flags ------------------------------------------------------------
+    def set_low_power(self, profile, on):
+        """Bring the profile's flags.json in line with its low-power switch,
+        leaving the file untouched when nothing changes."""
+        path = os.path.join(self.path(profile), "flags.json")
+        try:
+            with open(path) as f:
+                flags = json.load(f)
+        except FileNotFoundError:
+            flags = {}
+        except ValueError:
+            return      # not ours to repair; Cordial reports it itself
+        if not isinstance(flags, dict):
+            return
+        new = low_power_flags(flags, on)
+        if new != flags:
+            _save_json(path, new)
+
+    # -- clients ----------------------------------------------------------
+    def launch(self, profile, url, build, nested=False, low_power=False):
+        """Start one account's engine and check it survives its first seconds.
+
+        Its output goes to ~/.cache/rbxmgr/logs/<profile>.log -- the only
+        account of why a client ended -- with the previous launch kept as
+        .log.1.
+        """
+        self.set_low_power(profile, low_power)
+        env = cordial_engine_env(cordial_settings())
+        if low_power:
+            env.update(LOW_POWER_ENV)
+        os.makedirs(self.logs, exist_ok=True)
+        log_path = os.path.join(self.logs, f"{profile}.log")
+        if os.path.exists(log_path):
+            os.replace(log_path, log_path + ".1")
+        with open(log_path, "wb") as out:
+            argv = client_argv(profile, url, build)
+            if low_power:
+                argv = ["nice", "-n", "10", *argv]
+            p = self.start(nested_argv(profile, argv) if nested else argv, out, env)
+        self.sleep(STARTUP_CHECK)
+        if p.poll() is not None:
+            try:
+                with open(log_path, "rb") as f:
+                    tail = _last_line(f.read()[-4096:])
+            except OSError:
+                tail = ""
+            raise RuntimeError(f"its client exited at once ({tail or p.returncode}); "
+                               f"log: {log_path}")
+        return p
+
+    def clients(self):
+        """Every running Cordial game client, as {pid: profile} -- somebody
+        playing from Cordial directly included. pgrep exits 1 when nothing
+        matches, which is an answer, not an error."""
+        r = self.run(["pgrep", "-a", "-f", "cordial-run"], timeout=10)
+        return parse_clients(r.stdout.decode(errors="replace"))
+
+    def running(self):
+        """The profiles a client has open."""
+        return set(self.clients().values())
+
+    def stop(self, profiles):
+        """SIGTERM every client running one of `profiles`; cordial-run ends its
+        session cleanly on it. Returns how many were signalled. Clients of
+        profiles no account owns are left alone."""
+        pids = [str(p) for p, prof in self.clients().items() if prof in profiles]
+        if pids:
+            self.run(["kill", *pids], timeout=10)
+        return len(pids)
+
+    # -- the Flatpak Cordial the manager used before the fork ---------------
+    def migrate_flatpak(self, log):
+        """Carry the manager's profiles and Cordial's settings over from the
+        Flatpak Cordial, once: the profiles hold each account's Roblox storage
+        and settings. Moved, not copied, and never over something already
+        here. The sessions the Flatpak profiles were given are dropped from
+        the keyring -- they are keyed by the old path, and every profile gets
+        a fresh one before each launch -- but never with a prompt, since
+        nobody asked for this. A profile a client still has open (an old
+        Flatpak one) waits for the next start."""
+        in_use = self.running()
+        old = os.path.join(FLATPAK_CORDIAL, "data/cordial/profiles")
+        try:
+            names = [n for n in os.listdir(old) if n.startswith("rbxmgr-")]
+        except OSError:
+            names = []
+        for name in names:
+            if os.path.exists(self.path(name)) or name in in_use:
+                continue
+            os.makedirs(self.root, exist_ok=True)
+            # shutil, not os.replace: under impermanence the two sides are
+            # separate bind mounts, and rename() refuses to cross those
+            # (EXDEV) even on one disk. It copies then deletes there.
+            shutil.move(os.path.join(old, name), self.path(name))
+            for kind in SECRET_KINDS:
+                self.keyring.forget(self.secret_attrs(
+                    name, kind, path=os.path.join(old, name)))
+            log(f"Moved Cordial profile {name} out of the old Flatpak")
+        old_cfg = os.path.join(FLATPAK_CORDIAL, "config/cordial/shell.json")
+        if os.path.exists(old_cfg) and not os.path.exists(CORDIAL_SHELL_JSON):
+            os.makedirs(os.path.dirname(CORDIAL_SHELL_JSON), exist_ok=True)
+            with open(old_cfg, "rb") as src, open(CORDIAL_SHELL_JSON, "wb") as dst:
+                dst.write(src.read())
 
 
 # --------------------------------------------------------------------------
@@ -1300,6 +1348,7 @@ def follow_leader(names, place_id, get_job_id, do_spawn, log,
                   timeout=LEADER_TIMEOUT, poll=LEADER_POLL,
                   is_running=None):
     """Launch names[0], wait for its server, then send the rest into it.
+    get_job_id(name) is (job_id, place_id), either None while unknown.
 
     Returns the jobId everyone joined, or None if the leader never reported one
     (in which case the followers still launch, into their own servers, rather
@@ -1341,14 +1390,7 @@ def follow_leader(names, place_id, get_job_id, do_spawn, log,
         else:
             waited += poll
         try:
-            res = get_job_id(leader)
-            if isinstance(res, tuple) and len(res) == 2:
-                job_id, leader_place = res
-            elif isinstance(res, dict):
-                job_id = res.get("gameId") or res.get("job_id")
-                leader_place = res.get("placeId") or res.get("place_id")
-            else:
-                job_id, leader_place = res, None
+            job_id, leader_place = get_job_id(leader)
         except Exception as e:  # a failed poll is not a failed launch
             log(f"{leader}: presence poll failed ({e})")
             job_id = None
@@ -1373,6 +1415,72 @@ def follow_leader(names, place_id, get_job_id, do_spawn, log,
         except Exception as e:
             log(f"{name}: FAILED -- {e}")
     return job_id
+
+
+class Launcher:
+    """Launching accounts: each into the target, or as a group behind its
+    leader. Per account it checks the stored session with Roblox, gives the
+    account's Cordial profile that session, and starts the client -- skipping
+    one already running, and spacing sign-ins.
+
+    Worker threads only. Nothing here touches the window: launch() returns
+    what happened, for the window to record.
+    """
+
+    def __init__(self, keyring, profiles, whoami=authenticated_user,
+                 presence=leader_presence, build=roblox_build,
+                 stagger=DEFAULT_STAGGER, sleep=time.sleep):
+        self.keyring = keyring
+        self.profiles = profiles
+        self.whoami = whoami
+        self.presence = presence
+        self.build = build
+        self.stagger = stagger
+        self.sleep = sleep
+
+    def launch(self, accounts, mode, place_id, log, job_id=None):
+        """accounts: the account dicts, in launch order -- read, never
+        written. mode "each" sends every one to place_id (job_id's server,
+        when given); "group" launches the first, waits for its server and
+        sends the rest into it.
+
+        Returns {"launched": {name: Roblox user}, "expired": [name]}: the
+        accounts whose client started, and those whose session Roblox refused.
+        """
+        by_name = {a["name"]: a for a in accounts}
+        names = list(by_name)
+        result = {"launched": {}, "expired": []}
+        build = self.build(log)
+
+        def is_running(name):
+            return cordial_profile(by_name[name]["user_id"]) in self.profiles.running()
+
+        def spawn(name, url):
+            acct = by_name[name]
+            cookie = self.keyring.cookie(name)
+            try:
+                user = self.whoami(cookie)
+            except SessionExpired:
+                result["expired"].append(name)
+                raise
+            profile = self.profiles.seed(user, cookie)
+            self.profiles.launch(profile, url, build,
+                                 nested=bool(acct.get("nested")),
+                                 low_power=bool(acct.get("low_power")))
+            result["launched"][name] = user
+
+        if mode == "group":
+            follow_leader(
+                names, place_id,
+                get_job_id=lambda n: self.presence(self.keyring.cookie(n),
+                                                   by_name[n]["user_id"]),
+                do_spawn=spawn, log=log, is_running=is_running,
+                stagger=self.stagger, sleep=self.sleep)
+        else:
+            launch_each(names, place_id, do_spawn=spawn, log=log,
+                        is_running=is_running, job_id=job_id,
+                        stagger=self.stagger, sleep=self.sleep)
+        return result
 
 
 # --------------------------------------------------------------------------
@@ -1474,27 +1582,6 @@ BUTTONS = {"left": 0x110, "right": 0x111, "middle": 0x112}
 MOD_MASKS = {42: 1, 54: 1, 29: 4, 97: 4, 56: 8, 100: 8}
 
 
-def _read_macros():
-    try:
-        with open(MACROS) as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def load_macros():
-    """{name: text}. A switched-off macro is stored as {"text", "enabled"};
-    any other dict is the earlier macro manager's entry."""
-    macros = {}
-    for name, m in _read_macros().items():
-        if isinstance(m, dict):
-            m = m.get("text") if "text" in m else migrate_macro(m)
-        if isinstance(m, str):
-            macros[str(name)] = m
-    return macros
-
-
 def migrate_macro(old):
     """The earlier macro manager's entry -- {"script", "start_delay", ...},
     with `key K`, `wait range(A,B)` and a closing bare `loop` -- as this one's
@@ -1513,36 +1600,124 @@ def migrate_macro(old):
     return "\n".join(lines).strip() + "\n"
 
 
-def disabled_macros():
-    return {str(n) for n, m in _read_macros().items()
-            if isinstance(m, dict) and "text" in m and m.get("enabled") is False}
+class MacroLibrary:
+    """Every macro by name: its text, whether it is switched on, and its
+    hotkey. macros.json, read once and written whole on every change. A
+    plain macro is stored as a bare string; one switched off or with a hotkey
+    as {"text", "enabled", "hotkey"}; any other dict is the earlier macro
+    manager's entry, carried over by migrate_macro.
 
+    Main thread only. Iterating gives the names, sorted.
+    """
 
-def macro_hotkeys():
-    """{name: GTK accelerator} for the macros that have a hotkey."""
-    return {str(n): m["hotkey"] for n, m in _read_macros().items()
-            if isinstance(m, dict) and "text" in m and m.get("hotkey")}
+    def __init__(self, path=None):
+        self.path = path or MACROS
+        self._text, self._off, self._hotkeys = {}, set(), {}
+        try:
+            with open(self.path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            data = {}
+        for name, m in (data if isinstance(data, dict) else {}).items():
+            name = str(name)
+            if isinstance(m, dict) and "text" in m:
+                if m.get("enabled") is False:
+                    self._off.add(name)
+                if m.get("hotkey"):
+                    self._hotkeys[name] = m["hotkey"]
+                m = m["text"]
+            elif isinstance(m, dict):
+                m = migrate_macro(m)
+            if isinstance(m, str):
+                self._text[name] = m
+        self._off &= set(self._text)
+        self._hotkeys = {n: k for n, k in self._hotkeys.items() if n in self._text}
 
+    def __contains__(self, name):
+        return name in self._text
 
-def save_macros(macros, disabled=(), hotkeys=None):
-    """A plain macro stays a bare string; one switched off or with a hotkey
-    becomes {"text", "enabled", "hotkey"}."""
-    hotkeys = hotkeys or {}
+    def __iter__(self):
+        return iter(sorted(self._text))
 
-    def entry(name, text):
-        if name not in disabled and not hotkeys.get(name):
-            return text
-        e = {"text": text, "enabled": name not in disabled}
-        if hotkeys.get(name):
-            e["hotkey"] = hotkeys[name]
-        return e
+    def text(self, name):
+        return self._text[name]
 
-    _save_json(MACROS, {n: entry(n, t) for n, t in macros.items()})
+    def enabled(self, name):
+        return name not in self._off
+
+    def hotkey(self, name):
+        return self._hotkeys.get(name)
+
+    def hotkeys(self):
+        """{name: GTK accelerator} for the macros that have one."""
+        return dict(self._hotkeys)
+
+    def set_enabled(self, name, on):
+        (self._off.discard if on else self._off.add)(name)
+        self._save()
+
+    def save(self, old, new, text, hotkey):
+        """Create (old None) or replace old, renaming it to new. Returns what
+        is wrong, or None once saved. The macro's text must already parse."""
+        if not new:
+            return "A macro needs a name"
+        if new != old and new in self._text:
+            return f"A macro called {new} already exists"
+        clash = next((n for n, k in self._hotkeys.items()
+                      if hotkey and k == hotkey and n != old), None)
+        if clash:
+            return f"{hotkey_label(hotkey)} already runs {clash}"
+        if old is not None and new != old:
+            self._text.pop(old, None)
+            self._hotkeys.pop(old, None)
+            if old in self._off:
+                self._off.discard(old)
+                self._off.add(new)
+        self._text[new] = text
+        if hotkey:
+            self._hotkeys[new] = hotkey
+        else:
+            self._hotkeys.pop(new, None)
+        self._save()
+        return None
+
+    def delete(self, name):
+        self._text.pop(name, None)
+        self._off.discard(name)
+        self._hotkeys.pop(name, None)
+        self._save()
+
+    def _save(self):
+        def entry(name, text):
+            if name not in self._off and not self._hotkeys.get(name):
+                return text
+            e = {"text": text, "enabled": name not in self._off}
+            if self._hotkeys.get(name):
+                e["hotkey"] = self._hotkeys[name]
+            return e
+
+        _save_json(self.path, {n: entry(n, t) for n, t in self._text.items()})
 
 
 # The editor's step types, and the command each one is in a macro's text.
 STEP_TYPES = {"Key": "tap", "Hold": "hold", "Type": "type", "Click": "click",
               "Move": "move", "Wait": "wait", "Start": "start", "Note": "#"}
+
+
+def macro_lines(text):
+    """(line number, command, rest) for each line of a macro that says
+    anything; the command is lower-cased, and "#" for a note. How a macro's
+    text splits into commands -- for the editor (macro_rows) and the player
+    (parse_macro) alike."""
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            yield n, "#", line[1:].strip()
+            continue
+        cmd, _, rest = line.partition(" ")
+        yield n, cmd.lower(), rest.strip()
 
 
 def macro_rows(text):
@@ -1551,18 +1726,11 @@ def macro_rows(text):
     keeps its own name, so saving writes it back unchanged."""
     cmds = {v: k for k, v in STEP_TYPES.items()}
     rows, loops = [], 0
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if line.startswith("#"):
-            rows.append(("Note", line[1:].strip()))
-            continue
-        cmd, _, rest = line.partition(" ")
-        if cmd.lower() == "loop" and rest.strip().isdigit():
+    for _n, cmd, rest in macro_lines(text):
+        if cmd == "loop" and rest.isdigit():
             loops = int(rest)
             continue
-        rows.append((cmds.get(cmd.lower(), cmd.capitalize()), rest.strip()))
+        rows.append((cmds.get(cmd, cmd.capitalize()), rest))
     return rows, loops
 
 
@@ -1615,16 +1783,13 @@ def parse_macro(text):
     """(loops, steps) from a macro's text; loops 0 means until stopped.
     Raises ValueError naming the line at fault."""
     loops, steps = 0, []
-    for n, raw in enumerate(text.splitlines(), 1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
+    for n, cmd, rest in macro_lines(text):
+        if cmd == "#":
             continue
-        cmd, _, rest = line.partition(" ")
         args = rest.split()
         try:
-            cmd = cmd.lower()
-            if cmd == "type" and rest.strip():
-                steps.append(("type", _typed(rest.strip())))
+            if cmd == "type" and rest:
+                steps.append(("type", _typed(rest)))
             elif cmd == "tap" and len(args) in (1, 2):
                 # A tap is a short hold: its press length is random as well.
                 steps.append(("hold", _keys(args[0]),
@@ -1646,7 +1811,7 @@ def parse_macro(text):
             elif cmd == "loop" and len(args) == 1 and args[0].isdigit():
                 loops = int(args[0])
             else:
-                raise ValueError(f"don't understand {line!r}")
+                raise ValueError(f"don't understand {(cmd + ' ' + rest).strip()!r}")
         except ValueError as e:
             raise ValueError(f"line {n}: {e}") from None
     if not steps:
@@ -1847,6 +2012,9 @@ def play_step(inp, step, stop, rng=random):
 
 
 def display_file(profile):
+    """Where a macro-ready client's display is linked while it runs -- the one
+    place that is worked out, for the link (nested_argv) and for macros
+    (run_macro) alike."""
     runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
     return os.path.join(runtime, "rbxmgr", f"{profile}.wayland")
 
@@ -1857,11 +2025,12 @@ def nested_argv(profile, argv):
     removes it when the client ends -- cage then exits with it. A link, not
     the display's name, so input can only ever reach this cage: once cage is
     gone the link refuses connections, whoever gets its name next. The
-    profile goes in as $0, never into the script."""
+    link's path goes in as $0, never into the script. cage's own socket is
+    found as cage makes it, from the environment it runs with."""
     return ["cage", "--", "sh", "-c",
-            'f="$XDG_RUNTIME_DIR/rbxmgr/$0.wayland"; mkdir -p "${f%/*}"; '
+            'f="$0"; mkdir -p "${f%/*}"; '
             'ln -f "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" "$f"; "$@"; rm -f "$f"',
-            profile, *argv]
+            display_file(profile), *argv]
 
 
 def describe_step(step):
@@ -1873,20 +2042,20 @@ def describe_step(step):
     return {"type": "typing", "click": "clicking", "move": "moving the mouse"}[kind]
 
 
-def run_macro(profile, loops, steps, stop, run=run_host, rng=random,
-              clients=None, connect=None, report=None, now=time.time):
+def run_macro(profile, loops, steps, stop, running, rng=random,
+              connect=None, report=None, now=time.time):
     """Play steps into profile's nested display until stop is set or loops
-    run out. Before every pass it checks the client is still up.
+    run out. Before every pass it checks the client is still up: running()
+    is the set of profiles a client has open (CordialProfiles.running).
 
     report(text) hears each step as it starts -- a wait with the clock time
     it ends at -- since a macro that opens on minutes of waiting otherwise
     looks exactly like one that does nothing."""
     report = report or (lambda _t: None)
-    clients = clients or cordial_clients
     connect = connect or VirtualInput
 
     def check_running():
-        if profile not in clients(run).values():
+        if profile not in running():
             raise RuntimeError("its client is not running -- launch it first")
 
     check_running()
@@ -2980,11 +3149,11 @@ class MacroCard(Gtk.Box):
         self.window = w = window
         self.name = name
         self.set_overflow(Gtk.Overflow.HIDDEN)
-        text = w.macros[name]
+        text = w.macros.text(name)
         rows, loops = macro_rows(text)
         steps = [r for r in rows if r[0] != "Note"]
         opened = name in w.open_macros
-        self.switch = switch(name not in w.macros_off,
+        self.switch = switch(w.macros.enabled(name),
                              lambda on: w.enable_macro(name, on), "Enable macro")
         self.running = hbox(6, "mrun", dot("running", True), lbl("Running"))
         head = vbox(10, "mhead",
@@ -2993,7 +3162,7 @@ class MacroCard(Gtk.Box):
                          self.running, self.switch),
                     hbox(8, "mmeta",
                          hbox(5, "hk", icon("keyboard", 14),
-                              lbl(hotkey_label(w.hotkeys.get(name)), "mono")),
+                              lbl(hotkey_label(w.macros.hotkey(name)), "mono")),
                          lbl(f"{len(steps)} step{'s' * (len(steps) != 1)}"),
                          Gtk.Box(css_classes=["bullet"], valign=Gtk.Align.CENTER),
                          hbox(4, "", icon("repeat", 14), lbl(loop_label(loops))),
@@ -3060,7 +3229,7 @@ class MacroCard(Gtk.Box):
             self.run.icon.set_label("stop" if running else "play_arrow")
             self.run.text.set_label("Stop" if running else "Run")
             (self.run.add_css_class if running else self.run.remove_css_class)("stop")
-            self.run.set_sensitive(running or self.name not in self.window.macros_off)
+            self.run.set_sensitive(running or self.window.macros.enabled(self.name))
 
 
 STEP_ICONS = {"Key": "keyboard", "Hold": "keyboard_keys", "Type": "text_fields",
@@ -3089,10 +3258,10 @@ class MacroDialog(Modal):
             # Roblox kicks after 20 idle minutes; the starter keeps a client in.
             text, title = "# anti-AFK\ntap space\nwait 60-240\n", f"Macro {n}"
         else:
-            text, title = w.macros[name], name
+            text, title = w.macros.text(name), name
         rows, self.loops = macro_rows(text)
         self.rows = [list(r) for r in rows]
-        self.hotkey = w.hotkeys.get(name) if name else None
+        self.hotkey = w.macros.hotkey(name) if name else None
         self.capturing = False
 
         self.name = Gtk.Entry(text=title, placeholder_text="Macro name",
@@ -3488,7 +3657,7 @@ class AddAccountDialog(Modal):
                 None)
             name = existing["name"] if existing else unique_label(
                 user.get("name"), {a["name"] for a in self.parent.accounts})
-            secret_store(name, cookie)
+            self.parent.keyring.set_cookie(name, cookie)
         except CodeExpired:
             if not self._stale(gen):
                 once(self.request_code)
@@ -3649,7 +3818,8 @@ class FriendsDialog(Modal):
 
         def work():
             try:
-                got = friends_status(secret_lookup(acct["name"]), acct["user_id"])
+                got = friends_status(self.window.keyring.cookie(acct["name"]),
+                                     acct["user_id"])
             except Exception as e:
                 got = str(e)
             once(self._loaded, key, got)
@@ -3713,6 +3883,9 @@ class Window(Adw.ApplicationWindow):
         super().__init__(application=app, title="Roblox Manager",
                          default_width=1320, default_height=860)
         self.add_css_class("rbx")
+        self.keyring = Keyring()
+        self.profiles = CordialProfiles(self.keyring)
+        self.launcher = Launcher(self.keyring, self.profiles)
         self.accounts = load_accounts()
         self.groups = load_groups()
         if self.groups is None:
@@ -3720,9 +3893,7 @@ class Window(Adw.ApplicationWindow):
             self.groups = []
             self.persist()
             self.save_groups()
-        self.macros = load_macros()
-        self.macros_off = disabled_macros() & set(self.macros)
-        self.hotkeys = {n: k for n, k in macro_hotkeys().items() if n in self.macros}
+        self.macros = MacroLibrary()
         self.macro_runs = {}        # account name -> (Event that stops it, macro)
         self.busy = False
         self._busy_count = 0
@@ -3848,7 +4019,7 @@ class Window(Adw.ApplicationWindow):
 
         self.refresh()
         self._log(time.strftime("%H:%M"), "Ready")
-        self.run_task(lambda: migrate_flatpak_cordial(self.log),
+        self.run_task(lambda: self.profiles.migrate_flatpak(self.log),
                       failure="Could not move the old Cordial profiles")
 
     # -- state ------------------------------------------------------------
@@ -4118,7 +4289,7 @@ class Window(Adw.ApplicationWindow):
                 name = acct["name"]
                 try:
                     acct["favorites"] = fresh[name] = favorite_games(
-                        secret_lookup(name), acct["user_id"])
+                        self.keyring.cookie(name), acct["user_id"])
                 except Exception as e:
                     # One account failing must not blank the bar: its
                     # last-known favourites stay in the merge.
@@ -4243,65 +4414,37 @@ class Window(Adw.ApplicationWindow):
         pid, job = target or (self.games.place_id(), None)
         if not target:
             self._remember_place(pid)
-        by_name = {a["name"]: a for a in self.accounts}
-
-        def launched(name, user):
-            # On the main loop: persist() may be json-dumping these very dicts
-            # there, and a new key mid-dump raises.
-            acct = by_name.get(name)
-            if acct is None:
-                return
-            now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-            acct["last_launch"] = acct["session_checked"] = now
-            acct.pop("session", None)
-            acct["username"] = user.get("name") or acct.get("username")
-            if pid:
-                plays = acct.setdefault("plays", {})
-                plays[pid] = plays.get(pid, 0) + 1
-
-        def is_running(name):
-            return (cordial_profile(by_name[name]["user_id"])
-                    in cordial_clients().values())
-
-        build = {}
-
-        def do_spawn(name, url):
-            cookie = secret_lookup(name)
-            try:
-                user = authenticated_user(cookie)
-            except SessionExpired:
-                once(self.mark_session, name, "expired")
-                raise
-            profile = seed_cordial_profile(user, cookie)
-            acct = by_name[name]
-            launch_client(profile, url, build["got"],
-                          nested=bool(acct.get("nested")),
-                          low_power=bool(acct.get("low_power")))
-            once(launched, name, user)
+        # The worker's own copies: the main loop may be json-dumping the real
+        # dicts, and a new key mid-dump raises.
+        chosen = [dict(a) for n in names for a in self.accounts if a["name"] == n]
+        got = {}
 
         def work():
-            build["got"] = roblox_build(self.log)
-            if mode == "group":
-                follow_leader(
-                    names, pid,
-                    get_job_id=lambda n: leader_presence(
-                        secret_lookup(n), by_name[n]["user_id"]),
-                    do_spawn=do_spawn, log=self.log, is_running=is_running,
-                )
-            else:
-                launch_each(
-                    names, pid,
-                    do_spawn=do_spawn, log=self.log, is_running=is_running,
-                    job_id=job,
-                )
+            got.update(self.launcher.launch(chosen, mode, pid, self.log, job_id=job))
 
         def done():
             self.launching.difference_update(names)
             self.joining.difference_update(joining)
+            for name in got.get("expired", ()):
+                self.mark_session(name, "expired")
+            for name, user in got.get("launched", {}).items():
+                self.record_launch(name, user, pid)
             self.persist()
             self.refresh_accounts()
 
         self.run_task(work, done, "Launch failed")
+
+    def record_launch(self, name, user, place):
+        acct = self._acct(name)
+        if acct is None:
+            return
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        acct["last_launch"] = acct["session_checked"] = now
+        acct.pop("session", None)
+        acct["username"] = user.get("name") or acct.get("username")
+        if place:
+            plays = acct.setdefault("plays", {})
+            plays[place] = plays.get(place, 0) + 1
 
     def on_friends(self):
         of = self.leader() or next(iter(self.selected_accounts()), None) \
@@ -4377,7 +4520,7 @@ class Window(Adw.ApplicationWindow):
             def work():
                 found = None
                 try:
-                    live = set(cordial_clients().values())
+                    live = self.profiles.running()
                     found = {n for p, n in profiles.items() if p in live}
                 except Exception:
                     pass
@@ -4407,7 +4550,7 @@ class Window(Adw.ApplicationWindow):
         profiles = self._profiles({name})
 
         def work():
-            n = stop_profiles(profiles)
+            n = self.profiles.stop(profiles)
             self.log(f"{name}: stopped" if n else f"{name}: was not running")
 
         threading.Thread(target=work, daemon=True).start()
@@ -4418,7 +4561,7 @@ class Window(Adw.ApplicationWindow):
             stop.set()
 
         def work():
-            self.log(f"Stopped {stop_profiles(profiles)} client(s)")
+            self.log(f"Stopped {self.profiles.stop(profiles)} client(s)")
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -4451,7 +4594,7 @@ class Window(Adw.ApplicationWindow):
         def work():
             for n in names:
                 try:
-                    authenticated_user(secret_lookup(n))
+                    authenticated_user(self.keyring.cookie(n))
                     once(self.mark_session, n, "ok")
                 except SessionExpired:
                     once(self.mark_session, n, "expired")
@@ -4498,16 +4641,13 @@ class Window(Adw.ApplicationWindow):
         `gapplication action io.github.mujo.RobloxManager run-macro "'NAME'"`."""
         while (s := self.shortcuts.get_item(0)) is not None:
             self.shortcuts.remove_shortcut(s)
-        for name, accel in self.hotkeys.items():
+        for name, accel in self.macros.hotkeys().items():
             trigger = Gtk.ShortcutTrigger.parse_string(accel)
             if trigger is None:
                 continue
             self.shortcuts.add_shortcut(Gtk.Shortcut.new(
                 trigger, Gtk.CallbackAction.new(
                     lambda *_a, n=name: (self.run_macro_card(n), True)[-1])))
-
-    def _save_macros(self):
-        save_macros(self.macros, self.macros_off, self.hotkeys)
 
     def macros_running(self):
         return {macro for _stop, macro in self.macro_runs.values()}
@@ -4518,8 +4658,7 @@ class Window(Adw.ApplicationWindow):
 
     def enable_macro(self, name, on):
         """A switched-off macro cannot run; switching one off stops it."""
-        (self.macros_off.discard if on else self.macros_off.add)(name)
-        self._save_macros()
+        self.macros.set_enabled(name, on)
         if not on:
             self._stop_macro(name)
         card = self._cards.get(name)
@@ -4536,7 +4675,7 @@ class Window(Adw.ApplicationWindow):
         if name in self.macros_running():
             self._stop_macro(name)
             return
-        if name in self.macros_off:
+        if not self.macros.enabled(name):
             self.toast(f"{name} is switched off")
             return
         chosen = self.selected_accounts()
@@ -4570,33 +4709,17 @@ class Window(Adw.ApplicationWindow):
 
     def save_macro(self, old, new, text, hotkey):
         """The editor's Save. Returns what is wrong, or None once saved."""
-        if not new:
-            return "A macro needs a name"
-        if new != old and new in self.macros:
-            return f"A macro called {new} already exists"
-        clash = next((n for n, k in self.hotkeys.items()
-                      if hotkey and k == hotkey and n != old), None)
-        if clash:
-            return f"{hotkey_label(hotkey)} already runs {clash}"
+        err = self.macros.save(old, new, text, hotkey)
+        if err:
+            return err
         if old is not None and new != old:
-            self.macros.pop(old)
-            self.hotkeys.pop(old, None)
-            if old in self.macros_off:
-                self.macros_off.discard(old)
-                self.macros_off.add(new)
             for a in self.accounts:
                 if a.get("macro") == old:
                     a["macro"] = new
             self.open_macros.discard(old)
             self.persist()
-        self.macros[new] = text
-        if hotkey:
-            self.hotkeys[new] = hotkey
-        else:
-            self.hotkeys.pop(new, None)
         if old is None:
             self.open_macros = {new}
-        self._save_macros()
         self.refresh_macros()
         self.refresh_accounts()
         self.log(f"Saved {new}")
@@ -4604,13 +4727,10 @@ class Window(Adw.ApplicationWindow):
 
     def delete_macro(self, name):
         self._stop_macro(name)
-        self.macros.pop(name, None)
-        self.macros_off.discard(name)
-        self.hotkeys.pop(name, None)
+        self.macros.delete(name)
         for a in self.accounts:
             if a.get("macro") == name:
                 a.pop("macro")
-        self._save_macros()
         self.persist()
         self.refresh_macros()
         self.refresh_accounts()
@@ -4626,11 +4746,11 @@ class Window(Adw.ApplicationWindow):
         if macro not in self.macros:
             self.toast(f"{name}: pick a macro first")
             return
-        if macro in self.macros_off:
+        if not self.macros.enabled(macro):
             self.toast(f"{macro} is switched off")
             return
         try:
-            loops, steps = parse_macro(self.macros[macro])
+            loops, steps = parse_macro(self.macros.text(macro))
         except ValueError as e:
             self.toast(f"{macro}: {e}")
             return
@@ -4646,7 +4766,7 @@ class Window(Adw.ApplicationWindow):
 
         def work():
             try:
-                run_macro(profile, loops, steps, stop,
+                run_macro(profile, loops, steps, stop, self.profiles.running,
                           report=lambda text: self.log(f"{name}: {macro} -- {text}"))
                 self.log(f"{name}: {macro} {'stopped' if stop.is_set() else 'finished'}")
             except Exception as e:
@@ -4712,7 +4832,7 @@ class Window(Adw.ApplicationWindow):
 
         def work():
             try:
-                move_account_data(old, new)
+                self.keyring.move_cookie(old, new)
             except Exception as e:
                 self.log(f"Could not rename '{old}': {e}")
                 once(self.refresh_accounts)   # put the old label back
@@ -4746,18 +4866,19 @@ class Window(Adw.ApplicationWindow):
             self.macro_runs[name][0].set()
 
         def work():
-            stop_profiles(profiles)
-            clear_cordial_profile(user_id)
+            self.profiles.stop(profiles)
+            self.profiles.clear(user_id)
+            self.keyring.drop_cookie(name)
 
-        threading.Thread(target=work, daemon=True).start()
-        secret_clear(name)
+        self.run_task(work, failure=f"{name}: could not clear its sessions from "
+                                    "the keyring")
         self.accounts = [a for a in self.accounts if a["name"] != name]
         set_follow(self.accounts, name, False)      # renumber the rest
         self.open_accounts.discard(name)
         self.persist()
         self.refresh()
         self.toast(f"Removed {name}")
-        self.log(f"Removed {name}; cookie cleared from the keyring")
+        self.log(f"Removed {name}")
 
 
 class App(Adw.Application):
