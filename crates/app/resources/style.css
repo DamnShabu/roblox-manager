@@ -8,6 +8,7 @@ window.rbx { background: #211c15; color: #efe6d6; font-size: 14px;
   font-variation-settings: "FILL" 0; }
 .ms.fill { font-variation-settings: "FILL" 1; }
 .ms.bold { font-weight: 700; }
+.ms.light { font-weight: 300; }
 button.b { background: none; box-shadow: none; border: none; padding: 0;
   min-height: 0; min-width: 0; color: inherit; font-weight: normal;
   border-radius: 8px; transition: none; }
@@ -30,6 +31,11 @@ tooltip label { font-size: 13px; }
 .dot.joining, .dot.starting, .dot.wait { background: #e9bd6a; }
 .dot.expired, .dot.error { background: #ff9d8c; }
 .dot.idlepill { background: #6b6150; }
+
+/* libadwaita fades the top and bottom bars to half when the window loses
+   focus; the design's bars keep their look. */
+toolbarview > .top-bar:backdrop > windowhandle,
+toolbarview > .bottom-bar:backdrop > windowhandle { filter: none; transition: none; }
 
 /* title bar */
 .titlebar { min-height: 52px; padding: 0 10px 0 16px; background: #1d1812;
@@ -119,6 +125,8 @@ button.chev:hover { color: #efe6d6; }
 button.glaunch { min-height: 34px; padding: 0 12px 0 8px; border-radius: 9px;
   border: 1px solid #4a3f2e; background: #2b2419; font-size: 13px; font-weight: 600; }
 button.glaunch:hover { background: #3a3124; }
+button.glaunch.stop { background: transparent; border-color: #5a2b24; color: #ff9d8c; }
+button.glaunch.stop:hover { background: #3a1d19; }
 .gempty { border-top: 1px solid #2b2419; padding: 18px 16px; font-size: 13px;
   color: #7d715d; }
 

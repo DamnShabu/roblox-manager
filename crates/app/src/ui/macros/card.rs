@@ -4,7 +4,9 @@ use adw::prelude::*;
 use rbxmgr_core::macros::grammar::{self, loop_label};
 
 use super::editor::MacroDialog;
-use crate::ui::widgets::{Btn, Fluent, LabelFluent, dot, hotkey_label, icon, lbl, switch};
+use crate::ui::widgets::{
+    Btn, Fluent, LabelFluent, dot, hotkey_label, icon, icon_tile, lbl, switch,
+};
 use crate::ui::window::Window;
 
 /// The icon for an editor step type.
@@ -93,7 +95,7 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::Box {
             listing.append(&hbox!(
                 10,
                 "mstep",
-                vbox!(0, "mstepic", icon(step_icon(&r.kind), 17, "")),
+                icon_tile("mstepic", step_icon(&r.kind), 17),
                 lbl(&r.kind, "msteptype").hexpand(),
                 lbl(&shown, "mstepval mono").ellipsize()
             ));

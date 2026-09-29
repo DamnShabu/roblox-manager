@@ -125,6 +125,12 @@ impl AppState {
         }
     }
 
+    /// Whether any of `ids` has a client up or on its way: a group's header
+    /// then offers Shut down instead of Launch.
+    pub fn any_live(&self, ids: &[UserId]) -> bool {
+        ids.iter().any(|id| self.running.contains(id) || self.launching.contains(id))
+    }
+
     /// Where a launch sends accounts: a friend's server, or the picked game.
     pub fn target(&self) -> (Option<PlaceId>, Option<ServerId>) {
         match &self.friend {
@@ -196,6 +202,20 @@ mod tests {
         assert_eq!(s.chip(UserId(1)), Chip::Joining);
         s.running.insert(UserId(1));
         assert_eq!(s.chip(UserId(1)), Chip::Running);
+    }
+
+    #[test]
+    fn a_group_is_live_while_any_member_runs_or_starts() {
+        let (_d, mut s) = state();
+        let group = [UserId(1), UserId(2)];
+        assert!(!s.any_live(&group));
+        s.launching.insert(UserId(2));
+        assert!(s.any_live(&group));
+        s.launching.clear();
+        s.running.insert(UserId(1));
+        assert!(s.any_live(&group));
+        assert!(!s.any_live(&[UserId(2)]));
+        assert!(!s.any_live(&[]));
     }
 
     #[test]

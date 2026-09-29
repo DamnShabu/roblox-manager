@@ -308,12 +308,19 @@ pub fn dot(kind: &str, pulse: bool, size: u32) -> gtk::Widget {
     o.upcast()
 }
 
+/// A glyph centred in a tile its CSS sizes. The tile is the label itself,
+/// which centres its text both ways: a box would pack the glyph at the top,
+/// and expanding the glyph instead spreads up and stretches every ancestor.
+pub fn icon_tile(css: &str, ic: &str, size: u32) -> Label {
+    icon(ic, size, css)
+}
+
 /// A section heading: icon tile, title, subtitle, then `suffix`.
 pub fn section(ic: &str, title: &str, sub: &str, suffix: &[gtk::Widget]) -> gtk::Box {
     let head = hbox!(
         12,
         "",
-        vbox!(0, "stile", icon(ic, 19, "")).centered(),
+        icon_tile("stile", ic, 19).centered(),
         vbox!(1, "", lbl(title, "stitle"), lbl(sub, "ssub").ellipsize()).hexpand().centered()
     );
     for w in suffix {
@@ -383,10 +390,16 @@ pub fn thumb(path: Option<&std::path::Path>, size: i32, css: &str) -> gtk::Box {
     b
 }
 
-/// A thumbnail-sized tile with a symbol centred on its own background.
-/// Overlaid, not packed: centring a packed child takes hexpand, and that
-/// spreads up and stretches every tile in the row.
-pub fn symbol_thumb(size: i32, css: &str, ic: &str, ic_size: u32) -> (gtk::Overlay, gtk::Box) {
+/// A thumbnail-sized tile with a symbol, styled by `ic_css`, centred on its
+/// own background. Overlaid, not packed: centring a packed child takes
+/// hexpand, and that spreads up and stretches every tile in the row.
+pub fn symbol_thumb(
+    size: i32,
+    css: &str,
+    ic: &str,
+    ic_size: u32,
+    ic_css: &str,
+) -> (gtk::Overlay, gtk::Box) {
     let b = new_box(Orientation::Horizontal, 0, &format!("thumb t{size} {css}"));
     b.set_size_request(size, size);
     b.set_overflow(gtk::Overflow::Hidden);
@@ -394,6 +407,6 @@ pub fn symbol_thumb(size: i32, css: &str, ic: &str, ic_size: u32) -> (gtk::Overl
     over.set_child(Some(&b));
     over.set_valign(Align::Center);
     over.set_halign(Align::Center);
-    over.add_overlay(&icon(ic, ic_size, ""));
+    over.add_overlay(&icon(ic, ic_size, ic_css));
     (over, b)
 }

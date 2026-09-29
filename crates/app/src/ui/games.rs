@@ -90,7 +90,7 @@ impl GameBar {
     ) -> gtk::Button {
         let pic: gtk::Widget = match look {
             Look::Symbol(ic, css) => {
-                let (over, b) = symbol_thumb(128, &format!("gthumb {css}"), ic, 36);
+                let (over, b) = symbol_thumb(128, &format!("gthumb {css}"), ic, 36, "light");
                 if selected {
                     b.add_css_class("sel");
                 }
