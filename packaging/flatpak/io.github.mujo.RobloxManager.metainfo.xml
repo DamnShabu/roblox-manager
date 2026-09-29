@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.mujo.RobloxManager</id>
+  <name>Roblox Manager</name>
+  <summary>Launch several Roblox accounts into the same server</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <!-- The manager is MIT; the Cordial runtime it bundles is GPL-3.0+. -->
+  <project_license>MIT AND GPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      Signs in several Roblox accounts, launches them together into one
+      server behind a leader, and plays input macros into them.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.mujo.RobloxManager.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-09-29"/>
+  </releases>
+</component>

@@ -92,6 +92,7 @@ fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cordial::ProcessView;
     use crate::cordial::process::recording::Recording;
     use crate::keyring::{Keyring, MemorySecrets, Secrets};
     use crate::paths::Paths;
@@ -122,7 +123,8 @@ mod tests {
         // rbxmgr-3 is still open in an old client.
         let runner =
             Arc::new(Recording::default().answer(0, "9 cordial-run --profile rbxmgr-3\n", ""));
-        let profiles = CordialProfiles::new(keyring, &paths, runner, Arc::new(|_| {}));
+        let profiles =
+            CordialProfiles::new(keyring, &paths, runner, ProcessView::Own, Arc::new(|_| {}));
         let logs = std::cell::RefCell::new(Vec::new());
         profiles.migrate_flatpak(&|l| logs.borrow_mut().push(l)).unwrap();
 
@@ -154,6 +156,7 @@ mod tests {
             keyring,
             &Paths::under(dir.path()),
             Arc::new(Recording::default().answer(1, "", "")),
+            ProcessView::Own,
             Arc::new(|_| {}),
         );
         profiles.migrate_flatpak(&|_| {}).unwrap();

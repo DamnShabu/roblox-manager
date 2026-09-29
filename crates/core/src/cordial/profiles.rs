@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use super::build::Build;
-use super::process::{Runner, last_line};
+use super::process::{ProcessView, Runner, last_line};
 use super::{CordialError, clients, engine, session};
 use crate::keyring::{Attrs, Keyring};
 use crate::macros::nested;
@@ -41,6 +41,8 @@ pub struct CordialProfiles {
     keyring: Arc<Keyring>,
     paths: Paths,
     runner: Arc<dyn Runner>,
+    /// Where pgrep and kill see the clients.
+    view: ProcessView,
     sleep: Arc<dyn Fn(Duration) + Send + Sync>,
 }
 
@@ -49,9 +51,10 @@ impl CordialProfiles {
         keyring: Arc<Keyring>,
         paths: &Paths,
         runner: Arc<dyn Runner>,
+        view: ProcessView,
         sleep: Arc<dyn Fn(Duration) + Send + Sync>,
     ) -> Self {
-        CordialProfiles { keyring, paths: paths.clone(), runner, sleep }
+        CordialProfiles { keyring, paths: paths.clone(), runner, view, sleep }
     }
 
     pub fn path(&self, profile: &Profile) -> PathBuf {
@@ -171,7 +174,7 @@ impl CordialProfiles {
     /// from Cordial directly included. pgrep exits 1 when nothing matches,
     /// which is an answer, not an error.
     pub fn clients(&self) -> Result<BTreeMap<u32, Profile>, CordialError> {
-        let argv = ["pgrep", "-a", "-f", "cordial-run"].map(String::from);
+        let argv = self.view.argv(&["pgrep", "-a", "-f", "cordial-run"]);
         let out = self.runner.run(&argv, Duration::from_secs(10))?;
         // 1 is "nothing matched"; anything past it is pgrep failing.
         if out.status > 1 || out.status < 0 {
@@ -199,8 +202,9 @@ impl CordialProfiles {
             .map(|(pid, _)| pid.to_string())
             .collect();
         if !pids.is_empty() {
-            let argv: Vec<String> =
-                std::iter::once("kill".to_owned()).chain(pids.iter().cloned()).collect();
+            let kill: Vec<&str> =
+                std::iter::once("kill").chain(pids.iter().map(String::as_str)).collect();
+            let argv = self.view.argv(&kill);
             self.runner.run(&argv, Duration::from_secs(10))?;
         }
         Ok(pids.len())

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use rbxmgr_core::Paths;
-use rbxmgr_core::cordial::{CordialProfiles, Runner, SystemRunner, roblox_build};
+use rbxmgr_core::cordial::{CordialProfiles, ProcessView, Runner, SystemRunner, roblox_build};
 use rbxmgr_core::keyring::{Attrs, DbusSecrets, Keyring, KeyringError, Secrets};
 use rbxmgr_core::launch::{BuildFn, Launcher, Pacing};
 use rbxmgr_core::roblox::{HttpRoblox, IconCache, UreqTransport};
@@ -32,6 +32,8 @@ impl Services {
             Arc::clone(&keyring),
             &paths,
             Arc::clone(&runner),
+            // Inside a Flatpak, clients an earlier launch started are the host's.
+            ProcessView::detect(),
             Arc::new(std::thread::sleep),
         ));
         let build_runner = Arc::clone(&runner);

@@ -1,0 +1,217 @@
+# The Roblox manager as a Flatpak: one build for every distro, updated with
+# the rest of the user's Flatpaks.
+#
+#   packaging/flatpak/build.sh            build and install for this user
+#   packaging/flatpak/build.sh --bundle   also write roblox-manager.flatpak
+#
+# The Flatpak is for packaging, not confinement: the manager runs Roblox
+# clients, finds and stops them on the host, and keeps the same data a
+# native install does. The permissions below say so plainly.
+#
+# Keep in step with the Nix build (package.nix, cordial/package.nix):
+#   - Cargo.lock changed  -> regenerate cargo-sources.json
+#   - Cordial bumped      -> regenerate cordial-cargo-sources.json from
+#                            cordial/Cargo.lock, and bump `commit` below
+#   - both with flatpak-builder-tools' cargo/flatpak-cargo-generator.py:
+#       flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+
+app-id: io.github.mujo.RobloxManager
+# GNOME rather than freedesktop: the window and Cordial's engine window are
+# GTK4 + libadwaita, which only the GNOME runtime carries.
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+# The SDK extensions follow the freedesktop base under GNOME 50, not GNOME's
+# number. build.sh reads this line; keep its format.
+# sdk-extension-version: '25.08'
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.llvm20
+command: roblox-manager
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --share=network
+  # The game clients: GLES/Vulkan, and sound through PulseAudio or PipeWire
+  # (Cordial's PipeWire backend speaks the native socket, not Pulse's).
+  - --device=dri
+  - --socket=pulseaudio
+  - --filesystem=xdg-run/pipewire-0:ro
+  # The same accounts, groups, macros and Cordial profiles as a native
+  # install (roblox-manager.sh points the XDG homes back at the host's), and
+  # the old Cordial Flatpak's data for the one-time migration.
+  - --filesystem=home
+  # Sessions live in the Secret Service, under the attributes native
+  # installs use.
+  - --talk-name=org.freedesktop.secrets
+  # pgrep and kill on the host: each launch of a Flatpak gets its own process
+  # namespace, so clients an earlier launch started are only visible there.
+  - --talk-name=org.freedesktop.Flatpak
+
+modules:
+  # -- the design's typefaces and icon font, the versions nixpkgs ships ------
+  - name: font-source-sans
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 -t /app/share/fonts/source-sans TTF/*.ttf
+    sources:
+      - type: archive
+        url: https://github.com/adobe-fonts/source-sans/archive/3.052R.zip
+        sha256: 8740ef8bee3a3144b3dbb8b673264bfc685dab944610b884b14e6146ded9a50a
+
+  - name: font-jetbrains-mono
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 -t /app/share/fonts/jetbrains-mono fonts/ttf/*.ttf
+    sources:
+      - type: archive
+        url: https://github.com/jetbrains/jetbrainsmono/archive/refs/tags/v2.304.tar.gz
+        sha256: d8dab5ff24fc9e345d6c7987f2746cf8df4f870561ea89c14630b8d1729fd727
+
+  - name: font-material-symbols
+    buildsystem: simple
+    build-commands:
+      - install -Dm644 -t /app/share/fonts/material-symbols MaterialSymbolsRounded.ttf
+    sources:
+      - type: file
+        url: https://raw.githubusercontent.com/google/material-design-icons/5d5d1fdd5476f3df3749e9fb872e32021ec7a750/variablefont/MaterialSymbolsRounded%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf
+        sha256: 9c6297110371a3668112f8e71112d3deec13769b2ab5b9ea5e53999bef8466eb
+        dest-filename: MaterialSymbolsRounded.ttf
+
+  # -- cage: the nested compositor a macro-ready client runs in -------------
+  # cage only ever runs nested inside the user's session, but its sources
+  # include wlroots' DRM-lease and session headers unconditionally, and
+  # wlroots installs those only with its DRM backend and session support.
+  # So both are built, with the libraries they need that the runtime lacks
+  # (hwdata's PNP ids, libdisplay-info, libseat); libinput stays out.
+  - name: hwdata
+    buildsystem: simple
+    build-commands:
+      - ./configure --prefix=/app
+      - make install
+    # Read by wlroots' build only.
+    cleanup:
+      - '*'
+    sources:
+      - type: git
+        url: https://github.com/vcrhonek/hwdata
+        tag: v0.390
+
+  - name: libdisplay-info
+    buildsystem: meson
+    cleanup:
+      - /bin
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://gitlab.freedesktop.org/emersion/libdisplay-info
+        tag: 0.2.0
+
+  - name: seatd
+    buildsystem: meson
+    config-opts:
+      - -Dwerror=false
+      - -Dlibseat-logind=disabled
+      - -Dlibseat-seatd=enabled
+      - -Dlibseat-builtin=disabled
+      - -Dserver=disabled
+      - -Dman-pages=disabled
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://git.sr.ht/~kennylevinsen/seatd
+        tag: 0.9.1
+
+  - name: wlroots
+    buildsystem: meson
+    config-opts:
+      - -Dbackends=drm
+      - -Dsession=enabled
+      - -Dxwayland=disabled
+      - -Dexamples=false
+      - -Drenderers=gles2
+      - -Dallocators=gbm
+      - -Dlibliftoff=disabled
+      - -Dxcb-errors=disabled
+      - -Dcolor-management=disabled
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: archive
+        url: https://gitlab.freedesktop.org/wlroots/wlroots/-/archive/0.20.2/wlroots-0.20.2.tar.gz
+        sha256: 972c7ac44b17828f4702bfae7cd8347346a3fb5b2c1076cfa2c3fcedac5ec343
+
+  - name: cage
+    buildsystem: meson
+    config-opts:
+      - -Dman-pages=disabled
+    sources:
+      - type: archive
+        url: https://github.com/cage-kiosk/cage/archive/refs/tags/v0.3.1.tar.gz
+        sha256: 6dc1619665acd367e0174c93b234002549a66f55f1de9197d67f0305415babc8
+
+  # -- mujō's fork of Cordial: cordial-run and cordial-fetch ----------------
+  # The same commit and patches as cordial/package.nix; see that file for
+  # what the patches do. Built with clang: AOSP bionic needs its extensions.
+  - name: cordial
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm20/bin
+      prepend-ld-library-path: /usr/lib/sdk/llvm20/lib
+      env:
+        CC: clang
+        CXX: clang++
+        CARGO_HOME: /run/build/cordial/cargo
+        CORDIAL_GIT_SHA: beff8f3-mujo
+    build-commands:
+      - cargo build --release --offline -p cordial-runtime --bin cordial-run -p cordial-update --bin cordial-fetch
+      - install -Dm755 -t /app/bin target/release/cordial-run target/release/cordial-fetch
+      - install -Dm644 LICENSE /app/share/licenses/cordial/LICENSE
+    sources:
+      # With its submodules (mcpelauncher-linker, libjnivm), which the build
+      # needs; flatpak-builder clones them at the commits the tree pins.
+      - type: git
+        url: https://github.com/luohoa97/cordial
+        commit: beff8f316ec878c42e8cae8cc4757374f168a63f
+      - type: patch
+        path: ../../cordial/0001-confine-pointer-while-fullscreen.patch
+      - type: patch
+        path: ../../cordial/0002-cordial-fetch-cli.patch
+      - cordial-cargo-sources.json
+
+  # -- the manager ----------------------------------------------------------
+  - name: roblox-manager
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/roblox-manager/cargo
+    build-commands:
+      - cargo build --release --offline -p rbxmgr
+      - install -Dm755 target/release/roblox-manager /app/libexec/roblox-manager
+      - install -Dm755 packaging/flatpak/roblox-manager.sh /app/bin/roblox-manager
+      # The window asks for these names; the launcher's icon must carry the
+      # app id to be exported.
+      - install -Dm644 packaging/icons/roblox-manager.svg /app/share/icons/hicolor/scalable/apps/roblox-manager.svg
+      - install -Dm644 packaging/icons/roblox-manager-mark.svg /app/share/icons/hicolor/scalable/apps/roblox-manager-mark.svg
+      - install -Dm644 packaging/icons/roblox-manager.svg /app/share/icons/hicolor/scalable/apps/io.github.mujo.RobloxManager.svg
+      - install -Dm644 packaging/flatpak/io.github.mujo.RobloxManager.desktop /app/share/applications/io.github.mujo.RobloxManager.desktop
+      - install -Dm644 packaging/flatpak/io.github.mujo.RobloxManager.metainfo.xml /app/share/metainfo/io.github.mujo.RobloxManager.metainfo.xml
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - roblox-manager.flatpak
+          - target
+          - result
+          - design
+          - docs
+          - __pycache__
+      - cargo-sources.json

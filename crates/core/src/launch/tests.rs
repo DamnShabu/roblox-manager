@@ -81,6 +81,7 @@ fn world(n: u64, sessions: &[(&str, &str)], running: &[u64]) -> World {
         Arc::clone(&keyring),
         &Paths::under(dir.path()),
         runner.clone(),
+        crate::cordial::ProcessView::Own,
         Arc::new(|_| {}),
     ));
     let roblox = Arc::new(FakeRoblox::default());
