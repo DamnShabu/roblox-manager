@@ -11,9 +11,13 @@ pub mod grammar;
 pub mod keys;
 mod library;
 pub mod nested;
+pub mod player;
+pub mod wayland;
 
 pub use grammar::{Macro, ParseError, Row, Step};
 pub use library::{MacroLibrary, migrate_legacy};
+pub use player::{Input, Player, StopFlag, random_pick};
+pub use wayland::VirtualInput;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MacroError {
