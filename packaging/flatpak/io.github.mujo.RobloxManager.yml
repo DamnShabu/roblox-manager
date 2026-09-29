@@ -170,6 +170,26 @@ modules:
         CARGO_HOME: /run/build/cordial/cargo
         CORDIAL_GIT_SHA: beff8f3-mujo
     build-commands:
+      # mcpelauncher-linker reaches bionic's headers through symlinks in
+      # include/ (android -> ../bionic/libc/include/android/, and eight more).
+      # A git that checks them out as plain files (core.symlinks=false, from
+      # the mirror's or the user's config) fails the build much later, with
+      # "'android/versioning.h' file not found". So check out include/ and
+      # the two submodules again with symlinks forced on, and if the header is
+      # still missing, show what is there instead of a compiler error.
+      - |
+        linker=third_party/mcpelauncher-linker
+        if [ ! -f "$linker/include/android/versioning.h" ]; then
+          git -C "$linker" -c core.symlinks=true checkout -f -- include || true
+          git -C "$linker/bionic" -c core.symlinks=true checkout -f -- . || true
+          git -C "$linker/core" -c core.symlinks=true checkout -f -- . || true
+        fi
+        if [ ! -f "$linker/include/android/versioning.h" ]; then
+          echo "error: $linker/include/android/versioning.h is missing" >&2
+          ls -la "$linker/include" "$linker/bionic/libc/include/android" >&2 || true
+          git -C "$linker" config --show-origin --get-all core.symlinks >&2 || true
+          exit 1
+        fi
       - cargo build --release --offline -p cordial-runtime --bin cordial-run -p cordial-update --bin cordial-fetch
       - install -Dm755 -t /app/bin target/release/cordial-run target/release/cordial-fetch
       - install -Dm644 LICENSE /app/share/licenses/cordial/LICENSE
