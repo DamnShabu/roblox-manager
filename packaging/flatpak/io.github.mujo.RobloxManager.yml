@@ -174,11 +174,24 @@ modules:
       - install -Dm755 -t /app/bin target/release/cordial-run target/release/cordial-fetch
       - install -Dm644 LICENSE /app/share/licenses/cordial/LICENSE
     sources:
-      # With its submodules (mcpelauncher-linker, libjnivm), which the build
-      # needs; flatpak-builder clones them at the commits the tree pins.
+      # Its submodules (mcpelauncher-linker, libjnivm) come in as sources of
+      # their own, at the commits the tree pins, as upstream's own Flatpak
+      # manifest does: through flatpak-builder's recursive submodule checkout
+      # the linker's headers (include/android -> ../bionic/...) were not
+      # found. mcpelauncher-linker's own submodules (bionic, core) still come
+      # with it.
       - type: git
         url: https://github.com/luohoa97/cordial
         commit: beff8f316ec878c42e8cae8cc4757374f168a63f
+        disable-submodules: true
+      - type: git
+        url: https://github.com/ChristopherHX/libjnivm
+        commit: f24b98c198fcc5c59a68d1efadd3f5791eb01c2e
+        dest: third_party/libjnivm
+      - type: git
+        url: https://github.com/minecraft-linux/mcpelauncher-linker
+        commit: 1ac3ea6c1cf4f73a84d73f0bff510fba94a7d0f2
+        dest: third_party/mcpelauncher-linker
       - type: patch
         path: ../../cordial/0001-confine-pointer-while-fullscreen.patch
       - type: patch
