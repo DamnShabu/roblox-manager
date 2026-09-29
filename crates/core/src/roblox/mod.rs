@@ -19,7 +19,7 @@ use crate::types::{Cookie, PlaceId, ServerId, User, UserId};
 pub use favorites::{AccountGames, FAVORITES_SHOWN, Game, merge as merge_favorites};
 pub use friends::{Friend, FriendState};
 pub use http::{Transport, UreqTransport};
-pub use icons::IconCache;
+pub use icons::{IconCache, IconError};
 pub use join_url::join_url;
 pub use quick_login::{
     QuickLoginCode, QuickLoginError, QuickLoginEvents, QuickLoginStatus, quick_login,

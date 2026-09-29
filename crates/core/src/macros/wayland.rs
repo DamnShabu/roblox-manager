@@ -188,7 +188,7 @@ impl Input for VirtualInput {
     fn motion(&mut self, dx: i32, dy: i32) -> io::Result<()> {
         let time = self.stamp()?;
         // wl_fixed: 24.8 fixed point.
-        let body = words(&[time, (dx * 256) as u32, (dy * 256) as u32]);
+        let body = words(&[time, dx.saturating_mul(256) as u32, dy.saturating_mul(256) as u32]);
         self.send(self.pointer, 0, &body)?;
         self.send(self.pointer, 4, &[]) // frame
     }

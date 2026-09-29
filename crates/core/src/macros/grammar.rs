@@ -9,6 +9,10 @@ use super::keys::{self, BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT};
 pub const TAP_PRESS: (f64, f64) = (0.04, 0.12);
 /// Typed characters are this far apart.
 pub const TYPE_GAP: (f64, f64) = (0.05, 0.16);
+/// The longest any one duration may be: a day.
+const LONGEST_SECS: f64 = 86_400.0;
+/// The furthest a move or click may reach from where it starts.
+const FURTHEST: i32 = 65_535;
 
 /// The editor's step types and the command each is in a macro's text.
 const STEP_TYPES: [(&str, &str); 8] = [
@@ -228,15 +232,22 @@ fn seconds(token: &str) -> Result<(f64, f64), String> {
     let bad = || format!("not a duration: '{token}'");
     let (lo, hi) = token.split_once('-').unwrap_or((token, token));
     let (lo, hi): (f64, f64) = (lo.parse().map_err(|_| bad())?, hi.parse().map_err(|_| bad())?);
-    if lo.is_finite() && hi.is_finite() && 0.0 <= lo && lo <= hi {
-        Ok((lo, hi))
-    } else {
-        Err(bad())
+    if !(lo.is_finite() && hi.is_finite() && 0.0 <= lo && lo <= hi) {
+        return Err(bad());
     }
+    if hi > LONGEST_SECS {
+        return Err(format!("'{token}' is longer than a day"));
+    }
+    Ok((lo, hi))
 }
 
+/// A distance in pixels, within reach of any screen.
 fn int(token: &str) -> Result<i32, String> {
-    token.parse().map_err(|_| format!("not a number: '{token}'"))
+    let n: i32 = token.parse().map_err(|_| format!("not a number: '{token}'"))?;
+    if n.unsigned_abs() > FURTHEST.unsigned_abs() {
+        return Err(format!("'{token}' is too far -- at most {FURTHEST} pixels"));
+    }
+    Ok(n)
 }
 
 fn click(args: &[&str]) -> Result<Step, String> {
@@ -311,6 +322,24 @@ mod tests {
         let (lo, hi) = TAP_PRESS;
         assert_eq!(parse("tap j").unwrap().steps, [hold(&[36], lo, hi)]);
         assert_eq!(parse("tap space").unwrap().steps, [hold(&[57], lo, hi)]);
+    }
+
+    #[test]
+    fn values_too_large_to_play_are_refused_by_line() {
+        for (bad, why) in [
+            ("wait 1e13", "line 1"),
+            ("tap e\nwait 1e20", "line 2"),
+            ("hold w 100000", "longer than a day"),
+            ("move 9000000 0", "too far"),
+            ("click 70000 5", "too far"),
+        ] {
+            let err = parse(bad).unwrap_err().to_string();
+            assert!(err.contains(why), "{bad:?}: {err}");
+        }
+        assert!(
+            parse("wait 86400\nmove -65535 65535").is_ok(),
+            "a day and a screen's width are fine"
+        );
     }
 
     #[test]

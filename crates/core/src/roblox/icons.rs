@@ -66,18 +66,33 @@ impl IconCache {
         self.path(universe).filter(|p| p.exists())
     }
 
-    /// The icon, downloading it from `url` first when it is not on disk. None
-    /// when there is none to be had: a missing icon is a placeholder tile,
-    /// not a failure.
-    pub fn fetch(&self, t: &dyn Transport, universe: &str, url: &str) -> Option<PathBuf> {
+    /// The icon, downloading it from `url` first when it is not on disk. A
+    /// failure is for the log: the tile shows its placeholder either way.
+    pub fn fetch(
+        &self,
+        t: &dyn Transport,
+        universe: &str,
+        url: &str,
+    ) -> Result<PathBuf, IconError> {
         if let Some(path) = self.cached(universe) {
-            return Some(path);
+            return Ok(path);
         }
-        let path = self.path(universe)?;
-        let resp = http::ok(http::send(t, Request::get(url)).ok()?, false).ok()?;
-        write_atomically(&path, &resp.body).ok()?;
-        Some(path)
+        let path =
+            self.path(universe).ok_or_else(|| IconError::NotAUniverse(universe.to_owned()))?;
+        let resp = http::ok(http::send(t, Request::get(url))?, false)?;
+        write_atomically(&path, &resp.body).map_err(|e| IconError::Write(e.to_string()))?;
+        Ok(path)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum IconError {
+    #[error("could not download the icon: {0}")]
+    Fetch(#[from] RobloxError),
+    #[error("could not save the icon: {0}")]
+    Write(String),
+    #[error("{0:?} is not a universe id")]
+    NotAUniverse(String),
 }
 
 fn write_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -125,18 +140,31 @@ mod tests {
         let t = Canned::new().answer(200, "PNGDATA");
         let path = cache.fetch(&t, "7", "https://t/7.png").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"PNGDATA");
-        assert_eq!(cache.fetch(&t, "7", "https://t/7.png"), Some(path.clone()));
+        assert_eq!(cache.fetch(&t, "7", "https://t/7.png").unwrap(), path.clone());
         assert_eq!(t.asked().len(), 1);
         assert_eq!(cache.cached("7"), Some(path));
     }
 
     #[test]
-    fn a_failed_download_is_no_icon_and_leaves_nothing_behind() {
+    fn a_failed_download_says_why_and_leaves_nothing_behind() {
         let dir = tempfile::tempdir().unwrap();
         let cache = IconCache::new(dir.path());
         let t = Canned::new().answer(404, "");
-        assert_eq!(cache.fetch(&t, "7", "https://t/7.png"), None);
+        assert!(matches!(
+            cache.fetch(&t, "7", "https://t/7.png"),
+            Err(IconError::Fetch(RobloxError::Http { status: 404, .. }))
+        ));
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_cache_that_cannot_be_written_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("not-a-dir");
+        fs::write(&blocker, "").unwrap();
+        let cache = IconCache::new(&blocker);
+        let t = Canned::new().answer(200, "PNG");
+        assert!(matches!(cache.fetch(&t, "7", "https://t/7.png"), Err(IconError::Write(_))));
     }
 
     #[test]

@@ -162,6 +162,25 @@ fn a_client_that_dies_at_once_is_a_failure_that_says_why() {
 }
 
 #[test]
+fn a_status_check_that_fails_is_a_failed_launch_not_a_running_client() {
+    let runner = Recording::default();
+    *runner.child_error.lock().unwrap() = Some("wait failed".into());
+    let w = world_with(runner);
+    let err = w.profiles.launch(&Profile::named("p"), None, &build(), ClientOpts::default());
+    assert!(
+        matches!(&err, Err(CordialError::Process(why)) if why.contains("wait failed")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn a_pgrep_that_fails_is_an_error_not_nothing_running() {
+    let w = world_with(Recording::default().answer(2, "", "pgrep: invalid option\n"));
+    let err = w.profiles.running().unwrap_err();
+    assert!(err.to_string().contains("pgrep: invalid option"), "{err}");
+}
+
+#[test]
 fn stopping_signals_only_the_given_profiles_clients() {
     let pgrep = "1 cordial-run --profile main\n2 cordial-run --profile mine-from-cordial\n3 cordial-run --profile main\n";
     let w = world_with(Recording::default().answer(0, pgrep, ""));

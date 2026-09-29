@@ -57,6 +57,8 @@ pub struct AccountStore {
     /// Entries that did not read as an account or group, written back as found.
     unread_accounts: Vec<Value>,
     unread_groups: Vec<Value>,
+    /// Files that did not parse, moved aside so no save overwrites them.
+    set_aside: Vec<PathBuf>,
     /// Sessions being checked. Never saved: a check that dies with the app
     /// must not leave a row stuck on "Checking".
     checking: HashSet<UserId>,
@@ -67,9 +69,14 @@ impl AccountStore {
     /// layout (the first selected account led, the other selected followed) is
     /// carried over and both files are written.
     pub fn load(paths: &Paths) -> Result<Self, AccountError> {
-        let accounts: Vec<Value> = json_file::read(&paths.accounts());
-        let groups: Option<Vec<Value>> = json_file::read_opt(&paths.groups());
-        let first_run = groups.is_none();
+        let accounts = json_file::read_owned::<Vec<Value>>(&paths.accounts());
+        let groups = json_file::read_owned::<Vec<Value>>(&paths.groups());
+        let set_aside: Vec<PathBuf> =
+            accounts.set_aside.iter().chain(&groups.set_aside).cloned().collect();
+        // A groups file that was set aside existed: no first-run migration.
+        let first_run = groups.value.is_none() && groups.set_aside.is_none();
+        let accounts = accounts.value.unwrap_or_default();
+        let groups = groups.value;
         let (accounts, unread_accounts) = model::split_entries(accounts);
         let (groups, unread_groups): (Vec<Group>, _) =
             model::split_entries(groups.unwrap_or_default());
@@ -86,12 +93,19 @@ impl AccountStore {
                 .chain(empty.iter().filter_map(|g| serde_json::to_value(g).ok()))
                 .collect(),
             checking: HashSet::new(),
+            set_aside,
         };
         if first_run {
             store.migrate_layout();
             store.save()?;
         }
         Ok(store)
+    }
+
+    /// Files that did not parse on load and were moved aside, for the UI to
+    /// tell the user about.
+    pub fn set_aside(&self) -> &[PathBuf] {
+        &self.set_aside
     }
 
     pub fn save(&self) -> Result<(), AccountError> {

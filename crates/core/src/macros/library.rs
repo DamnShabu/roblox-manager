@@ -19,6 +19,7 @@ pub struct MacroLibrary {
     text: BTreeMap<String, String>,
     off: BTreeSet<String>,
     hotkeys: BTreeMap<String, String>,
+    set_aside: Option<PathBuf>,
 }
 
 impl MacroLibrary {
@@ -28,8 +29,11 @@ impl MacroLibrary {
             text: BTreeMap::new(),
             off: BTreeSet::new(),
             hotkeys: BTreeMap::new(),
+            set_aside: None,
         };
-        let stored: Map<String, Value> = json_file::read(path);
+        let owned = json_file::read_owned::<Map<String, Value>>(path);
+        lib.set_aside = owned.set_aside;
+        let stored = owned.value.unwrap_or_default();
         for (name, entry) in stored {
             let text = match &entry {
                 Value::String(text) => text.clone(),
@@ -51,6 +55,11 @@ impl MacroLibrary {
             lib.text.insert(name, text);
         }
         lib
+    }
+
+    /// Where a macros.json that did not parse was moved on load.
+    pub fn set_aside(&self) -> &[PathBuf] {
+        self.set_aside.as_slice()
     }
 
     /// The names, sorted.
@@ -305,6 +314,17 @@ mod tests {
             lib.save(Some("a"), "a", "tap g", Some("F6")).is_ok(),
             "its own hotkey is no clash"
         );
+    }
+
+    #[test]
+    fn a_hand_broken_macros_file_is_set_aside_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("macros.json");
+        fs::write(&path, "{\"a\": \"tap e\",}").unwrap();
+        let mut lib = MacroLibrary::load(&path);
+        assert_eq!(lib.set_aside().len(), 1);
+        lib.save(None, "b", "tap f", None).unwrap();
+        assert_eq!(fs::read_to_string(&lib.set_aside()[0]).unwrap(), "{\"a\": \"tap e\",}");
     }
 
     #[test]

@@ -31,8 +31,9 @@ pub fn last_line(raw: &[u8]) -> String {
 
 /// A program started to keep running.
 pub trait Child: Send {
-    /// Its exit status once it has ended, without waiting.
-    fn exited(&mut self) -> Option<i32>;
+    /// Its exit status once it has ended (None while it runs), without
+    /// waiting. An error means its state could not be read.
+    fn exited(&mut self) -> Result<Option<i32>, CordialError>;
 }
 
 /// How programs are run. Adapters: [`SystemRunner`], and a recording fake in
@@ -127,9 +128,12 @@ impl Runner for SystemRunner {
 struct SystemChild(Option<std::process::Child>);
 
 impl Child for SystemChild {
-    fn exited(&mut self) -> Option<i32> {
-        let status = self.0.as_mut()?.try_wait().ok()??;
-        Some(status.code().unwrap_or(-1))
+    fn exited(&mut self) -> Result<Option<i32>, CordialError> {
+        let Some(child) = self.0.as_mut() else { return Ok(None) };
+        let status = child
+            .try_wait()
+            .map_err(|e| process_error(&format!("could not check the client: {e}")))?;
+        Ok(status.map(|s| s.code().unwrap_or(-1)))
     }
 }
 
@@ -163,6 +167,8 @@ pub(crate) mod recording {
         answers: Mutex<VecDeque<Output>>,
         /// What `spawn`ed children report from `exited`.
         pub child_exit: Mutex<Option<i32>>,
+        /// When set, `exited` fails with this instead.
+        pub child_error: Mutex<Option<String>>,
         /// When set, every `pgrep` answers this (its running clients),
         /// leaving the queued answers for other commands.
         pub pgrep: Mutex<Option<String>>,
@@ -189,11 +195,11 @@ pub(crate) mod recording {
         }
     }
 
-    struct Exits(Option<i32>);
+    struct Exits(Result<Option<i32>, String>);
 
     impl Child for Exits {
-        fn exited(&mut self) -> Option<i32> {
-            self.0
+        fn exited(&mut self) -> Result<Option<i32>, CordialError> {
+            self.0.clone().map_err(CordialError::Process)
         }
     }
 
@@ -219,7 +225,11 @@ pub(crate) mod recording {
             env: &[(String, String)],
         ) -> Result<Box<dyn Child>, CordialError> {
             self.spawned.lock().unwrap().push((argv.to_vec(), env.to_vec()));
-            Ok(Box::new(Exits(*self.child_exit.lock().unwrap())))
+            let exit = match self.child_error.lock().unwrap().clone() {
+                Some(why) => Err(why),
+                None => Ok(*self.child_exit.lock().unwrap()),
+            };
+            Ok(Box::new(Exits(exit)))
         }
     }
 }
@@ -260,7 +270,7 @@ mod tests {
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
         let status = loop {
-            if let Some(s) = child.exited() {
+            if let Some(s) = child.exited().unwrap() {
                 break s;
             }
             assert!(Instant::now() < deadline, "never exited");

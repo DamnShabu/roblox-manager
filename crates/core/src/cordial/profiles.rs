@@ -142,7 +142,7 @@ impl CordialProfiles {
         }
         let mut child = self.runner.spawn(&argv, log, &env)?;
         (self.sleep)(STARTUP_CHECK);
-        match child.exited() {
+        match child.exited()? {
             None => Ok(()),
             Some(status) => {
                 let tail = read_tail(&log_path);
@@ -173,6 +173,13 @@ impl CordialProfiles {
     pub fn clients(&self) -> Result<BTreeMap<u32, Profile>, CordialError> {
         let argv = ["pgrep", "-a", "-f", "cordial-run"].map(String::from);
         let out = self.runner.run(&argv, Duration::from_secs(10))?;
+        // 1 is "nothing matched"; anything past it is pgrep failing.
+        if out.status > 1 || out.status < 0 {
+            return Err(CordialError::Process(format!(
+                "could not list the running clients: {}",
+                last_line(&out.stderr)
+            )));
+        }
         Ok(clients::parse(&String::from_utf8_lossy(&out.stdout)))
     }
 

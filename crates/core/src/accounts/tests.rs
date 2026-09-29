@@ -30,6 +30,7 @@ pub(in crate::accounts) fn store(
         unread_accounts: Vec::new(),
         unread_groups: Vec::new(),
         checking: HashSet::new(),
+        set_aside: Vec::new(),
     }
 }
 
@@ -191,4 +192,20 @@ fn the_last_place_picked_is_remembered() {
     let mut s = store(&[("a", true), ("b", true)], &[]);
     s.remember_place(&PlaceId::parse("5").unwrap());
     assert_eq!(s.last_place().map(PlaceId::as_str), Some("5"));
+}
+
+#[test]
+fn a_hand_broken_accounts_file_is_set_aside_not_overwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::under(dir.path());
+    fs::create_dir_all(paths.state()).unwrap();
+    let broken = r#"[{"name": "a", "user_id": 1},]"#;
+    fs::write(paths.accounts(), broken).unwrap();
+    let mut s = AccountStore::load(&paths).unwrap();
+    assert!(s.accounts().is_empty());
+    let aside = s.set_aside().to_vec();
+    assert_eq!(aside.len(), 1, "{aside:?}");
+    s.add_or_refresh(&user(2, "b"), now());
+    s.save().unwrap();
+    assert_eq!(fs::read_to_string(&aside[0]).unwrap(), broken, "the user's text survives the save");
 }
