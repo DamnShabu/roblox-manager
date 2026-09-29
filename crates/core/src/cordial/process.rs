@@ -163,6 +163,9 @@ pub(crate) mod recording {
         answers: Mutex<VecDeque<Output>>,
         /// What `spawn`ed children report from `exited`.
         pub child_exit: Mutex<Option<i32>>,
+        /// When set, every `pgrep` answers this (its running clients),
+        /// leaving the queued answers for other commands.
+        pub pgrep: Mutex<Option<String>>,
         pub ran: Mutex<Vec<Vec<String>>>,
         pub spawned: Mutex<Vec<Spawned>>,
     }
@@ -197,6 +200,15 @@ pub(crate) mod recording {
     impl Runner for Recording {
         fn run(&self, argv: &[String], _timeout: Duration) -> Result<Output, CordialError> {
             self.ran.lock().unwrap().push(argv.to_vec());
+            if argv.first().is_some_and(|p| p == "pgrep") {
+                if let Some(clients) = self.pgrep.lock().unwrap().clone() {
+                    return Ok(Output {
+                        status: 0,
+                        stdout: clients.into_bytes(),
+                        stderr: Vec::new(),
+                    });
+                }
+            }
             Ok(self.answers.lock().unwrap().pop_front().unwrap_or_default())
         }
 

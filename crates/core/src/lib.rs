@@ -7,6 +7,7 @@
 pub mod cordial;
 pub mod json_file;
 pub mod keyring;
+pub mod launch;
 pub mod macros;
 pub mod paths;
 pub mod roblox;
