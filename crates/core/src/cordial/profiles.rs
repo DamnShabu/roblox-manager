@@ -130,7 +130,7 @@ impl CordialProfiles {
         self.set_low_power(profile, opts.low_power)?;
         let mut env = engine::env(&engine::load_settings(&self.paths.cordial_shell_json()));
         if opts.low_power {
-            env.extend(engine::LOW_POWER_ENV.map(|(k, v)| (k.to_owned(), v.to_owned())));
+            env = engine::with_low_power(env);
         }
         let log_path = self.rotate_log(profile)?;
         let log = File::create(&log_path)

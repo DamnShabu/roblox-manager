@@ -1,8 +1,11 @@
 # Cordial
 
-The runtime the manager's clients run in. `source.json` pins which source
-is built -- today upstream (`luohoa97/cordial`) at an audited commit plus the
-patches beside it. `package.nix` builds it for Nix; the Flatpak manifest
+The runtime the manager's clients run in: Stacked
+([DamnShabu/stacked](https://github.com/DamnShabu/stacked)), mujō's fork of
+Cordial. `source.json` pins which commit is built, plus the patches beside
+it -- today only `0002`, which adds `cordial-fetch` (the fork has
+`stacked install` / `update`, which print for a person, not a program).
+`package.nix` builds it for Nix; the Flatpak manifest
 (`packaging/flatpak/io.github.mujo.RobloxManager.yml`) builds the same, and
 `crates/core/tests/cordial_pin.rs` fails `cargo test` when the two disagree.
 
@@ -24,21 +27,23 @@ changes with it. Each item names the code that depends on it.
   a failure exits non-zero with its reason as the last stderr line.
 - **Profiles** at `$XDG_DATA_HOME/cordial/profiles/<name>`, each with its
   FastFlags in `flags.json` (`profiles.rs`).
-- **Settings** in `$XDG_CONFIG_HOME/cordial/shell.json`, passed to the
-  engine as the `CORDIAL_*` variables `engine::env` sets, plus
-  `CORDIAL_SECRET_STORE=keyring`.
+- **Settings** in `$XDG_CONFIG_HOME/cordial/shell.json` (what `stacked
+  config` writes), passed to the engine as the `CORDIAL_*` variables
+  `engine::env` sets, plus `CORDIAL_SECRET_STORE=keyring`. A low-power
+  client's 20 fps is `CORDIAL_FPS_CAP`, the fork's frame-rate layer.
 - **Sessions in the Secret Service** (`session.rs`, `profiles.rs`): filed
   under `xdg:schema=org.cordial.Session`, `application=cordial`,
   `profile=<profile directory>`, `store=identity|cookies`; the secret is
   `cordial-secret-hex-v1:<hex>` of the identity JSON (schema 1) or the
   cookie store (v1). Existing users' keyrings hold these, so they stay.
 
-## Moving to another source (our fork)
+## Moving the pin
 
-1. Push the fork with the patches committed, or leave them to be applied.
+1. Push the commit to the fork, with the patches committed or left to be
+   applied here.
 2. In `source.json` set `owner`, `repo`, `rev`, `version`, and `hash` (build
    once with `lib.fakeHash` and copy the hash Nix prints). `patches` lists
-   only what the fork does not already carry -- `[]` once both are in it.
+   only what the fork does not already carry -- `[]` once `0002` is in it.
 3. Copy the fork's `Cargo.lock` over `Cargo.lock` here, and regenerate
    `packaging/flatpak/cordial-cargo-sources.json` from it
    (`flatpak-cargo-generator.py cordial/Cargo.lock -o ...`).

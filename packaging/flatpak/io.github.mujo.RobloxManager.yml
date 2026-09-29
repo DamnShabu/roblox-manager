@@ -159,7 +159,7 @@ modules:
         url: https://github.com/cage-kiosk/cage/archive/refs/tags/v0.3.1.tar.gz
         sha256: 6dc1619665acd367e0174c93b234002549a66f55f1de9197d67f0305415babc8
 
-  # -- mujō's fork of Cordial: cordial-run and cordial-fetch ----------------
+  # -- Stacked, mujō's fork of Cordial: cordial-run and cordial-fetch -------
   # The source, commit and patches of cordial/source.json; see
   # cordial/package.nix for what the patches do. Built with clang: AOSP
   # bionic needs its extensions.
@@ -172,7 +172,7 @@ modules:
         CC: clang
         CXX: clang++
         CARGO_HOME: /run/build/cordial/cargo
-        CORDIAL_GIT_SHA: beff8f3-mujo
+        CORDIAL_GIT_SHA: ce31eec-mujo
     build-commands:
       # mcpelauncher-linker reaches bionic's headers through symlinks in
       # include/ (android -> ../bionic/libc/include/android/, and eight more).
@@ -205,8 +205,8 @@ modules:
       # found. mcpelauncher-linker's own submodules (bionic, core) still come
       # with it.
       - type: git
-        url: https://github.com/luohoa97/cordial
-        commit: beff8f316ec878c42e8cae8cc4757374f168a63f
+        url: https://github.com/DamnShabu/stacked
+        commit: ce31eeccbb748407f2598c15b4cafbcec8464faf
         disable-submodules: true
       - type: git
         url: https://github.com/ChristopherHX/libjnivm
@@ -216,8 +216,6 @@ modules:
         url: https://github.com/minecraft-linux/mcpelauncher-linker
         commit: 1ac3ea6c1cf4f73a84d73f0bff510fba94a7d0f2
         dest: third_party/mcpelauncher-linker
-      - type: patch
-        path: ../../cordial/0001-confine-pointer-while-fullscreen.patch
       - type: patch
         path: ../../cordial/0002-cordial-fetch-cli.patch
       - cordial-cargo-sources.json

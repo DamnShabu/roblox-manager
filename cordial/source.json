@@ -1,11 +1,10 @@
 {
-  "owner": "luohoa97",
-  "repo": "cordial",
-  "rev": "beff8f316ec878c42e8cae8cc4757374f168a63f",
-  "hash": "sha256-+EdhuDUj1TPTYtUklxO9TV3ai9G9lS6SUvgV7uhRkhs=",
-  "version": "0.18.0",
+  "owner": "DamnShabu",
+  "repo": "stacked",
+  "rev": "ce31eeccbb748407f2598c15b4cafbcec8464faf",
+  "hash": "sha256-kSCBvpp3TkVkPgoYjOF2UKtzoAKlhbzFzz7BRq/OTzI=",
+  "version": "0.20.1",
   "patches": [
-    "0001-confine-pointer-while-fullscreen.patch",
     "0002-cordial-fetch-cli.patch"
   ]
 }

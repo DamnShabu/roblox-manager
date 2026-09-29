@@ -29,8 +29,8 @@ instance of a place (Roblox's gameId / gameInstanceId).
 **Target** -- where a launch sends accounts: the place picked in the game bar,
 or a friend's server.
 
-**Cordial** -- the Roblox runtime this repo ships a fork of (`cordial-run`,
-`cordial-fetch`). **Cordial profile** -- one per account, named
+**Cordial** -- the Roblox runtime this repo ships a fork of, Stacked
+(`cordial-run`, `cordial-fetch`). **Cordial profile** -- one per account, named
 `rbxmgr-<user id>`; the manager seeds its session before every launch.
 **Build** -- the installed Roblox engine and APK the clients run.
 

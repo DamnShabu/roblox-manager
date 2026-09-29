@@ -60,27 +60,58 @@ pub fn env(settings: &Map<String, Value>) -> Vec<(String, String)> {
     if let Some(sink) = text("audio_output").map(str::trim).filter(|s| !s.is_empty()) {
         env.push(("CORDIAL_AUDIO_SINK", sink.into()));
     }
+    // Stacked's own settings. The client confines the cursor and draws its
+    // own theme unless told otherwise, so only the other choice is sent.
+    if flag("fullscreen_confine") == Some(false) {
+        env.push(("CORDIAL_NO_FULLSCREEN_CONFINE", "1".into()));
+    }
+    if text("theme") == Some("system") {
+        env.push(("CORDIAL_THEME", "system".into()));
+    }
+    if let Some(cap) = settings.get("fps_cap").and_then(Value::as_u64).filter(valid_fps_cap) {
+        env.push((FPS_CAP, cap.to_string()));
+    }
     env.into_iter().map(|(k, v)| (k.to_owned(), v)).collect()
 }
 
+/// The frame-rate target Stacked turns into a flag layer beneath the
+/// profile's own flags.json, so a target set there still wins.
+const FPS_CAP: &str = "CORDIAL_FPS_CAP";
+
+/// The range the client accepts; anything else it refuses by name.
+fn valid_fps_cap(cap: &u64) -> bool {
+    (1..=1000).contains(cap)
+}
+
 /// A low-power client, for an account along for the ride: throttled when
-/// unfocused, FIFO-paced, no GameMode boost (and niced by the launcher).
-pub const LOW_POWER_ENV: [(&str, &str); 3] = [
+/// unfocused, FIFO-paced, no GameMode boost, 20 frames a second (and niced
+/// by the launcher). These replace whatever the settings chose.
+pub const LOW_POWER_ENV: [(&str, &str); 4] = [
     ("CORDIAL_THROTTLE", "unfocused"),
     ("CORDIAL_PRESENT_MODE", "fifo"),
     ("CORDIAL_GAMEMODE", "0"),
+    (FPS_CAP, "20"),
 ];
 
-/// Its two FastFlags in the profile's own flags.json: a frame-rate target,
-/// and a cap on the engine's worker threads, which otherwise size themselves
-/// to every core in every client at once.
-pub const LOW_POWER_FLAGS: [(&str, i64); 2] =
-    [("DFIntTaskSchedulerTargetFps", 20), ("FIntTaskSchedulerAutoThreadLimit", 2)];
+/// Its FastFlag in the profile's own flags.json: a cap on the engine's worker
+/// threads, which otherwise size themselves to every core in every client at
+/// once.
+pub const LOW_POWER_FLAGS: [(&str, i64); 1] = [("FIntTaskSchedulerAutoThreadLimit", 2)];
+
+/// What earlier versions wrote there too, before the frame-rate target was
+/// an environment variable: taken back out, since in flags.json it would
+/// outrank a frame-rate target set anywhere else.
+const LEGACY_LOW_POWER_FLAGS: [(&str, i64); 1] = [("DFIntTaskSchedulerTargetFps", 20)];
 
 /// `flags` with the low-power values added, or taken back out. A value you
 /// set to something else yourself is never overwritten, nor removed.
 pub fn low_power_flags(flags: &Map<String, Value>, on: bool) -> Map<String, Value> {
     let mut flags = flags.clone();
+    for (k, v) in LEGACY_LOW_POWER_FLAGS {
+        if flags.get(k) == Some(&Value::from(v)) {
+            flags.remove(k);
+        }
+    }
     for (k, v) in LOW_POWER_FLAGS {
         if on {
             flags.entry(k).or_insert(Value::from(v));
@@ -89,6 +120,13 @@ pub fn low_power_flags(flags: &Map<String, Value>, on: bool) -> Map<String, Valu
         }
     }
     flags
+}
+
+/// `env` with the low-power values in place of any the settings gave.
+pub fn with_low_power(mut env: Vec<(String, String)>) -> Vec<(String, String)> {
+    env.retain(|(k, _)| LOW_POWER_ENV.iter().all(|(low, _)| low != k));
+    env.extend(LOW_POWER_ENV.map(|(k, v)| (k.to_owned(), v.to_owned())));
+    env
 }
 
 /// One account's engine, with the arguments upstream's window starts it with.
@@ -165,6 +203,37 @@ mod tests {
     }
 
     #[test]
+    fn stackeds_own_settings_are_sent_only_when_they_differ_from_its_default() {
+        let s = map(json!({"fullscreen_confine": false, "theme": "system", "fps_cap": 144}));
+        assert_eq!(
+            env(&s),
+            pairs(&[
+                ("CORDIAL_SECRET_STORE", "keyring"),
+                ("CORDIAL_NO_FULLSCREEN_CONFINE", "1"),
+                ("CORDIAL_THEME", "system"),
+                ("CORDIAL_FPS_CAP", "144"),
+            ])
+        );
+        let defaults = map(json!({"fullscreen_confine": true, "theme": "stacked", "fps_cap": 0}));
+        assert_eq!(env(&defaults), pairs(&[("CORDIAL_SECRET_STORE", "keyring")]));
+    }
+
+    #[test]
+    fn low_power_replaces_what_the_settings_chose() {
+        let env = with_low_power(env(&map(json!({"throttle": "visible", "fps_cap": 144}))));
+        assert_eq!(
+            env,
+            pairs(&[
+                ("CORDIAL_SECRET_STORE", "keyring"),
+                ("CORDIAL_THROTTLE", "unfocused"),
+                ("CORDIAL_PRESENT_MODE", "fifo"),
+                ("CORDIAL_GAMEMODE", "0"),
+                ("CORDIAL_FPS_CAP", "20"),
+            ])
+        );
+    }
+
+    #[test]
     fn no_settings_is_only_the_keyring_store() {
         let dir = tempfile::tempdir().unwrap();
         let bad = dir.path().join("shell.json");
@@ -175,11 +244,25 @@ mod tests {
 
     #[test]
     fn low_power_adds_its_flags_and_never_overrides_yours() {
-        let mine = map(json!({"DFIntTaskSchedulerTargetFps": 144, "FFlagX": true}));
+        let mine = map(json!({"FIntTaskSchedulerAutoThreadLimit": 4, "FFlagX": true}));
+        assert_eq!(low_power_flags(&mine, true), mine);
         assert_eq!(
-            Value::Object(low_power_flags(&mine, true)),
-            json!({"DFIntTaskSchedulerTargetFps": 144, "FFlagX": true, "FIntTaskSchedulerAutoThreadLimit": 2})
+            Value::Object(low_power_flags(&map(json!({"FFlagX": true})), true)),
+            json!({"FFlagX": true, "FIntTaskSchedulerAutoThreadLimit": 2})
         );
+    }
+
+    #[test]
+    fn the_frame_target_earlier_versions_wrote_is_taken_out_and_yours_kept() {
+        let ours =
+            map(json!({"DFIntTaskSchedulerTargetFps": 20, "FIntTaskSchedulerAutoThreadLimit": 2}));
+        assert_eq!(
+            Value::Object(low_power_flags(&ours, true)),
+            json!({"FIntTaskSchedulerAutoThreadLimit": 2})
+        );
+        assert!(low_power_flags(&ours, false).is_empty());
+        let yours = map(json!({"DFIntTaskSchedulerTargetFps": 144}));
+        assert_eq!(low_power_flags(&yours, false), yours);
     }
 
     #[test]

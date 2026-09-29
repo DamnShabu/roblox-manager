@@ -78,10 +78,7 @@ fn low_power_writes_its_flags_into_the_profile() {
     let p = Profile::named("p");
     w.profiles.set_low_power(&p, true).unwrap();
     let written: Value = serde_json::from_slice(&fs::read(flags(&w, &p)).unwrap()).unwrap();
-    assert_eq!(
-        written,
-        json!({"DFIntTaskSchedulerTargetFps": 20, "FIntTaskSchedulerAutoThreadLimit": 2})
-    );
+    assert_eq!(written, json!({"FIntTaskSchedulerAutoThreadLimit": 2}));
 }
 
 #[test]
@@ -89,7 +86,7 @@ fn flags_are_left_alone_when_nothing_changes() {
     let w = world();
     let p = Profile::named("p");
     fs::create_dir_all(w.profiles.path(&p)).unwrap();
-    let mine = r#"{"FIntTaskSchedulerAutoThreadLimit":2,"DFIntTaskSchedulerTargetFps":20}"#;
+    let mine = r#"{"FIntTaskSchedulerAutoThreadLimit":2,"DFIntTaskSchedulerTargetFps":144}"#;
     fs::write(flags(&w, &p), mine).unwrap();
     w.profiles.set_low_power(&p, true).unwrap();
     assert_eq!(fs::read_to_string(flags(&w, &p)).unwrap(), mine);
