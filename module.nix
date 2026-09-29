@@ -9,13 +9,17 @@
   environment.systemPackages = [
     (import ./package.nix {inherit pkgs;})
     (pkgs.makeDesktopItem {
-      name = "roblox-manager";
+      # Named after the app id, which is the window's Wayland app_id: docks and
+      # task bars find a window's icon through the entry of that name.
+      name = "io.github.mujo.RobloxManager";
       desktopName = "Roblox Manager";
       genericName = "Roblox Account Manager";
       comment = "Launch several Roblox accounts into the same server";
-      icon = "roblox-manager";
+      icon = "io.github.mujo.RobloxManager";
       exec = "roblox-manager";
       terminal = false;
+      # X11's match, for the same reason (GTK sets WM_CLASS to the app id).
+      startupWMClass = "io.github.mujo.RobloxManager";
       # Game alone: listing a second main category makes the entry show up twice
       # in menus (desktop-file-validate warns about exactly this).
       categories = ["Game"];

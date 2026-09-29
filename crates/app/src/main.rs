@@ -21,7 +21,7 @@ fn main() -> glib::ExitCode {
     app.connect_startup(|app| {
         // The design is dark only; the stock widgets it leaves alone follow.
         adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
-        gtk::Window::set_default_icon_name("roblox-manager");
+        gtk::Window::set_default_icon_name(APP_ID);
         let css = gtk::CssProvider::new();
         css.load_from_string(include_str!("../resources/style.css"));
         if let Some(display) = gdk::Display::default() {

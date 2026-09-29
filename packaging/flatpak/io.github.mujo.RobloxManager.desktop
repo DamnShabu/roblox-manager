@@ -6,5 +6,6 @@ Comment=Launch several Roblox accounts into the same server
 Icon=io.github.mujo.RobloxManager
 Exec=roblox-manager
 Terminal=false
+StartupWMClass=io.github.mujo.RobloxManager
 Categories=Game;
 Keywords=roblox;cordial;account;alt;multi;instance;

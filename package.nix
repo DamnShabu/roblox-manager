@@ -61,6 +61,7 @@ in
     postInstall = ''
       install -Dm644 ${./packaging/icons/roblox-manager.svg} $out/share/icons/hicolor/scalable/apps/roblox-manager.svg
       install -Dm644 ${./packaging/icons/roblox-manager-mark.svg} $out/share/icons/hicolor/scalable/apps/roblox-manager-mark.svg
+      install -Dm644 ${./packaging/icons/roblox-manager.svg} $out/share/icons/hicolor/scalable/apps/io.github.mujo.RobloxManager.svg
     '';
 
     # The fork of Cordial (cordial-run, cordial-fetch) is prepended, so it is
