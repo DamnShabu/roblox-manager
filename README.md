@@ -2,6 +2,8 @@
 
 Several Roblox accounts, launched into one server.
 
+![The window: the game strip, the leader and its auto-join list, a group, and the macros pane](docs/screenshots/window-dark.png)
+
 Roblox runs in Cordial, an open-source runtime for Roblox's official Android
 build — this repo's fork of it, built as two command-line tools the manager
 drives: `cordial-run` for each account's client and `cordial-fetch` for the
@@ -24,12 +26,63 @@ client is launched, which is always an explicit click.
 ```bash
 nix run .                               # the manager
 nix build .#roblox-manager-appimage     # one file for other distros (x86_64)
+packaging/flatpak/build.sh              # a Flatpak, installed for this user
 ```
 
 NixOS: add this flake as an input and import `inputs.roblox-manager.nixosModules.default`.
 
+## The window
+
+A GTK4/libadwaita app in your desktop's light or dark style.
+
+- **Accounts** sign in with Roblox Quick Login (the add button, Ctrl+N):
+  you approve a short code on a device where you are already signed in, and
+  no password is typed here. Each row shows its avatar, its state, and
+  play/stop; its menu (⋮, or a right click) holds its settings, leader and
+  auto-join, groups, sessions, and removing it. Search (Ctrl+F) finds
+  accounts by label, Roblox name or note.
+- **The leader** launches first; its **auto-join** accounts follow into its
+  server, in the order shown. Drag an account onto the leader's card to
+  add it, onto a group to move it, or onto another row to reorder.
+- **Groups** each have a game: Launch on a group's header sends every
+  account in it there.
+- **Launch Into** picks where Launch Selected and Launch as Group go: a
+  favourite game of any account, Roblox's own games browser, or a friend's
+  server.
+- **Macros** (the side pane, F9) play keys and clicks into macro-ready
+  clients; How Macros Work (F1) explains the steps and their timing.
+- **Activity** keeps what happened this run; Ctrl+L shows all of it.
+
+<p>
+  <img src="docs/screenshots/window-light.png" width="49%" alt="The window in the light style">
+  <img src="docs/screenshots/macro-editor.png" width="49%" alt="The macro editor">
+</p>
+
+| Keys | Does |
+| --- | --- |
+| Ctrl+N | Add an account |
+| Ctrl+F | Search accounts |
+| Ctrl+R, F5 | Check sessions and reload favourites |
+| Ctrl+Enter | Launch as group |
+| Ctrl+Shift+Enter | Launch selected |
+| Ctrl+Shift+. | Stop all |
+| Ctrl+Shift+N | New macro |
+| F9 | Show or hide the macros pane |
+| Ctrl+L | Activity log |
+| F1 | How macros work |
+| Ctrl+? | Every shortcut, and the macros' hotkeys |
+
+Row and group actions are window actions too, so they can be scripted over
+D-Bus (`org.gtk.Actions` on `/io/github/mujo/RobloxManager/window/1`), and a
+macro's hotkey can be bound anywhere with
+`gapplication action io.github.mujo.RobloxManager run-macro "'NAME'"`.
+
+## Files
+
 Data lives in `~/.local/share/rbxmgr`, `~/.local/share/cordial`,
-`~/.config/cordial` and (regenerable) `~/.cache/cordial`.
+`~/.config/cordial`, the window's size in `~/.local/state/rbxmgr`, and
+(regenerable) game icons, avatars and client logs in `~/.cache/rbxmgr` and
+`~/.cache/cordial`.
 
 ## Layout
 
@@ -42,6 +95,10 @@ A Rust workspace:
   the one the tests use.
 - `crates/app` (`roblox-manager`): the GTK4/libadwaita window on top of it.
   Slow work runs on worker threads; results come back to the main loop.
+  `resources/style.css` holds the little the window adds to Adwaita: the
+  amber accent, the warm surfaces (`style-dark.css` for the dark style), and
+  a few pieces Adwaita has no class for. Every icon is one of Adwaita's
+  symbolic icons.
 
 ## Checks
 
