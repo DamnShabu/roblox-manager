@@ -2,7 +2,8 @@
 //! work, everyone's favourites and pictures, and installing the newest
 //! Roblox build or Stacked.
 
-use rbxmgr_core::cordial::{ProcessView, roblox_build, stacked};
+use rbxmgr_core::cordial::roblox_build;
+use rbxmgr_core::cordial::stacked::{self, Host};
 use rbxmgr_core::roblox::{FAVORITES_SHOWN, Game, Roblox, RobloxError};
 use rbxmgr_core::types::{Label, UserId};
 
@@ -198,7 +199,7 @@ impl Window {
     }
 
     // -- updating Stacked -----------------------------------------------------
-    /// Build the newest commit of Stacked, the fork the engine comes from,
+    /// Install the newest release of Stacked, the fork the engine comes from,
     /// and launch every client on it from now on. Clients already running
     /// keep the engine they started with.
     pub fn on_update_stacked(&self) {
@@ -207,22 +208,35 @@ impl Window {
         }
         self.state_mut().updating = true;
         self.set_updates_enabled(false);
-        self.0.ui.banner.set_title("Building the newest Stacked — this can take a while");
+        self.0.ui.banner.set_title("Installing the newest Stacked — this can take a few minutes");
         self.0.ui.banner.set_revealed(true);
-        self.log("Updating Stacked: building its newest commit with Nix...");
-        let (runner, paths) = (self.services().runner.clone(), self.services().paths.clone());
+        let (runner, releases, paths, log) = (
+            self.services().runner.clone(),
+            self.services().releases.clone(),
+            self.services().paths.clone(),
+            self.logger(),
+        );
         self.run_task(
-            move || stacked::update(&*runner, &paths, ProcessView::detect()),
+            move || stacked::update(&*runner, &*releases, &paths, Host::detect(), &|l| log.line(l)),
             |w, got| {
                 w.state_mut().updating = false;
                 w.set_updates_enabled(true);
                 w.0.ui.banner.set_revealed(false);
                 match got {
-                    Ok(version) => {
-                        let done = format!("Stacked {version} is installed");
-                        w.log(&done);
-                        w.toast(&done);
-                        w.notify(&done, "Clients launched from now on run it.");
+                    Ok(done) => {
+                        if let Some(why) = &done.left_behind {
+                            w.log(&format!("Older Stacked versions were not all deleted: {why}"));
+                        }
+                        let what = if done.fresh {
+                            format!("Stacked {} is installed", done.version)
+                        } else {
+                            format!("Stacked {} is already the newest", done.version)
+                        };
+                        w.log(&what);
+                        w.toast(&what);
+                        if done.fresh {
+                            w.notify(&what, "Clients launched from now on run it.");
+                        }
                     }
                     Err(e) => {
                         w.log(&format!("Could not update Stacked: {e}"));
