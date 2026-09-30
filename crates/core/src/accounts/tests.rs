@@ -209,3 +209,17 @@ fn a_hand_broken_accounts_file_is_set_aside_not_overwritten() {
     s.save().unwrap();
     assert_eq!(fs::read_to_string(&aside[0]).unwrap(), broken, "the user's text survives the save");
 }
+
+#[test]
+fn the_accounts_for_join_links_are_remembered_and_replaced() {
+    let mut s = store(&[("a", true), ("b", true), ("c", true)], &[]);
+    assert!(s.link_accounts().is_empty());
+    s.set_link_accounts(&[UserId(3), UserId(1)]);
+    assert_eq!(s.link_accounts(), [UserId(1), UserId(3)], "in list order");
+    s.set_link_accounts(&[UserId(2)]);
+    assert_eq!(s.link_accounts(), [UserId(2)]);
+    let saved = serde_json::to_value(s.get(UserId(2)).unwrap()).unwrap();
+    assert_eq!(saved["join_links"], json!(true));
+    let unpicked = serde_json::to_value(s.get(UserId(1)).unwrap()).unwrap();
+    assert!(unpicked.get("join_links").is_none(), "false is not written");
+}

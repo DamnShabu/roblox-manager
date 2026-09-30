@@ -50,6 +50,12 @@ chosen in its main menu.
 - **Launch Into** picks where Launch Selected and Launch as Group go: a
   favourite game of any account, Roblox's own games browser, or a friend's
   server.
+- **Join links**: the app is the desktop's handler for `roblox-player:` and
+  `roblox:` links, so the website's Play button (or a server's join link)
+  opens a small popup rather than the whole window: the game, and the
+  accounts to join with. Nothing starts until Join; several accounts share
+  one server. "Remember these accounts" picks the same ones next time.
+  Private-server and follow-a-user links are not supported yet.
 - **Macros** (the side pane, F9) play keys and clicks into macro-ready
   clients; How Macros Work (F1) explains the steps and their timing.
 - **Activity** keeps what happened this run; Ctrl+L shows all of it.

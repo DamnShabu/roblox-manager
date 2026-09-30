@@ -35,6 +35,9 @@ impl Roblox for FakeRoblox {
     fn favorites(&self, _: &Cookie, _: UserId, _: usize) -> Result<Vec<Game>, RobloxError> {
         unimplemented!()
     }
+    fn place_details(&self, _: &PlaceId) -> Result<crate::roblox::PlaceDetails, RobloxError> {
+        unimplemented!()
+    }
     fn icon_urls(
         &self,
         _: &[String],

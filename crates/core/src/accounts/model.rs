@@ -62,6 +62,9 @@ pub struct Account {
     /// The group it is drawn in.
     #[serde(default, deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// Picked up front when a join link comes from the browser.
+    #[serde(default, deserialize_with = "lenient", skip_serializing_if = "is_false")]
+    pub join_links: bool,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -87,6 +90,7 @@ impl Account {
             leader: false,
             follow: None,
             group: None,
+            join_links: false,
             extra: Map::new(),
         }
     }

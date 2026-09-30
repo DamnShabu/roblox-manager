@@ -5,6 +5,7 @@ mod accounts;
 mod actions;
 mod chrome;
 mod launching;
+mod links;
 mod macros;
 mod roblox;
 
@@ -52,6 +53,11 @@ pub struct Inner {
     dialogs: RefCell<Vec<LiveRedraw>>,
     /// The open activity log, which takes each new line as it comes.
     log_view: RefCell<Option<glib::WeakRef<gtk::ListBox>>>,
+    /// The open join link popup.
+    link_popup: RefCell<Option<glib::WeakRef<adw::Window>>>,
+    /// Whether the window has been shown: one opened for a join link alone
+    /// stays hidden, and goes once the link needs nothing more of it.
+    seen: Cell<bool>,
     polling: Cell<bool>,
 }
 
@@ -88,6 +94,8 @@ impl Window {
                 cards: RefCell::default(),
                 dialogs: RefCell::default(),
                 log_view: RefCell::default(),
+                link_popup: RefCell::default(),
+                seen: Cell::new(false),
                 polling: Cell::new(false),
             }
         });
@@ -129,7 +137,13 @@ impl Window {
     }
 
     pub fn present(&self) {
+        self.0.seen.set(true);
         self.0.win.present();
+    }
+
+    /// Whether the window has been shown since it was made.
+    pub fn seen(&self) -> bool {
+        self.0.seen.get()
     }
 
     pub fn weak(&self) -> WeakWindow {
@@ -234,6 +248,7 @@ impl Window {
             if let Some(w) = weak.upgrade() {
                 done(&w, result);
                 w.set_busy(false);
+                w.leave_if_unseen();
             }
         });
     }
@@ -349,11 +364,19 @@ impl Window {
         glib::Propagation::Stop
     }
 
-    /// Stop what plays, remember how the window was, and let go of it.
+    /// Stop what plays, remember how the window was, and let go of it. A
+    /// window never shown has nothing of its size to remember.
     fn close_now(&self) {
         for (stop, _) in self.state().macro_runs.values() {
             stop.set();
         }
+        if self.seen() {
+            self.remember_size();
+        }
+        CURRENT.with_borrow_mut(|c| c.take());
+    }
+
+    fn remember_size(&self) {
         let (width, height) = self.0.win.default_size();
         let state = WindowState {
             width,
@@ -366,7 +389,6 @@ impl Window {
         if let Err(e) = state.save(&self.services().paths.window_state()) {
             eprintln!("roblox-manager: could not remember the window's size: {e}");
         }
-        CURRENT.with_borrow_mut(|c| c.take());
     }
 }
 

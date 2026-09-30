@@ -16,7 +16,8 @@
       genericName = "Roblox Account Manager";
       comment = "Launch several Roblox accounts into the same server";
       icon = "io.github.mujo.RobloxManager";
-      exec = "roblox-manager";
+      # %u: a join link from the browser opens its popup.
+      exec = "roblox-manager %u";
       terminal = false;
       # X11's match, for the same reason (GTK sets WM_CLASS to the app id).
       startupWMClass = "io.github.mujo.RobloxManager";
@@ -24,6 +25,8 @@
       # in menus (desktop-file-validate warns about exactly this).
       categories = ["Game"];
       keywords = ["roblox" "cordial" "account" "alt" "multi" "instance"];
+      # The website's Play button and Roblox's deep links.
+      mimeTypes = ["x-scheme-handler/roblox-player" "x-scheme-handler/roblox"];
     })
   ];
 }

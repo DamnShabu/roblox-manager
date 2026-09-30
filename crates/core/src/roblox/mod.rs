@@ -2,11 +2,13 @@
 //! favourites, icons, and the Quick Login flow. A handful of requests, not a
 //! client library.
 
+mod deep_link;
 mod favorites;
 mod friends;
 pub mod http;
 mod icons;
 mod join_url;
+mod place;
 mod presence;
 pub mod quick_login;
 mod users;
@@ -16,11 +18,13 @@ use std::sync::Arc;
 
 use crate::types::{Cookie, PlaceId, ServerId, User, UserId};
 
+pub use deep_link::{JoinLink, LinkError};
 pub use favorites::{AccountGames, FAVORITES_SHOWN, Game, merge as merge_favorites};
 pub use friends::{Friend, FriendState};
 pub use http::{Transport, UreqTransport};
 pub use icons::{IconCache, IconError};
 pub use join_url::join_url;
+pub use place::PlaceDetails;
 pub use quick_login::{
     QuickLoginCode, QuickLoginError, QuickLoginEvents, QuickLoginStatus, quick_login,
 };
@@ -64,6 +68,8 @@ pub trait Roblox: Send + Sync {
         user: UserId,
         limit: usize,
     ) -> Result<Vec<Game>, RobloxError>;
+    /// The game a place belongs to: its name, maker and player count.
+    fn place_details(&self, place: &PlaceId) -> Result<PlaceDetails, RobloxError>;
     /// {universe id: icon url} for the icons Roblox has rendered.
     fn icon_urls(&self, universes: &[String]) -> Result<HashMap<String, String>, RobloxError>;
     /// {user id: headshot url} for the headshots Roblox has rendered.
@@ -110,6 +116,10 @@ impl Roblox for HttpRoblox {
         limit: usize,
     ) -> Result<Vec<Game>, RobloxError> {
         favorites::of_user(&*self.transport, cookie, user, limit)
+    }
+
+    fn place_details(&self, place: &PlaceId) -> Result<PlaceDetails, RobloxError> {
+        place::details(&*self.transport, place)
     }
 
     fn icon_urls(&self, universes: &[String]) -> Result<HashMap<String, String>, RobloxError> {

@@ -8,6 +8,7 @@ pub mod activity;
 pub mod confirm;
 pub mod friends;
 pub mod games;
+pub mod join_link;
 pub mod login;
 pub mod macros;
 pub mod window;
