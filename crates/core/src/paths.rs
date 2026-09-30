@@ -12,6 +12,8 @@ pub struct Paths {
     cache_home: PathBuf,
     state_home: PathBuf,
     runtime_dir: PathBuf,
+    /// XDG_DATA_DIRS: where installed applications' desktop entries are.
+    data_dirs: Vec<PathBuf>,
 }
 
 impl Paths {
@@ -32,6 +34,13 @@ impl Paths {
             state_home: var("XDG_STATE_HOME").unwrap_or_else(|| home.join(".local/state")),
             runtime_dir: var("XDG_RUNTIME_DIR")
                 .unwrap_or_else(|| PathBuf::from(format!("/run/user/{uid}"))),
+            data_dirs: get("XDG_DATA_DIRS")
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "/usr/local/share:/usr/share".to_owned())
+                .split(':')
+                .filter(|d| !d.is_empty())
+                .map(PathBuf::from)
+                .collect(),
             home,
         }
     }
@@ -45,6 +54,7 @@ impl Paths {
             cache_home: root.join("cache"),
             state_home: root.join("state"),
             runtime_dir: root.join("run"),
+            data_dirs: vec![root.join("system")],
         }
     }
 
@@ -109,6 +119,21 @@ impl Paths {
         self.home.join(".var/app/io.github.luohoa97.Cordial")
     }
 
+    /// Where this user's own desktop entries go.
+    pub fn user_applications(&self) -> PathBuf {
+        self.data_home.join("applications")
+    }
+
+    /// Where installed desktop entries are, in the desktop's order.
+    pub fn system_applications(&self) -> impl Iterator<Item = PathBuf> + '_ {
+        self.data_dirs.iter().map(|d| d.join("applications"))
+    }
+
+    /// Which application opens which type or link scheme, for this user.
+    pub fn mimeapps(&self) -> PathBuf {
+        self.config_home.join("mimeapps.list")
+    }
+
     pub fn runtime_dir(&self) -> &Path {
         &self.runtime_dir
     }
@@ -134,6 +159,11 @@ mod tests {
         assert_eq!(p.window_state(), PathBuf::from("/home/u/.local/state/rbxmgr/window.json"));
         assert_eq!(p.cordial_shell_json(), PathBuf::from("/home/u/.config/cordial/shell.json"));
         assert_eq!(p.runtime_dir(), Path::new("/run/user/1000"));
+        assert_eq!(p.mimeapps(), PathBuf::from("/home/u/.config/mimeapps.list"));
+        assert_eq!(
+            p.system_applications().collect::<Vec<_>>(),
+            [PathBuf::from("/usr/local/share/applications"), "/usr/share/applications".into()]
+        );
     }
 
     #[test]
@@ -151,7 +181,13 @@ mod tests {
             ("XDG_CACHE_HOME", "/c"),
             ("XDG_STATE_HOME", "/s"),
             ("XDG_RUNTIME_DIR", "/r"),
+            ("XDG_DATA_DIRS", "/a:/b/"),
         ]);
+        assert_eq!(p.user_applications(), PathBuf::from("/d/applications"));
+        assert_eq!(
+            p.system_applications().collect::<Vec<_>>(),
+            [PathBuf::from("/a/applications"), "/b/applications".into()]
+        );
         assert_eq!(p.window_state(), PathBuf::from("/s/rbxmgr/window.json"));
         assert_eq!(p.macros(), PathBuf::from("/d/rbxmgr/macros.json"));
         assert_eq!(p.logs(), PathBuf::from("/c/rbxmgr/logs"));

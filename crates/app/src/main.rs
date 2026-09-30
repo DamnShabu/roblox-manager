@@ -17,7 +17,10 @@ use crate::ui::window::Window;
 pub const APP_ID: &str = "io.github.mujo.RobloxManager";
 
 fn main() -> glib::ExitCode {
-    let app = adw::Application::builder().application_id(APP_ID).build();
+    let app = adw::Application::builder()
+        .application_id(APP_ID)
+        .flags(gio::ApplicationFlags::HANDLES_OPEN)
+        .build();
     app.connect_startup(|app| {
         gtk::Window::set_default_icon_name(APP_ID);
         load_style();
@@ -52,22 +55,38 @@ fn main() -> glib::ExitCode {
         ui::window::set_accels(app);
     });
     app.connect_activate(|app| {
-        if let Some(w) = ui::window::current() {
-            return w.present();
+        if let Some(w) = window(app) {
+            w.present();
         }
-        let services = Services::new();
-        let accounts = match AccountStore::load(&services.paths) {
-            Ok(a) => a,
-            Err(e) => {
-                eprintln!("roblox-manager: {e}");
-                return app.quit();
-            }
-        };
-        let macros = MacroLibrary::load(&services.paths.macros());
-        let w = Window::new(app, AppState::new(accounts, macros), services);
-        w.present();
+    });
+    // A join link from the browser (the desktop entry handles roblox-player:
+    // and roblox:): its popup alone, not the whole window.
+    app.connect_open(|app, links, _| {
+        let Some(w) = window(app) else { return };
+        match links.last() {
+            Some(link) => w.open_link(&link.uri()),
+            None => w.present(),
+        }
     });
     app.run()
+}
+
+/// The window, made (and not yet shown) if there is none.
+fn window(app: &adw::Application) -> Option<Window> {
+    if let Some(w) = ui::window::current() {
+        return Some(w);
+    }
+    let services = Services::new();
+    let accounts = match AccountStore::load(&services.paths) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("roblox-manager: {e}");
+            app.quit();
+            return None;
+        }
+    };
+    let macros = MacroLibrary::load(&services.paths.macros());
+    Some(Window::new(app, AppState::new(accounts, macros), services))
 }
 
 /// The app's stylesheet, and its dark surfaces while the style is dark --

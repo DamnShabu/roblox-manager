@@ -6,6 +6,7 @@
 
 pub mod accounts;
 pub mod cordial;
+pub mod desktop;
 pub mod json_file;
 pub mod keyring;
 pub mod launch;

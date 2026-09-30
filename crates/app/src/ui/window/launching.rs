@@ -230,6 +230,7 @@ impl Window {
                 && ids.first().is_some_and(|l| accounts.first().is_none_or(|a| a.id != *l));
             if leader_skipped {
                 drop(s);
+                self.surface();
                 return self.toast("Its leader is still starting: try again once it is up");
             }
             let joining: HashSet<UserId> = if mode == Mode::Group {
@@ -276,6 +277,10 @@ impl Window {
                         for (id, user) in &report.launched {
                             s.accounts.record_launch(*id, user, place.as_ref(), now);
                             s.failures.remove(id);
+                            match &place {
+                                Some(p) => s.playing.insert(*id, p.clone()),
+                                None => s.playing.remove(id),
+                            };
                         }
                         for (id, why) in &report.failed {
                             s.failures.insert(*id, why.clone());
@@ -285,6 +290,7 @@ impl Window {
                 match result {
                     Ok(report) => w.tell_report(&report),
                     Err(e) => {
+                        w.surface();
                         w.log(&format!("Launch failed: {e}"));
                         w.toast_with(
                             "Nothing launched: Roblox could not be installed",
@@ -314,6 +320,7 @@ impl Window {
             }
             return;
         }
+        self.surface();
         if expired + failed == 0 {
             return self.toast(&format!("Launch stopped · {stopped} not started"));
         }

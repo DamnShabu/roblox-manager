@@ -154,6 +154,20 @@ progressbar.expiry.low progress { background: var(--error-bg-color); }
 .presence.game { background: var(--success-color); }
 .presence.online { background: var(--accent-blue, #3584e4); }
 
+/* -- a join link's popup ------------------------------------------------------------ */
+.link-popup .game-card { padding: 14px; border-radius: 14px; }
+.link-popup .game-card .thumb { border-radius: 12px; }
+.link-popup .game-card .tag image { -gtk-icon-size: 12px; }
+.link-popup .game-name { font-weight: 800; font-size: 1.15em; }
+.link-popup list.link-accounts > row { padding: 8px 12px; }
+.link-popup .in-game { color: var(--accent-color); }
+.link-popup .expired { color: var(--error-color); }
+.link-popup .link-footer {
+  padding: 12px 18px;
+  border-top: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+}
+.link-popup .link-footer button.pill { padding: 8px 22px; }
+
 /* -- the macro editor ------------------------------------------------------------ */
 row.step-row { padding: 6px 8px; }
 row.step-row .number { font-feature-settings: "tnum"; min-width: 22px; }

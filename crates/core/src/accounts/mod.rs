@@ -298,6 +298,18 @@ impl AccountStore {
         self.accounts.iter().find_map(|a| a.last_place.as_ref())
     }
 
+    /// The accounts a join link from the browser starts with, in list order.
+    pub fn link_accounts(&self) -> Vec<UserId> {
+        self.accounts.iter().filter(|a| a.join_links).map(|a| a.user_id).collect()
+    }
+
+    /// Remember `ids`, and only those, for the next join link.
+    pub fn set_link_accounts(&mut self, ids: &[UserId]) {
+        for a in &mut self.accounts {
+            a.join_links = ids.contains(&a.user_id);
+        }
+    }
+
     /// Every account's favourites merged into one strip, best first.
     pub fn favorite_strip(&self, limit: usize) -> Vec<Game> {
         let lists: Vec<AccountGames<'_>> = self

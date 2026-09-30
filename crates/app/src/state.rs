@@ -99,6 +99,8 @@ pub struct AppState {
     pub game_list: Vec<Tile>,
     /// Newest first, the last [`ACTIVITY_KEPT`].
     pub activity: Vec<Activity>,
+    /// The place each account's client was last launched into.
+    pub playing: HashMap<UserId, PlaceId>,
     /// Why each account's last launch failed, until one succeeds.
     pub failures: HashMap<UserId, String>,
     /// A Roblox or Stacked update is being installed.
@@ -124,6 +126,7 @@ impl AppState {
             place: None,
             game_list: Vec::new(),
             activity: Vec::new(),
+            playing: HashMap::new(),
             failures: HashMap::new(),
             updating: false,
             busy: 0,
@@ -193,6 +196,11 @@ impl AppState {
             Some(f) => (Some(f.place.clone()), Some(f.server.clone())),
             None => (self.place.clone(), None),
         }
+    }
+
+    /// A place's game name, when the bar has it.
+    pub fn game_name(&self, place: &PlaceId) -> Option<&str> {
+        self.game_list.iter().find(|t| &t.game.place_id == place).map(|t| t.game.name.as_str())
     }
 
     pub fn target_label(&self) -> String {
