@@ -38,12 +38,15 @@ fn page(w: &Window, dialog: &adw::PreferencesDialog, acct: &Account) -> adw::Pre
 
     let remove = adw::ButtonRow::builder().title("Remove Account…").build();
     remove.add_css_class("destructive-action");
-    let (weak, d) = (w.weak(), dialog.clone());
+    // Weak: the dialog owns this row, and so this handler.
+    let (weak, d) = (w.weak(), dialog.downgrade());
     remove.connect_activated(move |_| {
         if let Some(w) = weak.upgrade() {
             let d = d.clone();
             w.confirm_remove_then(id, move || {
-                d.close();
+                if let Some(d) = d.upgrade() {
+                    d.close();
+                }
             });
         }
     });
@@ -166,9 +169,13 @@ fn launching(
         lead.add_prefix(&icon("starred-symbolic").css("accent"));
     } else {
         lead.set_subtitle("Launch as Group starts the leader, then the auto-join list");
-        let (weak, dialog, page) = (w.weak(), dialog.clone(), page.clone());
+        let (weak, dialog, page) = (w.weak(), dialog.downgrade(), page.downgrade());
         let make = Btn::new("").text("Make Leader").build(move || {
-            let Some(w) = weak.upgrade() else { return };
+            let (Some(w), Some(dialog), Some(page)) =
+                (weak.upgrade(), dialog.upgrade(), page.upgrade())
+            else {
+                return;
+            };
             w.set_leader(id);
             // Its group and auto-join rows no longer apply: draw them again.
             if let Some(acct) = w.state().accounts.get(id).cloned() {
@@ -287,9 +294,10 @@ fn macro_group(w: &Window, acct: &Account) -> adw::PreferencesGroup {
     group.add(&combo);
     group.add(&nested);
 
-    let button = run.button.downgrade();
+    let run = run.downgrade();
     w.watch_while(Box::new(move |s| {
-        let Some(b) = button.upgrade() else { return false };
+        let Some(run) = run.upgrade() else { return false };
+        let b = &run.button;
         let playing = s.macro_runs.get(&id).map(|(_, m)| m.clone());
         let chosen = s.accounts.get(id).and_then(|a| a.macro_name.clone());
         run.set_text(if playing.is_some() { "Stop" } else { "Run" });
@@ -298,7 +306,7 @@ fn macro_group(w: &Window, acct: &Account) -> adw::PreferencesGroup {
         } else {
             "media-playback-start-symbolic"
         });
-        toggle_class(&b, "destructive-action", playing.is_some());
+        toggle_class(b, "destructive-action", playing.is_some());
         b.set_sensitive(playing.is_some() || chosen.is_some_and(|m| s.macros.contains(&m)));
         b.set_tooltip_text(Some(&match playing {
             Some(m) => format!("Stop {m} on this account"),
@@ -338,9 +346,15 @@ fn session_group(w: &Window, acct: &Account) -> adw::PreferencesGroup {
     row.add_suffix(&sign_in.button);
     group.add(&row);
 
-    let shown = row.downgrade();
+    // Weak, all of them: the redraw must end with the dialog.
+    let (shown, status, check, sign_in) =
+        (row.downgrade(), status.downgrade(), check.downgrade(), sign_in.downgrade());
     w.watch_while(Box::new(move |s| {
-        let Some(row) = shown.upgrade() else { return false };
+        let (Some(row), Some(status), Some(check), Some(sign_in)) =
+            (shown.upgrade(), status.upgrade(), check.upgrade(), sign_in.upgrade())
+        else {
+            return false;
+        };
         let session = s.accounts.session(id);
         let (title, sub, kind) = match &session {
             SessionState::Checking => ("Checking…", String::new(), "starting"),

@@ -95,10 +95,12 @@ impl Chrome {
             });
         }
         {
-            let w = w.clone();
+            // Closed, the search is forgotten: the entry's words with it, so
+            // opening it again never shows words that filter nothing.
+            let entry = search.clone();
             search_bar.connect_search_mode_enabled_notify(move |bar| {
-                if let (false, Some(w)) = (bar.is_search_mode(), w.upgrade()) {
-                    w.set_filter("");
+                if !bar.is_search_mode() {
+                    entry.set_text("");
                 }
             });
         }

@@ -93,12 +93,15 @@ impl GroupSettings {
 
         let delete = adw::ButtonRow::builder().title("Delete Group…").build();
         delete.add_css_class("destructive-action");
-        let (weak, id, d) = (w.weak(), gid.to_owned(), dialog.clone());
+        // Weak: the dialog owns this row, and so this handler.
+        let (weak, id, d) = (w.weak(), gid.to_owned(), dialog.downgrade());
         delete.connect_activated(move |_| {
             if let Some(w) = weak.upgrade() {
                 let d = d.clone();
                 w.confirm_delete_group_then(&id, move || {
-                    d.close();
+                    if let Some(d) = d.upgrade() {
+                        d.close();
+                    }
                 });
             }
         });

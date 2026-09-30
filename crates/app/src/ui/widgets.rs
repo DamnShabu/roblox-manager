@@ -164,6 +164,30 @@ impl IconButton {
             None => self.button.set_label(text),
         }
     }
+
+    /// A handle that does not keep the button alive.
+    pub fn downgrade(&self) -> WeakIconButton {
+        WeakIconButton {
+            button: self.button.downgrade(),
+            content: self.content.as_ref().map(ObjectExt::downgrade),
+        }
+    }
+}
+
+/// An [`IconButton`] held for a redraw that must not outlive it.
+pub struct WeakIconButton {
+    button: gtk::glib::WeakRef<gtk::Button>,
+    content: Option<gtk::glib::WeakRef<adw::ButtonContent>>,
+}
+
+impl WeakIconButton {
+    pub fn upgrade(&self) -> Option<IconButton> {
+        let content = match &self.content {
+            Some(c) => Some(c.upgrade()?),
+            None => None,
+        };
+        Some(IconButton { button: self.button.upgrade()?, content })
+    }
 }
 
 /// Builds an [`IconButton`]: `Btn::new("flat").text("Launch").icon("media-playback-start-symbolic")`.

@@ -245,25 +245,35 @@ pub fn context_menu(row: &impl IsA<gtk::Widget>, model: &gio::Menu) {
 /// where a dragged account would land: after this row when it comes from
 /// above, before it when from below.
 fn drag_and_drop(w: &Window, row: &adw::ActionRow, id: UserId) {
+    // Weak: the row owns these handlers, and a handler that owned the row
+    // would keep every rebuilt list alive.
+    let weak_row = row.downgrade();
     let src = gtk::DragSource::new();
     src.set_actions(gdk::DragAction::MOVE);
     src.connect_prepare(move |_, _, _| {
         Some(gdk::ContentProvider::for_value(&id.0.to_string().to_value()))
     });
-    let dragged = row.clone();
+    let dragged = weak_row.clone();
     src.connect_drag_begin(move |s, _| {
-        s.set_icon(Some(&gtk::WidgetPaintable::new(Some(&dragged))), 20, 20);
-        dragged.add_css_class("dragging");
+        if let Some(row) = dragged.upgrade() {
+            s.set_icon(Some(&gtk::WidgetPaintable::new(Some(&row))), 20, 20);
+            row.add_css_class("dragging");
+        }
     });
-    let dragged = row.clone();
-    src.connect_drag_end(move |_, _, _| dragged.remove_css_class("dragging"));
+    let dragged = weak_row.clone();
+    src.connect_drag_end(move |_, _, _| {
+        if let Some(row) = dragged.upgrade() {
+            row.remove_css_class("dragging");
+        }
+    });
     row.add_controller(src);
 
     let drop = gtk::DropTarget::new(glib::Type::STRING, gdk::DragAction::MOVE);
     drop.set_preload(true);
-    let (marked, weak) = (row.clone(), w.weak());
+    let (marked, weak) = (weak_row.clone(), w.weak());
     drop.connect_motion(move |t, _, _| {
-        mark(&marked, None);
+        let Some(row) = marked.upgrade() else { return gdk::DragAction::MOVE };
+        mark(&row, None);
         let from = dragged_id(t.value().as_ref());
         if let (Some(from), Some(w)) = (from.filter(|f| *f != id), weak.upgrade()) {
             let order: Vec<UserId> =
@@ -271,16 +281,22 @@ fn drag_and_drop(w: &Window, row: &adw::ActionRow, id: UserId) {
             if let (Some(a), Some(b)) =
                 (order.iter().position(|x| *x == from), order.iter().position(|x| *x == id))
             {
-                mark(&marked, Some(if a < b { "drop-below" } else { "drop-above" }));
+                mark(&row, Some(if a < b { "drop-below" } else { "drop-above" }));
             }
         }
         gdk::DragAction::MOVE
     });
-    let marked = row.clone();
-    drop.connect_leave(move |_| mark(&marked, None));
-    let (marked, weak) = (row.clone(), w.weak());
+    let marked = weak_row.clone();
+    drop.connect_leave(move |_| {
+        if let Some(row) = marked.upgrade() {
+            mark(&row, None);
+        }
+    });
+    let (marked, weak) = (weak_row, w.weak());
     drop.connect_drop(move |_, value, _, _| {
-        mark(&marked, None);
+        if let Some(row) = marked.upgrade() {
+            mark(&row, None);
+        }
         if let (Some(from), Some(w)) = (dragged_id(Some(value)), weak.upgrade()) {
             // Deferred: the row that took the drop is rebuilt by it.
             glib::idle_add_local_once(move || w.drop_on_row(from, id));

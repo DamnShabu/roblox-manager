@@ -117,9 +117,11 @@ impl MacroDialog {
             .show_start_title_buttons(false)
             .build();
         let cancel = {
-            let dialog = self.dialog.clone();
+            let dialog = self.dialog.downgrade();
             Btn::new("").text("_Cancel").build(move || {
-                dialog.close();
+                if let Some(d) = dialog.upgrade() {
+                    d.close();
+                }
             })
         };
         let me = Rc::downgrade(self);
