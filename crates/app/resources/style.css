@@ -3,11 +3,28 @@
    app's own amber as the accent, a warm cast on the neutral surfaces, and
    the few pieces Adwaita has no class for. Colours come from Adwaita's
    variables, so both styles hold together; style-dark.css swaps in the dark
-   surfaces while the dark style is on. */
+   surfaces while the dark style is on.
+
+   Every surface given a background here is given its text colour too. Left
+   to the desktop, the text comes from whatever palette its theme defines --
+   on a dark desktop, pale text -- and lands on these light surfaces with
+   next to no contrast. */
 
 :root {
   --accent-bg-color: #e3a84a;
   --accent-fg-color: rgb(0 0 0 / 82%);
+  --accent-color: #8a5a12;
+  --dim-opacity: 70%;
+  --window-fg-color: #2b241e;
+  --view-fg-color: #2b241e;
+  --headerbar-fg-color: #2b241e;
+  --headerbar-border-color: #2b241e;
+  --sidebar-fg-color: #2b241e;
+  --secondary-sidebar-fg-color: #2b241e;
+  --dialog-fg-color: #2b241e;
+  --popover-fg-color: #2b241e;
+  --card-fg-color: #2b241e;
+  --thumbnail-fg-color: #2b241e;
   --window-bg-color: #faf8f5;
   --view-bg-color: #fffefc;
   --headerbar-bg-color: #f3efe9;
