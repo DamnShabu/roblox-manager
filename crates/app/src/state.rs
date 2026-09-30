@@ -57,11 +57,22 @@ impl Chip {
             Chip::Running => ("running", "Running", true),
             Chip::Joining => ("joining", "Joining…", true),
             Chip::Starting => ("starting", "Starting…", true),
-            Chip::Expired => ("expired", "Expired", false),
+            Chip::Expired => ("expired", "Signed out", false),
             Chip::Idle => ("idle", "Idle", false),
         }
     }
 }
+
+/// One line of the activity log.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Activity {
+    /// Local time, "14:05".
+    pub time: String,
+    pub line: String,
+}
+
+/// How many activity lines are kept for the log window.
+pub const ACTIVITY_KEPT: usize = 500;
 
 pub struct AppState {
     pub accounts: AccountStore,
@@ -74,18 +85,20 @@ pub struct AppState {
     pub joining: HashSet<UserId>,
     /// Each account's playing macro: what stops it, and its name.
     pub macro_runs: HashMap<UserId, (StopFlag, String)>,
-    pub open_accounts: HashSet<UserId>,
+    /// The macros shown unfolded.
     pub open_macros: HashSet<String>,
-    /// The group showing its settings.
-    pub edit_group: Option<String>,
     pub ungrouped_open: bool,
     /// A friend's server as the launch target, instead of the picked game.
     pub friend: Option<FriendTarget>,
     /// The picked game; None is Roblox's own games browser.
     pub place: Option<PlaceId>,
     pub game_list: Vec<Tile>,
-    /// (time, line), newest first, the last four.
-    pub activity: Vec<(String, String)>,
+    /// Newest first, the last [`ACTIVITY_KEPT`].
+    pub activity: Vec<Activity>,
+    /// Why each account's last launch failed, until one succeeds.
+    pub failures: HashMap<UserId, String>,
+    /// A Roblox update is being installed.
+    pub updating: bool,
     /// How many tasks are running; the window spins while any are.
     pub busy: u32,
 }
@@ -99,14 +112,14 @@ impl AppState {
             launching: HashSet::new(),
             joining: HashSet::new(),
             macro_runs: HashMap::new(),
-            open_accounts: HashSet::new(),
             open_macros: HashSet::new(),
-            edit_group: None,
             ungrouped_open: true,
             friend: None,
             place: None,
             game_list: Vec::new(),
             activity: Vec::new(),
+            failures: HashMap::new(),
+            updating: false,
             busy: 0,
         }
     }
@@ -149,12 +162,21 @@ impl AppState {
             .map_or_else(|| "Games browser".to_owned(), |t| t.game.name.clone())
     }
 
-    /// The title bar pill: "3 running" or "All idle".
-    pub fn pill(&self) -> String {
-        match self.running.len() {
-            0 => "All idle".to_owned(),
-            n => format!("{n} running"),
+    /// The window's subtitle: "3 running · 1 macro playing", or "All idle".
+    pub fn status_line(&self) -> String {
+        let mut parts = Vec::new();
+        match (self.running.len(), self.launching.len()) {
+            (0, 0) => {}
+            (0, n) => parts.push(format!("{n} starting")),
+            (n, 0) => parts.push(format!("{n} running")),
+            (n, m) => parts.push(format!("{n} running, {m} starting")),
         }
+        match self.macro_runs.len() {
+            0 => {}
+            1 => parts.push("1 macro playing".to_owned()),
+            n => parts.push(format!("{n} macros playing")),
+        }
+        if parts.is_empty() { "All idle".to_owned() } else { parts.join(" · ") }
     }
 
     /// The macros playing anywhere.
@@ -162,10 +184,10 @@ impl AppState {
         self.macro_runs.values().map(|(_, m)| m.as_str()).collect()
     }
 
-    /// Add an activity line; the log keeps the latest four.
+    /// Add an activity line; the log keeps the latest [`ACTIVITY_KEPT`].
     pub fn log(&mut self, time: String, line: String) {
-        self.activity.insert(0, (time, line));
-        self.activity.truncate(4);
+        self.activity.insert(0, Activity { time, line });
+        self.activity.truncate(ACTIVITY_KEPT);
     }
 }
 
@@ -241,20 +263,25 @@ mod tests {
     }
 
     #[test]
-    fn the_pill_counts_running_clients() {
+    fn the_status_line_counts_clients_and_macros() {
         let (_d, mut s) = state();
-        assert_eq!(s.pill(), "All idle");
+        assert_eq!(s.status_line(), "All idle");
+        s.launching.insert(UserId(2));
+        assert_eq!(s.status_line(), "1 starting");
         s.running.extend([UserId(1), UserId(2)]);
-        assert_eq!(s.pill(), "2 running");
+        assert_eq!(s.status_line(), "2 running, 1 starting");
+        s.launching.clear();
+        s.macro_runs.insert(UserId(1), (StopFlag::default(), "m".into()));
+        assert_eq!(s.status_line(), "2 running · 1 macro playing");
     }
 
     #[test]
-    fn the_activity_log_keeps_the_latest_four() {
+    fn the_activity_log_keeps_the_latest_lines_newest_first() {
         let (_d, mut s) = state();
-        for n in 0..6 {
+        for n in 0..ACTIVITY_KEPT + 3 {
             s.log("12:00".into(), format!("line {n}"));
         }
-        let lines: Vec<&str> = s.activity.iter().map(|(_, l)| l.as_str()).collect();
-        assert_eq!(lines, ["line 5", "line 4", "line 3", "line 2"]);
+        assert_eq!(s.activity.len(), ACTIVITY_KEPT);
+        assert_eq!(s.activity[0].line, format!("line {}", ACTIVITY_KEPT + 2));
     }
 }

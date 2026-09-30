@@ -6,12 +6,11 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{Align, PolicyType};
+use gtk::{Align, PolicyType, glib};
 use rbxmgr_core::roblox::{Friend, FriendState, Roblox};
-use rbxmgr_core::types::UserId;
+use rbxmgr_core::types::{Label, UserId};
 
-use super::modal::Modal;
-use super::widgets::{Btn, Fluent, LabelFluent, clear, clear_wrap, icon, lbl, wrap};
+use super::widgets::{Btn, Fluent, boxed_list, lbl};
 use super::window::{WeakWindow, Window};
 use crate::state::FriendTarget;
 use crate::worker;
@@ -38,107 +37,117 @@ fn state_class(s: FriendState) -> &'static str {
 
 pub struct FriendsDialog {
     window: WeakWindow,
-    modal: Modal,
+    dialog: adw::Dialog,
     /// Each account's friends, once loaded (or why they did not load).
     cache: RefCell<HashMap<UserId, Result<Vec<Friend>, String>>>,
     of: Cell<UserId>,
+    accounts: Vec<(UserId, Label)>,
     query: RefCell<String>,
-    chips: adw::WrapBox,
-    list: gtk::Box,
-    summary: gtk::Label,
+    title: adw::WindowTitle,
+    pages: gtk::Stack,
+    list: gtk::ListBox,
+    problem: adw::StatusPage,
 }
 
 impl FriendsDialog {
     pub fn open(w: &Window, of: UserId) {
-        let modal = Modal::new(
-            "person_search",
-            "Join a friend",
-            "Selected accounts launch into their server",
-            520,
-        );
+        let accounts: Vec<(UserId, Label)> =
+            w.state().accounts.accounts().iter().map(|a| (a.user_id, a.name.clone())).collect();
         let d = Rc::new(FriendsDialog {
             window: w.weak(),
-            modal,
+            dialog: adw::Dialog::builder()
+                .title("Join a Friend")
+                .content_width(520)
+                .content_height(620)
+                .build(),
             cache: RefCell::default(),
             of: Cell::new(of),
+            accounts,
             query: RefCell::default(),
-            chips: wrap(6, &[]),
-            list: vbox!(2, "flist"),
-            summary: lbl("", "fsum").hexpand(),
+            title: adw::WindowTitle::new("Join a Friend", ""),
+            pages: gtk::Stack::new(),
+            list: boxed_list(),
+            problem: adw::StatusPage::builder().icon_name("network-offline-symbolic").build(),
         });
-        let search = gtk::Entry::builder().placeholder_text("Search friends").hexpand(true).build();
-        let me = Rc::downgrade(&d);
-        search.connect_changed(move |e| {
+        d.assemble();
+        d.load(of);
+        let held = RefCell::new(Some(d.clone()));
+        d.dialog.connect_closed(move |_| {
+            held.take();
+        });
+        d.dialog.present(Some(w.gtk_window()));
+    }
+
+    fn assemble(self: &Rc<Self>) {
+        let names: Vec<&str> = self.accounts.iter().map(|(_, l)| l.as_str()).collect();
+        let picker = gtk::DropDown::from_strings(&names);
+        picker.set_tooltip_text(Some("Whose friends to list"));
+        picker.set_selected(
+            self.accounts.iter().position(|(id, _)| *id == self.of.get()).unwrap_or(0) as u32,
+        );
+        let me = Rc::downgrade(self);
+        picker.connect_selected_notify(move |p| {
+            if let Some(d) = me.upgrade() {
+                if let Some((id, _)) = d.accounts.get(p.selected() as usize) {
+                    d.load(*id);
+                }
+            }
+        });
+        let search =
+            gtk::SearchEntry::builder().placeholder_text("Search friends").hexpand(true).build();
+        let me = Rc::downgrade(self);
+        search.connect_search_changed(move |e| {
             if let Some(d) = me.upgrade() {
                 d.query.replace(e.text().trim().to_lowercase());
                 d.show();
             }
         });
-        // A floor, not only a ceiling: the dialog is sized while the list is
-        // still a spinner and does not grow when it fills.
-        let scroller = gtk::ScrolledWindow::builder()
-            .child(&d.list)
-            .min_content_height(280)
-            .max_content_height(340)
-            .propagate_natural_height(true)
-            .hscrollbar_policy(PolicyType::Never)
-            .build();
-        let close = {
-            let dialog = d.modal.dialog.clone();
-            Btn::new("cancel").text("Close").build(move || {
-                dialog.close();
-            })
-        };
-        d.modal.build(
-            &vbox!(
-                0,
-                "",
-                vbox!(
-                    12,
-                    "fbody",
-                    d.chips.clone(),
-                    hbox!(8, "search", icon("search", 18, ""), search)
-                ),
-                scroller
-            ),
-            &hbox!(10, "mfoot", d.summary.clone(), close.button),
+        let bar = hbox!(8, "", lbl("Friends of", "dimmed").centered(), picker, search);
+        bar.set_margin_start(12);
+        bar.set_margin_end(12);
+        bar.set_margin_bottom(8);
+
+        let spinner = adw::Spinner::builder().width_request(32).height_request(32).build();
+        spinner.set_halign(Align::Center);
+        spinner.set_valign(Align::Center);
+        self.pages.add_named(&spinner, Some("loading"));
+        self.pages.add_named(&self.problem, Some("problem"));
+        let page = vbox!(
+            10,
+            "",
+            lbl("Join makes their server the launch target.", "caption dimmed"),
+            self.list.clone()
+        )
+        .margins(12);
+        self.pages.add_named(
+            &gtk::ScrolledWindow::builder()
+                .child(&adw::Clamp::builder().maximum_size(600).child(&page).build())
+                .hscrollbar_policy(PolicyType::Never)
+                .vexpand(true)
+                .build(),
+            Some("list"),
         );
-        d.load(of);
-        d.modal.keep_alive(d.clone());
-        d.modal.present(w.gtk_window());
+
+        let header = adw::HeaderBar::new();
+        header.set_title_widget(Some(&self.title));
+        let view = adw::ToolbarView::new();
+        view.add_top_bar(&header);
+        view.add_top_bar(&bar);
+        view.set_content(Some(&self.pages));
+        self.dialog.set_child(Some(&view));
+        self.dialog.set_focus(Some(&search));
     }
 
     fn load(self: &Rc<Self>, of: UserId) {
         self.of.set(of);
-        let Some(w) = self.window.upgrade() else { return };
-        clear_wrap(&self.chips);
-        self.chips.append(&lbl("Friends of", "fof").centered());
-        let accounts: Vec<(UserId, rbxmgr_core::types::Label)> =
-            w.state().accounts.accounts().iter().map(|a| (a.user_id, a.name.clone())).collect();
-        for (id, name) in &accounts {
-            let me = Rc::downgrade(self);
-            let id = *id;
-            let b = Btn::new(if id == of { "fchip on" } else { "fchip" })
-                .text(name.as_str())
-                .build(move || {
-                    if let Some(d) = me.upgrade() {
-                        d.load(id);
-                    }
-                });
-            self.chips.append(&b.button);
-        }
         if self.cache.borrow().contains_key(&of) {
             return self.show();
         }
-        clear(&self.list);
-        let spinner = gtk::Spinner::new();
-        spinner.start();
-        spinner.set_halign(Align::Center);
-        spinner.set_margin_top(24);
-        spinner.set_margin_bottom(24);
-        self.list.append(&spinner);
-        self.summary.set_label("Loading…");
-        let Some(label) = accounts.iter().find(|(id, _)| *id == of).map(|(_, l)| l.clone()) else {
+        self.pages.set_visible_child_name("loading");
+        self.title.set_subtitle("Loading…");
+        let Some(w) = self.window.upgrade() else { return };
+        let Some(label) = self.accounts.iter().find(|(id, _)| *id == of).map(|(_, l)| l.clone())
+        else {
             return;
         };
         let (keyring, roblox) = (w.services().keyring.clone(), w.services().roblox.clone());
@@ -160,24 +169,22 @@ impl FriendsDialog {
     }
 
     fn show(self: &Rc<Self>) {
-        clear(&self.list);
+        self.list.remove_all();
         let cache = self.cache.borrow();
         let Some(got) = cache.get(&self.of.get()) else { return };
         let friends = match got {
             Ok(f) => f,
             Err(e) => {
-                self.summary.set_label("");
-                self.list.append(
-                    &lbl(&format!("Could not load friends: {e}"), "nofriends")
-                        .wrapped()
-                        .xalign(0.5),
-                );
+                self.title.set_subtitle("");
+                self.problem.set_title("Could Not Load Friends");
+                self.problem.set_description(Some(&glib::markup_escape_text(e)));
+                self.pages.set_visible_child_name("problem");
                 return;
             }
         };
         let in_game = friends.iter().filter(|f| f.state == FriendState::Game).count();
         let online = friends.iter().filter(|f| f.state == FriendState::Online).count();
-        self.summary.set_label(&format!("{in_game} in game · {online} online"));
+        self.title.set_subtitle(&format!("{in_game} in a game · {online} online"));
         let query = self.query.borrow().clone();
         let chosen = self.window.upgrade().and_then(|w| w.state().friend.as_ref().map(|f| f.user));
         let shown: Vec<&Friend> = friends
@@ -188,49 +195,52 @@ impl FriendsDialog {
                     || f.display.to_lowercase().contains(&query)
             })
             .collect();
-        for f in &shown {
+        if shown.is_empty() {
+            self.problem.set_icon_name(Some(if query.is_empty() {
+                "avatar-default-symbolic"
+            } else {
+                "system-search-symbolic"
+            }));
+            self.problem.set_title(if query.is_empty() { "No Friends Yet" } else { "No Matches" });
+            self.problem.set_description(Some(if query.is_empty() {
+                "Friends of this account show up here."
+            } else {
+                "No friend's name has that in it."
+            }));
+            self.pages.set_visible_child_name("problem");
+            return;
+        }
+        self.problem.set_icon_name(Some("network-offline-symbolic"));
+        for f in shown {
             let class = state_class(f.state);
             let picked = chosen == Some(f.id);
-            let row = hbox!(
-                12,
-                if picked { "friend sel" } else { "friend" },
-                gtk::Box::new(gtk::Orientation::Horizontal, 0)
-                    .css(&format!("fdot {class}"))
-                    .centered(),
-                vbox!(
-                    2,
-                    "",
-                    lbl(&f.display, &format!("frname {class}")).ellipsize(),
-                    lbl(&status_text(f), &format!("frstatus {class}")).ellipsize()
-                )
-                .hexpand()
-                .centered()
-            )
-            .tip(&format!("@{}", f.name));
+            let row = adw::ActionRow::builder()
+                .title(&f.display)
+                .subtitle(format!("@{} · {}", f.name, status_text(f)))
+                .use_markup(false)
+                .build();
+            let dot =
+                gtk::Box::new(gtk::Orientation::Horizontal, 0).css(&format!("presence {class}"));
+            dot.set_valign(Align::Center);
+            row.add_prefix(&dot);
             if let Some(target) = FriendTarget::of(f) {
                 let me = Rc::downgrade(self);
-                let join = Btn::new(if picked { "join chosen" } else { "join" })
-                    .text(if picked { "Selected" } else { "Join" })
-                    .icon(if picked { "check" } else { "login" })
-                    .size(17)
-                    .gap(5)
+                let join = Btn::new(if picked { "flat" } else { "suggested-action" })
+                    .text(if picked { "Chosen" } else { "Join" })
                     .build(move || {
                         if let Some(d) = me.upgrade() {
-                            d.modal.dialog.close();
+                            d.dialog.close();
                             if let Some(w) = d.window.upgrade() {
                                 w.join_friend(target.clone());
                             }
                         }
                     });
-                row.append(&join.button.centered());
+                join.button.set_valign(Align::Center);
+                row.add_suffix(&join.button);
             }
             self.list.append(&row);
         }
-        if shown.is_empty() {
-            let text =
-                if query.is_empty() { "No friends yet" } else { "No friends match that search" };
-            self.list.append(&lbl(text, "nofriends").xalign(0.5));
-        }
+        self.pages.set_visible_child_name("list");
     }
 }
 

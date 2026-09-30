@@ -1,28 +1,37 @@
-//! The macros column, and running macros on accounts.
+//! The macros pane, and running macros on accounts.
 
 use adw::prelude::*;
 use rbxmgr_core::macros::{self, Player, StopFlag, VirtualInput, nested, random_pick};
 use rbxmgr_core::types::{Profile, UserId};
 
 use super::Window;
+use crate::ui::accounts::leader::placeholder;
 use crate::ui::macros::card::macro_card;
-use crate::ui::widgets::{LabelFluent, clear, hotkey_label, lbl};
+use crate::ui::widgets::{boxed_list, clear, hotkey_label};
 use crate::worker;
 
 impl Window {
     pub fn refresh_macros(&self) {
         self.0.cards.borrow_mut().clear();
-        let cards = &self.0.ui.cards;
+        let cards = &self.0.ui.macros_box;
         clear(cards);
         let names: Vec<String> = self.state().macros.names().map(str::to_owned).collect();
         for name in &names {
             cards.append(&macro_card(self, name));
         }
         if names.is_empty() {
-            cards.append(
-                &lbl("No macros yet. A macro presses keys and clicks for an account on its own -- press New.", "mempty")
-                    .wrapped(),
-            );
+            let list = boxed_list();
+            list.append(&placeholder(
+                "input-keyboard-symbolic",
+                "No macros yet. A macro presses keys and clicks for an account on its own.",
+            ));
+            let add = adw::ButtonRow::builder()
+                .title("New Macro…")
+                .start_icon_name("list-add-symbolic")
+                .action_name("win.new-macro")
+                .build();
+            list.append(&add);
+            cards.append(&list);
         }
         self.bind_hotkeys();
         self.refresh_launch_state();
@@ -51,14 +60,14 @@ impl Window {
         }
     }
 
-    pub fn toggle_macro(&self, name: &str) {
-        {
-            let mut s = self.state_mut();
-            if !s.open_macros.remove(name) {
-                s.open_macros.insert(name.to_owned());
-            }
+    /// Remember a macro folded or unfolded, for the next redraw.
+    pub fn set_macro_open(&self, name: &str, open: bool) {
+        let mut s = self.state_mut();
+        if open {
+            s.open_macros.insert(name.to_owned());
+        } else {
+            s.open_macros.remove(name);
         }
-        self.refresh_macros();
     }
 
     /// A switched-off macro cannot run; switching one off stops it.
@@ -92,7 +101,7 @@ impl Window {
         let chosen: Vec<UserId> =
             self.state().accounts.selected().iter().map(|a| a.user_id).collect();
         if chosen.is_empty() {
-            return self.log("No accounts selected");
+            return self.toast("Select the accounts to run it on");
         }
         for id in chosen {
             // A macro cannot reach a normal window once you look away.
@@ -244,7 +253,6 @@ impl Window {
                 }
                 drop(s);
                 w.refresh_states();
-                w.refresh_accounts();
             },
         );
     }

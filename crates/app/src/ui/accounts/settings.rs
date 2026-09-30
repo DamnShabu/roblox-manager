@@ -1,128 +1,118 @@
-//! An account's settings panel, under its row.
+//! An account's settings: its label and note, where it launches from, its
+//! macro, its session, and removing it. Changes apply as they are made.
 
 use adw::prelude::*;
-use gtk::WrapMode;
+use gtk::{Align, WrapMode};
 use rbxmgr_core::accounts::{Account, SessionState, relative_time};
-use rbxmgr_core::types::Profile;
+use rbxmgr_core::types::{Profile, UserId};
 
 use crate::ui::login::AddAccountDialog;
-use crate::ui::widgets::{
-    Btn, Fluent, LabelFluent, armed_btn, dot, icon, icon_fill, lbl, setting, switch, wrap,
-};
+use crate::ui::widgets::{Btn, Fluent, LabelFluent, avatar, icon, lbl, toggle_class};
 use crate::ui::window::Window;
 
-pub fn panel(w: &Window, acct: &Account) -> gtk::Box {
-    let id = acct.user_id;
-    let panel = vbox!(18, "panel");
-    let row = |title: &str, content: &gtk::Widget, top: i32| setting(&panel, title, content, top);
+pub struct AccountSettings;
 
-    let (groups, leader_name, macros, playing, session) = {
-        let s = w.state();
-        let groups: Vec<(Option<String>, String)> = std::iter::once((None, "Ungrouped".to_owned()))
-            .chain(s.accounts.groups().iter().map(|g| {
-                let name =
-                    if g.name.is_empty() { "Untitled group".to_owned() } else { g.name.clone() };
-                (Some(g.id.clone()), name)
-            }))
-            .collect();
-        let group = s.accounts.group_of(acct).map(str::to_owned);
-        let leader = s.accounts.leader().map(|l| l.name.to_string());
-        let macros: Vec<String> = s.macros.names().map(str::to_owned).collect();
-        let playing = s.macro_runs.contains_key(&id);
-        ((groups, group), leader, macros, playing, s.accounts.session(id))
-    };
-
-    if acct.leader {
-        row(
-            "Leader",
-            &hbox!(6, "leadnote", icon_fill("star", 18, ""), lbl("This account is the leader", ""))
-                .upcast(),
-            7,
-        );
-        row(
-            "Group",
-            &lbl(
-                "The leader can't be in a group. Make another account leader from its settings to hand over the lead.",
-                "phint",
-            )
-            .wrapped()
-            .chars(72)
-            .upcast(),
-            0,
-        );
-    } else {
-        let make = Btn::new("obtn")
-            .text("Make leader")
-            .icon("star")
-            .build(w.act(move |w| w.set_leader(id)));
-        row("Leader", &hbox!(0, "", make.button).upcast(), 7);
-        let (options, now) = groups;
-        let buttons: Vec<gtk::Widget> = options
-            .into_iter()
-            .map(|(gid, name)| {
-                let css = if gid == now { "opt on" } else { "opt" };
-                Btn::new(css)
-                    .text(&name)
-                    .build(w.act(move |w| w.set_group(id, gid.clone())))
-                    .button
-                    .upcast()
-            })
-            .collect();
-        row("Group", &wrap(6, &buttons).upcast(), 7);
-        if let Some(leader) = leader_name {
-            let sw = switch(acct.follow.is_some(), None, {
-                let weak = w.weak();
-                move |on| {
-                    if let Some(w) = weak.upgrade() {
-                        w.set_follow(id, on);
-                    }
-                }
-            });
-            let text = lbl(&format!("Joins {leader}'s server right after it launches."), "phint")
-                .wrapped()
-                .chars(72);
-            row("Auto-join", &hbox!(12, "", sw, text).upcast(), 2);
-        }
+impl AccountSettings {
+    pub fn open(w: &Window, id: UserId) {
+        let Some(acct) = w.state().accounts.get(id).cloned() else { return };
+        let dialog = adw::PreferencesDialog::builder()
+            .title("Account Settings")
+            .content_width(560)
+            .content_height(720)
+            .build();
+        dialog.add(&page(w, &dialog, &acct));
+        dialog.present(Some(w.gtk_window()));
     }
+}
 
-    let label =
-        gtk::Entry::builder().text(acct.name.as_str()).hexpand(true).css_classes(["field"]).build();
+/// Everything about one account. Rebuilt in place when the account changes
+/// shape (made leader), so its rows are always the ones that apply.
+fn page(w: &Window, dialog: &adw::PreferencesDialog, acct: &Account) -> adw::PreferencesPage {
+    let id = acct.user_id;
+    let page = adw::PreferencesPage::new();
+    page.add(&identity(w, acct));
+    page.add(&label_and_note(w, acct));
+    page.add(&launching(w, dialog, &page, acct));
+    page.add(&macro_group(w, acct));
+    page.add(&session_group(w, acct));
+
+    let remove = adw::ButtonRow::builder().title("Remove Account…").build();
+    remove.add_css_class("destructive-action");
+    let (weak, d) = (w.weak(), dialog.clone());
+    remove.connect_activated(move |_| {
+        if let Some(w) = weak.upgrade() {
+            let d = d.clone();
+            w.confirm_remove_then(id, move || {
+                d.close();
+            });
+        }
+    });
+    let danger = adw::PreferencesGroup::new();
+    danger.add(&remove);
+    page.add(&danger);
+    page
+}
+
+/// The account at a glance: its picture, label and Roblox user.
+fn identity(w: &Window, acct: &Account) -> adw::PreferencesGroup {
+    let picture = w.services().avatars.cached(&acct.user_id.to_string());
+    let who = match (&acct.username, &acct.display) {
+        (Some(user), Some(display)) if display != user => format!("{display} · @{user}"),
+        (Some(user), _) => format!("@{user}"),
+        _ => format!("Roblox user {}", acct.user_id),
+    };
+    let group = adw::PreferencesGroup::new();
+    let head = hbox!(
+        16,
+        "",
+        avatar(acct.name.as_str(), picture.as_deref(), 64),
+        vbox!(
+            2,
+            "",
+            lbl(acct.name.as_str(), "title-2").ellipsize(),
+            lbl(&who, "dimmed").ellipsize()
+        )
+        .centered()
+        .hexpand()
+    );
+    head.set_margin_bottom(6);
+    group.add(&head);
+    group
+}
+
+fn label_and_note(w: &Window, acct: &Account) -> adw::PreferencesGroup {
+    let id = acct.user_id;
+    let group = adw::PreferencesGroup::new();
+    let label = adw::EntryRow::builder()
+        .title("Label")
+        .text(acct.name.as_str())
+        .show_apply_button(true)
+        .build();
     let weak = w.weak();
-    label.connect_activate(move |e| {
+    label.connect_apply(move |e| {
         if let Some(w) = weak.upgrade() {
             w.rename_account(id, e.text().trim());
         }
     });
-    let entry = label.clone();
-    let rename = Btn::new("sbtn")
-        .text("Rename")
-        .build(w.act(move |w| w.rename_account(id, entry.text().trim())));
-    row(
-        "Label",
-        &vbox!(
-            6,
-            "",
-            hbox!(8, "", label, rename.button.centered()),
-            lbl("Your name for this account; renaming moves its keyring entry too.", "phint2")
-                .wrapped()
-        )
-        .upcast(),
-        10,
+    group.add(&label);
+    group.add(
+        &lbl("Your name for this account. Renaming moves its keyring entry too.", "caption dimmed")
+            .wrapped()
+            .top(6),
     );
 
     // accounts.json is not encrypted at rest, so the note is for labels, not
-    // secrets. It grows with its text: a scroller's minimum height here made
-    // GTK measure the panel smaller than its own minimum.
+    // secrets.
     let note = gtk::TextView::builder()
         .wrap_mode(WrapMode::WordChar)
-        .top_margin(9)
-        .bottom_margin(9)
+        .top_margin(10)
+        .bottom_margin(10)
         .left_margin(12)
         .right_margin(12)
         .accepts_tab(false)
-        .height_request(62)
-        .hexpand(true)
+        .height_request(72)
         .build();
+    note.add_css_class("inline");
     note.buffer().set_text(&acct.note);
     let weak = w.weak();
     note.buffer().connect_changed(move |b| {
@@ -130,151 +120,249 @@ pub fn panel(w: &Window, acct: &Account) -> gtk::Box {
             w.set_note(id, &b.text(&b.start_iter(), &b.end_iter(), false));
         }
     });
-    let notebox = hbox!(0, "notebox", note);
-    notebox.set_overflow(gtk::Overflow::Hidden);
-    row(
-        "Note",
-        &vbox!(
-            6,
-            "",
-            notebox,
-            hbox!(
-                5,
-                "phint2",
-                icon("sticky_note_2", 14, ""),
-                lbl("Hover the note icon next to the name to read it. Plain text -- not for passwords.", "")
-            )
+    let frame = gtk::Frame::builder().child(&note).build();
+    frame.add_css_class("view");
+    frame.set_margin_top(12);
+    let note_group = vbox!(
+        6,
+        "",
+        lbl("Note", "heading"),
+        frame,
+        lbl(
+            "Shown on the note icon beside its name. Plain text — not for passwords.",
+            "caption dimmed"
         )
-        .upcast(),
-        10,
+        .wrapped()
     );
+    note_group.set_margin_top(18);
+    group.add(&note_group);
+    group
+}
 
-    let mine = acct.macro_name.clone().filter(|m| macros.contains(m));
-    let run = Btn::new("sbtn")
-        .text(if playing { "Stop here" } else { "Run here" })
-        .icon(if playing { "stop" } else { "play_arrow" })
-        .fill()
-        .gap(4)
-        .tip(if playing {
-            "Stop the macro on this account"
-        } else {
-            "Play the macro into this account's client"
-        })
-        .build(w.act(move |w| w.play_macro_here(id)));
-    run.button.set_sensitive(mine.is_some() || playing);
-    let mut options: Vec<gtk::Widget> = std::iter::once(None)
-        .chain(macros.into_iter().map(Some))
-        .map(|m| {
-            let css = if m == mine { "opt on" } else { "opt" };
-            let text = m.clone().unwrap_or_else(|| "None".to_owned());
-            Btn::new(css)
-                .text(&text)
-                .build(w.act(move |w| w.pick_macro(id, m.clone())))
-                .button
-                .upcast()
-        })
-        .collect();
-    let divider = gtk::Box::new(gtk::Orientation::Horizontal, 0).css("vdiv").centered();
-    divider.set_margin_start(4);
-    divider.set_margin_end(4);
-    options.push(divider.upcast());
-    options.push(run.button.upcast());
-    row("Macro", &wrap(6, &options).upcast(), 7);
+/// Leader, group, auto-join, and how its client runs.
+fn launching(
+    w: &Window,
+    dialog: &adw::PreferencesDialog,
+    page: &adw::PreferencesPage,
+    acct: &Account,
+) -> adw::PreferencesGroup {
+    let id = acct.user_id;
+    let (groups, current, leader) = {
+        let s = w.state();
+        let groups: Vec<(Option<String>, String)> = std::iter::once((None, "Ungrouped".into()))
+            .chain(s.accounts.groups().iter().map(|g| {
+                let name = if g.name.is_empty() { "Untitled group".into() } else { g.name.clone() };
+                (Some(g.id.clone()), name)
+            }))
+            .collect();
+        let current = s.accounts.group_of(acct).map(str::to_owned);
+        (groups, current, s.accounts.leader().map(|l| l.name.to_string()))
+    };
+    let group = adw::PreferencesGroup::builder().title("Launching").build();
 
-    let toggle =
-        |title: &str, on: bool, text: &str, set: fn(&Window, rbxmgr_core::types::UserId, bool)| {
+    let lead = adw::ActionRow::builder().title("Leader").build();
+    if acct.leader {
+        lead.set_subtitle("This account launches first; its auto-join accounts follow it");
+        lead.add_prefix(&icon("starred-symbolic").css("accent"));
+    } else {
+        lead.set_subtitle("Launch as Group starts the leader, then the auto-join list");
+        let (weak, dialog, page) = (w.weak(), dialog.clone(), page.clone());
+        let make = Btn::new("").text("Make Leader").build(move || {
+            let Some(w) = weak.upgrade() else { return };
+            w.set_leader(id);
+            // Its group and auto-join rows no longer apply: draw them again.
+            if let Some(acct) = w.state().accounts.get(id).cloned() {
+                dialog.remove(&page);
+                dialog.add(&self::page(&w, &dialog, &acct));
+            }
+        });
+        make.button.set_valign(Align::Center);
+        lead.add_suffix(&make.button);
+    }
+    group.add(&lead);
+
+    if !acct.leader {
+        let names: Vec<&str> = groups.iter().map(|(_, n)| n.as_str()).collect();
+        let combo = adw::ComboRow::builder()
+            .title("Group")
+            .model(&gtk::StringList::new(&names))
+            .selected(groups.iter().position(|(g, _)| *g == current).unwrap_or(0) as u32)
+            .build();
+        let weak = w.weak();
+        combo.connect_selected_notify(move |c| {
+            let gid = groups.get(c.selected() as usize).and_then(|(g, _)| g.clone());
+            if let Some(w) = weak.upgrade() {
+                w.set_group(id, gid);
+            }
+        });
+        group.add(&combo);
+        if let Some(leader) = leader {
+            let follow = adw::SwitchRow::builder()
+                .title("Auto-join the Leader")
+                .subtitle(format!("Joins {leader}'s server right after it launches"))
+                .active(acct.follow.is_some())
+                .build();
             let weak = w.weak();
-            let sw = switch(on, None, move |on| {
+            follow.connect_active_notify(move |r| {
                 if let Some(w) = weak.upgrade() {
-                    set(&w, id, on);
+                    w.set_follow(id, r.is_active());
                 }
             });
-            let hint = lbl(text, "phint").wrapped().chars(72).hexpand();
-            setting(&panel, title, &hbox!(12, "", sw, hint), 2);
-        };
-    toggle(
-        "Macro-ready window",
-        acct.nested,
-        "Runs the client on a display of its own, so a macro can play into it while you use other windows. \
-         Picking a macro turns it on. Applies from the next launch.",
-        Window::set_nested,
-    );
-    toggle(
-        "Low-power client",
-        acct.low_power,
-        "For an account you are not playing on: 20 FPS, fewer CPU threads, lower priority, and slower still \
-         when its window is not focused. Applies from the next launch.",
-        Window::set_low_power,
-    );
-
-    let (text, kind) = match &session {
-        SessionState::Checking => ("Checking session…".to_owned(), "checking"),
-        SessionState::Expired => ("Session expired".to_owned(), "expired"),
-        SessionState::Ok { checked: Some(when) } => {
-            (format!("Signed in · checked {}", relative_time(Some(when), chrono::Utc::now())), "ok")
+            group.add(&follow);
         }
-        SessionState::Ok { checked: None } => ("Signed in".to_owned(), "ok"),
-    };
-    let action = if session == SessionState::Expired {
-        let relogin = acct.clone();
-        Btn::new("sbtn amber")
-            .text("Sign in again")
-            .icon("login")
-            .size(17)
-            .gap(5)
-            .build(w.act(move |w| AddAccountDialog::open(w, Some(relogin.clone()))))
-    } else {
-        let checking = session == SessionState::Checking;
-        let b = Btn::new("sbtn")
-            .text(if checking { "Checking…" } else { "Check session" })
-            .icon("sync")
-            .size(17)
-            .gap(5)
-            .tip("Ask Roblox whether the stored session still works")
-            .build(w.act(move |w| w.check_sessions(vec![id])));
-        b.button.set_sensitive(!checking);
-        b
-    };
-    let dot_kind = match kind {
-        "checking" => "wait",
-        "expired" => "expired",
-        _ => "running",
-    };
-    row(
-        "Session",
-        &vbox!(
-            6,
-            "",
-            hbox!(
-                12,
-                "",
-                hbox!(
-                    7,
-                    &format!("sess {kind}"),
-                    dot(dot_kind, kind == "checking", 7),
-                    lbl(&text, "")
-                ),
-                action.button
-            ),
-            lbl(
-                &format!(
-                    "Sign in again when launches fail with HTTP 401. Cordial profile {}.",
-                    Profile::of(id)
-                ),
-                "phint2"
-            )
-            .wrapped()
-            .selectable()
+    }
+
+    let low = adw::SwitchRow::builder()
+        .title("Low-Power Client")
+        .subtitle(
+            "For an account along for the ride: 20 FPS, fewer threads, lower priority, and \
+             slower still out of focus. From the next launch.",
         )
-        .upcast(),
-        8,
-    );
-    let remove = armed_btn(
-        "Remove account",
-        "Click again to remove",
-        "person_remove",
-        w.act(move |w| w.remove_account(id)),
-    );
-    row("", &hbox!(0, "prm", remove).upcast(), 0);
-    panel
+        .active(acct.low_power)
+        .build();
+    let weak = w.weak();
+    low.connect_active_notify(move |r| {
+        if let Some(w) = weak.upgrade() {
+            w.set_low_power(id, r.is_active());
+        }
+    });
+    group.add(&low);
+    group
+}
+
+/// Its macro-ready window, the macro its Run plays, and Run itself.
+fn macro_group(w: &Window, acct: &Account) -> adw::PreferencesGroup {
+    let id = acct.user_id;
+    let names: Vec<String> = w.state().macros.names().map(str::to_owned).collect();
+    let group = adw::PreferencesGroup::builder()
+        .title("Macro")
+        .description("A macro plays into a macro-ready window, even while you use other windows.")
+        .build();
+
+    let nested = adw::SwitchRow::builder()
+        .title("Macro-Ready Window")
+        .subtitle(
+            "Runs the client on a display of its own, where a macro can reach it. \
+             Picking a macro turns it on. From the next launch.",
+        )
+        .active(acct.nested)
+        .build();
+    let weak = w.weak();
+    nested.connect_active_notify(move |r| {
+        if let Some(w) = weak.upgrade() {
+            w.set_nested(id, r.is_active());
+        }
+    });
+
+    let mine = acct.macro_name.clone().filter(|m| names.contains(m));
+    let options: Vec<&str> =
+        std::iter::once("None").chain(names.iter().map(String::as_str)).collect();
+    let combo = adw::ComboRow::builder()
+        .title("Macro")
+        .model(&gtk::StringList::new(&options))
+        .selected(
+            mine.as_ref().and_then(|m| names.iter().position(|n| n == m)).map_or(0, |i| i + 1)
+                as u32,
+        )
+        .build();
+    let (weak, nested_row) = (w.weak(), nested.clone());
+    combo.connect_selected_notify(move |c| {
+        let name = (c.selected() as usize).checked_sub(1).and_then(|i| names.get(i)).cloned();
+        if let Some(w) = weak.upgrade() {
+            let picked = name.is_some();
+            w.pick_macro(id, name);
+            if picked {
+                nested_row.set_active(true);
+            }
+        }
+    });
+
+    let run =
+        Btn::new("").text("Run").icon("media-playback-start-symbolic").build(w.act(move |w| {
+            w.play_macro_here(id);
+            w.refresh_states();
+        }));
+    run.button.set_valign(Align::Center);
+    combo.add_suffix(&run.button);
+    group.add(&combo);
+    group.add(&nested);
+
+    let button = run.button.downgrade();
+    w.watch_while(Box::new(move |s| {
+        let Some(b) = button.upgrade() else { return false };
+        let playing = s.macro_runs.get(&id).map(|(_, m)| m.clone());
+        let chosen = s.accounts.get(id).and_then(|a| a.macro_name.clone());
+        run.set_text(if playing.is_some() { "Stop" } else { "Run" });
+        run.set_icon(if playing.is_some() {
+            "media-playback-stop-symbolic"
+        } else {
+            "media-playback-start-symbolic"
+        });
+        toggle_class(&b, "destructive-action", playing.is_some());
+        b.set_sensitive(playing.is_some() || chosen.is_some_and(|m| s.macros.contains(&m)));
+        b.set_tooltip_text(Some(&match playing {
+            Some(m) => format!("Stop {m} on this account"),
+            None => "Play the macro into this account's client".to_owned(),
+        }));
+        true
+    }));
+    group
+}
+
+/// Whether Roblox still takes its stored session, and the fix when not.
+fn session_group(w: &Window, acct: &Account) -> adw::PreferencesGroup {
+    let id = acct.user_id;
+    let group = adw::PreferencesGroup::builder()
+        .title("Session")
+        .description(format!(
+            "Kept in your keyring. Sign in again when launches fail with “session expired”. \
+             Its Cordial profile is {}.",
+            Profile::of(id)
+        ))
+        .build();
+    let row = adw::ActionRow::new();
+    let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let status = hbox!(0, "status", dot.clone());
+    dot.add_css_class("dot");
+    dot.set_valign(Align::Center);
+    status.set_valign(Align::Center);
+    row.add_prefix(&status);
+    let check = Btn::new("").text("Check").build(w.act(move |w| w.check_sessions(vec![id])));
+    check.button.set_valign(Align::Center);
+    let relogin = acct.clone();
+    let sign_in = Btn::new("suggested-action")
+        .text("Sign In Again…")
+        .build(w.act(move |w| AddAccountDialog::open(w, Some(relogin.clone()))));
+    sign_in.button.set_valign(Align::Center);
+    row.add_suffix(&check.button);
+    row.add_suffix(&sign_in.button);
+    group.add(&row);
+
+    let shown = row.downgrade();
+    w.watch_while(Box::new(move |s| {
+        let Some(row) = shown.upgrade() else { return false };
+        let session = s.accounts.session(id);
+        let (title, sub, kind) = match &session {
+            SessionState::Checking => ("Checking…", String::new(), "starting"),
+            SessionState::Expired => {
+                ("Signed out", "Roblox no longer takes this session".to_owned(), "expired")
+            }
+            SessionState::Ok { checked: Some(when) } => (
+                "Signed in",
+                format!("Roblox took it {}", relative_time(Some(when), chrono::Utc::now())),
+                "running",
+            ),
+            SessionState::Ok { checked: None } => ("Signed in", String::new(), "running"),
+        };
+        row.set_title(title);
+        row.set_subtitle(&sub);
+        for k in ["starting", "expired", "running"] {
+            toggle_class(&status, k, k == kind);
+        }
+        check.button.set_sensitive(session != SessionState::Checking);
+        check.button.set_visible(session != SessionState::Expired);
+        sign_in.button.set_visible(session == SessionState::Expired);
+        true
+    }));
+    group
 }

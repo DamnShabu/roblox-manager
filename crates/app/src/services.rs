@@ -16,6 +16,8 @@ pub struct Services {
     pub profiles: Arc<CordialProfiles>,
     pub launcher: Arc<Launcher>,
     pub icons: Arc<IconCache>,
+    /// Accounts' headshots.
+    pub avatars: Arc<IconCache>,
 }
 
 impl Services {
@@ -46,7 +48,8 @@ impl Services {
             Pacing::default(),
         ));
         let icons = Arc::new(IconCache::new(paths.icons()));
-        Services { paths, keyring, roblox, runner, profiles, launcher, icons }
+        let avatars = Arc::new(IconCache::new(paths.avatars()));
+        Services { paths, keyring, roblox, runner, profiles, launcher, icons, avatars }
     }
 }
 

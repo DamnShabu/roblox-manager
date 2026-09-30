@@ -2,27 +2,36 @@
 //! draws from, and the redraws.
 
 mod accounts;
+mod actions;
 mod chrome;
 mod launching;
 mod macros;
 
-use std::cell::{Ref, RefCell, RefMut};
+use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashSet;
 use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::glib;
 use rbxmgr_core::types::{Profile, UserId};
+use rbxmgr_core::window_state::WindowState;
 
 use self::chrome::Chrome;
 use super::activity;
-use super::widgets::{Fluent, LabelFluent, clear, dot, icon, lbl};
+use super::widgets::clear;
 use crate::services::Services;
 use crate::state::AppState;
 use crate::worker::{self, Logger};
 
 /// Brings one drawn widget up to date with the state, without rebuilding it.
 pub type Redraw = Box<dyn Fn(&AppState)>;
+
+/// A redraw for a widget that may go away on its own (a dialog's): it says
+/// whether its widget is still there, and is dropped once it is not.
+pub type LiveRedraw = Box<dyn Fn(&AppState) -> bool>;
+
+/// How many activity lines the side pane shows; the log window has the rest.
+const ACTIVITY_SHOWN: usize = 6;
 
 /// A cheap handle on the window; widgets keep one to act on it.
 #[derive(Clone)]
@@ -34,15 +43,20 @@ pub struct Inner {
     pub services: Services,
     log: Logger,
     ui: Chrome,
-    /// Redraw each drawn account's status, without rebuilding the rows.
-    chips: RefCell<Vec<Redraw>>,
-    /// Redraw each macro card's running state and meta line.
+    /// Redraw each drawn account's live parts, without rebuilding the rows.
+    rows: RefCell<Vec<Redraw>>,
+    /// Redraw each macro's running state.
     cards: RefCell<Vec<Redraw>>,
-    polling: std::cell::Cell<bool>,
+    /// Redraw open dialogs' live parts.
+    dialogs: RefCell<Vec<LiveRedraw>>,
+    /// The open activity log, which takes each new line as it comes.
+    log_view: RefCell<Option<glib::WeakRef<gtk::ListBox>>>,
+    polling: Cell<bool>,
 }
 
 impl Window {
     pub fn new(app: &adw::Application, state: AppState, services: Services) -> Self {
+        let saved = WindowState::load(&services.paths.window_state());
         let inner = Rc::new_cyclic(|weak: &Weak<Inner>| {
             let handle = WeakWindow(weak.clone());
             let log = {
@@ -56,29 +70,35 @@ impl Window {
             let win = adw::ApplicationWindow::builder()
                 .application(app)
                 .title("Roblox Manager")
-                .default_width(1320)
-                .default_height(860)
+                .default_width(saved.width)
+                .default_height(saved.height)
+                .maximized(saved.maximized)
+                .width_request(360)
+                .height_request(320)
                 .build();
-            win.add_css_class("rbx");
-            let ui = Chrome::build(&win, &handle);
+            let ui = Chrome::build(&win, &handle, saved.sidebar);
             Inner {
                 win,
                 state: RefCell::new(state),
                 services,
                 log,
                 ui,
-                chips: RefCell::default(),
+                rows: RefCell::default(),
                 cards: RefCell::default(),
-                polling: std::cell::Cell::new(false),
+                dialogs: RefCell::default(),
+                log_view: RefCell::default(),
+                polling: Cell::new(false),
             }
         });
         let w = Window(inner);
+        w.install_actions();
         // The app owns the window's handle until the window closes: every
         // widget and task holds only a weak one.
         CURRENT.with_borrow_mut(|c| *c = Some(w.clone()));
-        w.0.win.connect_close_request(|_| {
-            CURRENT.with_borrow_mut(|c| c.take());
-            glib::Propagation::Proceed
+        let weak = w.weak();
+        w.0.win.connect_close_request(move |_| match weak.upgrade() {
+            Some(w) => w.on_close_request(),
+            None => glib::Propagation::Proceed,
         });
         w.refresh();
         w.log("Ready");
@@ -154,18 +174,19 @@ impl Window {
         self.state_mut().log(stamp, line);
         let log_box = &self.0.ui.log_box;
         clear(log_box);
-        for (t, m) in &self.state().activity {
-            let kind = activity::kind(m);
-            let row = hbox!(
-                8,
-                "",
-                icon(activity::icon(kind), 16, &format!("k-{kind}")),
-                lbl(m, "logline").hexpand().ellipsize().chars(1),
-                lbl(t, "logtime mono")
-            )
-            .tip(m);
-            log_box.append(&row);
+        let s = self.state();
+        for entry in s.activity.iter().take(ACTIVITY_SHOWN) {
+            log_box.append(&activity::line(entry, false));
         }
+        let open = self.0.log_view.borrow().as_ref().and_then(glib::WeakRef::upgrade);
+        if let (Some(list), Some(newest)) = (open, s.activity.first()) {
+            list.prepend(&activity::row(newest));
+        }
+    }
+
+    /// Let the open log window take new lines.
+    pub fn watch_log(&self, list: &gtk::ListBox) {
+        self.0.log_view.replace(Some(list.downgrade()));
     }
 
     /// Plain text: messages carry labels the user typed and error text,
@@ -173,6 +194,16 @@ impl Window {
     pub fn toast(&self, msg: &str) {
         let toast = adw::Toast::new(msg);
         toast.set_use_markup(false);
+        self.0.ui.toasts.add_toast(toast);
+    }
+
+    /// A toast with a button that runs `action` on the window.
+    pub fn toast_with(&self, msg: &str, button: &str, action: impl Fn(&Window) + 'static) {
+        let toast = adw::Toast::new(msg);
+        toast.set_use_markup(false);
+        toast.set_button_label(Some(button));
+        let act = self.act(action);
+        toast.connect_button_clicked(move |_| act());
         self.0.ui.toasts.add_toast(toast);
     }
 
@@ -200,11 +231,7 @@ impl Window {
             s.busy = if on { s.busy + 1 } else { s.busy.saturating_sub(1) };
             s.busy > 0
         };
-        if busy {
-            self.0.win.add_css_class("busy");
-        } else {
-            self.0.win.remove_css_class("busy");
-        }
+        self.0.ui.spinner.set_visible(busy);
     }
 
     // -- redraws ----------------------------------------------------------
@@ -214,43 +241,45 @@ impl Window {
         self.refresh_macros();
     }
 
-    /// Every drawn status: rows' chips, the pill, macro cards.
+    /// Every drawn status: rows, group headers, macro cards, the title.
     pub fn refresh_states(&self) {
         let s = self.state();
-        for chip in self.0.chips.borrow().iter() {
-            chip(&s);
+        for redraw in self.0.rows.borrow().iter() {
+            redraw(&s);
         }
         for card in self.0.cards.borrow().iter() {
             card(&s);
         }
+        // Taken out while they run: a redraw that sets a widget may reach
+        // code that watches a new one.
+        let mut dialogs = self.0.dialogs.take();
+        dialogs.retain(|redraw| redraw(&s));
+        let mut added = self.0.dialogs.replace(dialogs);
+        self.0.dialogs.borrow_mut().append(&mut added);
+        self.0.ui.title.set_subtitle(&s.status_line());
+        let live = !s.running.is_empty() || !s.launching.is_empty() || !s.macro_runs.is_empty();
         drop(s);
-        self.update_pill();
+        self.set_action_enabled("stop-all", live);
     }
 
-    pub(super) fn add_chip(&self, redraw: Redraw) {
+    /// Keep `redraw` up to date with the accounts' state until they are next
+    /// drawn afresh.
+    pub(super) fn watch_accounts(&self, redraw: Redraw) {
         redraw(&self.state());
-        self.0.chips.borrow_mut().push(redraw);
+        self.0.rows.borrow_mut().push(redraw);
     }
 
-    pub(super) fn add_card(&self, redraw: Redraw) {
+    /// Keep `redraw` up to date until the macros are next drawn afresh.
+    pub(super) fn watch_macros(&self, redraw: Redraw) {
         redraw(&self.state());
         self.0.cards.borrow_mut().push(redraw);
     }
 
-    fn update_pill(&self) {
-        let (text, n) = {
-            let s = self.state();
-            (s.pill(), s.running.len())
-        };
-        let ui = &self.0.ui;
-        ui.pill_label.set_label(&text);
-        if n > 0 {
-            ui.pill.add_css_class("on");
-        } else {
-            ui.pill.remove_css_class("on");
+    /// Keep a dialog's widget up to date while `redraw` says it is there.
+    pub fn watch_while(&self, redraw: LiveRedraw) {
+        if redraw(&self.state()) {
+            self.0.dialogs.borrow_mut().push(redraw);
         }
-        clear(&ui.pill_dot);
-        ui.pill_dot.append(&dot(if n > 0 { "running" } else { "idlepill" }, n > 0, 7));
     }
 
     /// Keeps every row's status and play/stop honest. pgrep runs off the
@@ -281,6 +310,46 @@ impl Window {
                 }
             },
         );
+    }
+
+    // -- closing ------------------------------------------------------------
+    /// Macros play from this process, so closing stops them: asked first.
+    /// Clients are processes of their own and keep running.
+    fn on_close_request(&self) -> glib::Propagation {
+        let playing = self.state().macro_runs.len();
+        if playing == 0 {
+            self.close_now();
+            return glib::Propagation::Proceed;
+        }
+        let body = format!(
+            "{} playing into {}. Closing Roblox Manager stops {}; the game clients keep running.",
+            if playing == 1 { "A macro is" } else { "Macros are" },
+            if playing == 1 { "a client" } else { "clients" },
+            if playing == 1 { "it" } else { "them" },
+        );
+        super::confirm::ask(self, "Stop Macros and Close?", &body, "_Close", |w| {
+            w.close_now();
+            w.0.win.destroy();
+        });
+        glib::Propagation::Stop
+    }
+
+    /// Stop what plays, remember how the window was, and let go of it.
+    fn close_now(&self) {
+        for (stop, _) in self.state().macro_runs.values() {
+            stop.set();
+        }
+        let (width, height) = self.0.win.default_size();
+        let state = WindowState {
+            width,
+            height,
+            maximized: self.0.win.is_maximized(),
+            sidebar: self.0.ui.split.shows_sidebar(),
+        };
+        if let Err(e) = state.save(&self.services().paths.window_state()) {
+            eprintln!("roblox-manager: could not remember the window's size: {e}");
+        }
+        CURRENT.with_borrow_mut(|c| c.take());
     }
 }
 
@@ -313,3 +382,5 @@ thread_local! {
 pub fn current() -> Option<Window> {
     CURRENT.with_borrow(Clone::clone)
 }
+
+pub use actions::set_accels;

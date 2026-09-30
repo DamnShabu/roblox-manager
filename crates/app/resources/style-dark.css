@@ -1,0 +1,15 @@
+/* The warm dark surfaces, loaded over style.css while libadwaita is dark. */
+
+:root {
+  --window-bg-color: #1e1b18;
+  --view-bg-color: #191714;
+  --headerbar-bg-color: #26221e;
+  --headerbar-backdrop-color: #1e1b18;
+  --sidebar-bg-color: #221f1b;
+  --sidebar-backdrop-color: #1f1c19;
+  --secondary-sidebar-bg-color: #211e1a;
+  --dialog-bg-color: #292520;
+  --popover-bg-color: #2d2924;
+  --card-bg-color: rgb(255 238 214 / 6%);
+  --thumbnail-bg-color: #2d2924;
+}

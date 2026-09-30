@@ -9,8 +9,10 @@ use gtk::{Align, PolicyType, gdk, glib};
 use rbxmgr_core::macros::grammar::{self, Row};
 
 use super::card::step_icon;
-use crate::ui::modal::Modal;
-use crate::ui::widgets::{Btn, Fluent, IconButton, LabelFluent, clear, hotkey_label, lbl, wrap};
+use crate::ui::confirm;
+use crate::ui::widgets::{
+    Btn, Fluent, LabelFluent, hotkey_label, icon, keycaps, lbl, plural, wrap,
+};
 use crate::ui::window::{WeakWindow, Window};
 
 const STEP_TYPES: [&str; 8] = ["Key", "Hold", "Type", "Click", "Move", "Wait", "Start", "Note"];
@@ -32,18 +34,19 @@ fn hint(kind: &str) -> &'static str {
 
 pub struct MacroDialog {
     window: WeakWindow,
-    modal: Modal,
+    dialog: adw::Dialog,
     old: Option<String>,
     rows: RefCell<Vec<Row>>,
     loops: Cell<u32>,
     hotkey: RefCell<Option<String>>,
     capturing: Cell<bool>,
-    name: gtk::Entry,
-    cap: IconButton,
-    seg: gtk::Box,
-    spin: gtk::SpinButton,
+    name: adw::EntryRow,
+    cap: gtk::Button,
+    clear_key: gtk::Button,
+    repeat: adw::ToggleGroup,
+    rounds: adw::SpinRow,
     count: gtk::Label,
-    list: gtk::Box,
+    list: gtk::ListBox,
     err: gtk::Label,
 }
 
@@ -70,67 +73,97 @@ impl MacroDialog {
         };
         let (rows, loops) = grammar::rows(&text);
         let new = name.is_none();
-        let modal = Modal::new(
-            "keyboard",
-            if new { "New macro" } else { "Edit macro" },
-            "Changes apply when you save",
-            560,
-        );
-        let name_entry =
-            gtk::Entry::builder().text(&title).placeholder_text("Macro name").hexpand(true).build();
-        name_entry.add_css_class("efield");
-        let spin = gtk::SpinButton::with_range(2.0, 9999.0, 1.0);
-        spin.add_css_class("rounds");
-        spin.set_value(if loops > 1 { f64::from(loops) } else { 10.0 });
-        let dialog = Rc::new_cyclic(|me: &std::rc::Weak<MacroDialog>| {
-            let me = me.clone();
-            let cap = Btn::new("hkcap mono")
-                .text(
-                    &hotkey
-                        .as_deref()
-                        .map_or_else(|| "Set hotkey".to_owned(), |k| hotkey_label(Some(k))),
-                )
-                .icon("keyboard")
-                .size(17)
-                .gap(8)
-                .tip("Press to set. While it waits: Esc keeps the old one, Backspace clears it.")
-                .build(move || {
-                    if let Some(d) = me.upgrade() {
-                        d.capture();
-                    }
-                });
-            if let Some(child) = cap.button.child() {
-                child.set_halign(Align::Start);
-            }
-            MacroDialog {
-                window: w.weak(),
-                modal,
-                old: name.map(str::to_owned),
-                rows: RefCell::new(rows),
-                loops: Cell::new(loops),
-                hotkey: RefCell::new(hotkey),
-                capturing: Cell::new(false),
-                name: name_entry,
-                cap,
-                seg: hbox!(2, "seg").halign(Align::Start),
-                spin,
-                count: lbl("", "phint2"),
-                list: vbox!(6, ""),
-                err: lbl("", "merr").wrapped().visible(false),
-            }
+        let dialog = adw::Dialog::builder()
+            .title(if new { "New Macro" } else { "Edit Macro" })
+            .content_width(600)
+            .build();
+        let rounds = adw::SpinRow::with_range(2.0, 9999.0, 1.0);
+        rounds.set_title("Rounds");
+        rounds.set_value(if loops > 1 { f64::from(loops) } else { 10.0 });
+        let d = Rc::new(MacroDialog {
+            window: w.weak(),
+            dialog,
+            old: name.map(str::to_owned),
+            rows: RefCell::new(rows),
+            loops: Cell::new(loops),
+            hotkey: RefCell::new(hotkey),
+            capturing: Cell::new(false),
+            name: adw::EntryRow::builder().title("Name").text(&title).build(),
+            cap: gtk::Button::builder().valign(Align::Center).build(),
+            clear_key: gtk::Button::builder()
+                .icon_name("edit-clear-symbolic")
+                .tooltip_text("No hotkey")
+                .valign(Align::Center)
+                .css_classes(["flat", "circular"])
+                .build(),
+            repeat: adw::ToggleGroup::builder().valign(Align::Center).build(),
+            rounds,
+            count: lbl("", "dimmed"),
+            list: crate::ui::widgets::boxed_list(),
+            err: lbl("", "error").wrapped().visible(false),
         });
-        dialog.assemble(w, new);
-        dialog.modal.keep_alive(dialog.clone());
-        dialog.modal.present(w.gtk_window());
+        d.assemble(new);
+        let held = RefCell::new(Some(d.clone()));
+        d.dialog.connect_closed(move |_| {
+            held.take();
+        });
+        d.dialog.present(Some(w.gtk_window()));
     }
 
-    fn assemble(self: &Rc<Self>, w: &Window, new: bool) {
+    fn assemble(self: &Rc<Self>, new: bool) {
+        // -- header bar: Cancel, the title, Save ------------------------------
+        let header = adw::HeaderBar::builder()
+            .show_end_title_buttons(false)
+            .show_start_title_buttons(false)
+            .build();
+        let cancel = {
+            let dialog = self.dialog.clone();
+            Btn::new("").text("_Cancel").build(move || {
+                dialog.close();
+            })
+        };
         let me = Rc::downgrade(self);
-        self.spin.connect_value_changed(move |s| {
+        let save = Btn::new("suggested-action").text("_Save").build(move || {
             if let Some(d) = me.upgrade() {
-                d.set_loops(s.value_as_int().max(0).unsigned_abs());
+                d.save();
             }
         });
+        header.pack_start(&cancel.button);
+        header.pack_end(&save.button);
+        header.pack_end(
+            &gtk::Button::builder()
+                .icon_name("help-about-symbolic")
+                .tooltip_text("How Macros Work")
+                .action_name("win.macro-help")
+                .build(),
+        );
+        self.dialog.set_default_widget(Some(&save.button));
+
+        // -- name and hotkey ------------------------------------------------------
+        let about = adw::PreferencesGroup::new();
+        about.add(&self.name);
+        let key_row = adw::ActionRow::builder()
+            .title("Hotkey")
+            .subtitle("Runs or stops it on the selected accounts while this window has focus")
+            .build();
+        let me = Rc::downgrade(self);
+        self.cap.connect_clicked(move |_| {
+            if let Some(d) = me.upgrade() {
+                d.capture();
+            }
+        });
+        let me = Rc::downgrade(self);
+        self.clear_key.connect_clicked(move |_| {
+            if let Some(d) = me.upgrade() {
+                d.hotkey.replace(None);
+                d.capturing.set(false);
+                d.draw_hotkey();
+            }
+        });
+        key_row.add_suffix(&self.clear_key);
+        key_row.add_suffix(&self.cap);
+        key_row.set_activatable_widget(Some(&self.cap));
+        about.add(&key_row);
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let me = Rc::downgrade(self);
@@ -138,23 +171,47 @@ impl MacroDialog {
             Some(d) => d.on_key(key, state),
             None => glib::Propagation::Proceed,
         });
-        self.modal.dialog.add_controller(keys);
+        self.dialog.add_controller(keys);
 
-        let steps = gtk::ScrolledWindow::builder()
-            .child(&self.list)
-            .max_content_height(300)
-            .propagate_natural_height(true)
-            .hscrollbar_policy(PolicyType::Never)
-            .build();
-        let adds: Vec<gtk::Widget> = ["Key", "Wait", "Click", "Type", "Hold", "Note"]
+        // -- repeat ---------------------------------------------------------------
+        let repeat_group = adw::PreferencesGroup::builder().title("Repeat").build();
+        for (name, label) in [("once", "Once"), ("rounds", "Rounds"), ("until", "Until Stopped")] {
+            self.repeat.add(adw::Toggle::builder().name(name).label(label).build());
+        }
+        self.repeat.set_active_name(Some(match self.loops.get() {
+            1 => "once",
+            0 => "until",
+            _ => "rounds",
+        }));
+        let repeat_row = adw::ActionRow::builder().title("Play the steps").build();
+        repeat_row.add_suffix(&self.repeat);
+        repeat_group.add(&repeat_row);
+        repeat_group.add(&self.rounds);
+        let me = Rc::downgrade(self);
+        self.repeat.connect_active_name_notify(move |_| {
+            if let Some(d) = me.upgrade() {
+                d.repeat_changed();
+            }
+        });
+        let me = Rc::downgrade(self);
+        self.rounds.connect_value_notify(move |r| {
+            if let Some(d) = me.upgrade() {
+                if d.repeat.active_name().as_deref() == Some("rounds") {
+                    d.loops.set(r.value().max(2.0) as u32);
+                }
+            }
+        });
+        self.rounds.set_visible(self.repeat.active_name().as_deref() == Some("rounds"));
+
+        // -- steps ----------------------------------------------------------------
+        let adds: Vec<gtk::Widget> = ["Key", "Wait", "Click", "Type", "Hold", "Move", "Note"]
             .into_iter()
             .map(|kind| {
                 let me = Rc::downgrade(self);
-                Btn::new("addstep")
+                Btn::new("")
                     .text(kind)
-                    .icon("add")
-                    .size(17)
-                    .gap(5)
+                    .icon("list-add-symbolic")
+                    .tip(&format!("Add a {} step", kind.to_lowercase()))
                     .build(move || {
                         if let Some(d) = me.upgrade() {
                             d.rows
@@ -167,114 +224,63 @@ impl MacroDialog {
                     .upcast()
             })
             .collect();
-        let body = vbox!(
-            18,
-            "ebody",
-            hbox!(
-                12,
-                "",
-                vbox!(6, "", lbl("Name", "elabel"), self.name.clone()).hexpand(),
-                vbox!(6, "", lbl("Hotkey", "elabel"), self.cap.button.clone()).width(160)
-            ),
-            vbox!(
-                6,
-                "",
-                lbl("Repeat", "elabel"),
-                hbox!(10, "", self.seg.clone(), self.spin.clone())
-            ),
-            vbox!(
-                8,
-                "",
-                hbox!(8, "", lbl("Steps", "elabel"), self.count.clone()),
-                steps,
-                wrap(8, &adds),
-                self.err.clone()
-            )
-        );
-        let (me, me2) = (Rc::downgrade(self), Rc::downgrade(self));
-        let discard = Btn::new("mdel")
-            .text(if new { "Discard" } else { "Delete macro" })
-            .icon("delete")
-            .gap(5)
-            .build(move || {
+        let steps_group =
+            adw::PreferencesGroup::builder().title("Steps").header_suffix(&self.count).build();
+        steps_group.add(&self.list);
+        let add_box = wrap(6, &adds);
+        add_box.set_margin_top(12);
+        steps_group.add(&add_box);
+
+        let page = vbox!(24, "", about, repeat_group, steps_group, self.err.clone()).margins(18);
+        if !new {
+            let delete = adw::ButtonRow::builder().title("Delete Macro…").build();
+            delete.add_css_class("destructive-action");
+            let me = Rc::downgrade(self);
+            delete.connect_activated(move |_| {
                 if let Some(d) = me.upgrade() {
-                    d.delete_or_discard();
+                    d.delete();
                 }
             });
-        let cancel = {
-            let dialog = self.modal.dialog.clone();
-            Btn::new("cancel").text("Cancel").build(move || {
-                dialog.close();
-            })
-        };
-        let save = Btn::new("save").text("Save").icon("check").build(move || {
-            if let Some(d) = me2.upgrade() {
-                d.save();
-            }
-        });
-        let footer = hbox!(
-            8,
-            "mfoot",
-            discard.button,
-            gtk::Box::new(gtk::Orientation::Horizontal, 0).hexpand(),
-            cancel.button,
-            save.button
-        );
-        footer.set_margin_top(20);
-        let help =
-            Btn::new("mclose").icon("help").size(20).tip("How macros work").build(w.act(show_help));
-        help.button.set_valign(Align::Start);
-        if let Some(first) = self.modal.header.first_child() {
-            self.modal.header.insert_child_after(&help.button, first.next_sibling().as_ref());
+            let danger = adw::PreferencesGroup::new();
+            danger.add(&delete);
+            page.append(&danger);
         }
-        self.modal.build(&body, &footer);
-        self.draw_seg();
+        let clamp = adw::Clamp::builder().maximum_size(640).child(&page).build();
+        let scroller = gtk::ScrolledWindow::builder()
+            .child(&clamp)
+            .hscrollbar_policy(PolicyType::Never)
+            .propagate_natural_height(true)
+            .build();
+        let view = adw::ToolbarView::new();
+        view.add_top_bar(&header);
+        view.set_content(Some(&scroller));
+        self.dialog.set_child(Some(&view));
+        self.draw_hotkey();
         self.draw_steps();
     }
 
     // -- repeat -----------------------------------------------------------
-    fn set_loops(self: &Rc<Self>, n: u32) {
-        self.loops.set(n);
-        self.draw_seg();
-    }
-
-    fn draw_seg(self: &Rc<Self>) {
-        clear(&self.seg);
-        let loops = self.loops.get();
-        let mode = match loops {
-            1 => "once",
-            0 => "until",
-            _ => "rounds",
-        };
-        let rounds = self.spin.value_as_int().max(2).unsigned_abs();
-        for (key, label, ic, n) in [
-            ("once", "Once", "looks_one", 1),
-            ("rounds", "Rounds", "pin", rounds),
-            ("until", "Until stopped", "repeat", 0),
-        ] {
-            let me = Rc::downgrade(self);
-            let b = Btn::new(if key == mode { "segopt on" } else { "segopt" })
-                .text(label)
-                .icon(ic)
-                .size(16)
-                .build(move || {
-                    if let Some(d) = me.upgrade() {
-                        d.set_loops(n);
-                    }
-                });
-            self.seg.append(&b.button);
-        }
-        self.spin.set_visible(mode == "rounds");
+    fn repeat_changed(&self) {
+        let mode = self.repeat.active_name();
+        self.loops.set(match mode.as_deref() {
+            Some("once") => 1,
+            Some("rounds") => self.rounds.value().max(2.0) as u32,
+            _ => 0,
+        });
+        self.rounds.set_visible(mode.as_deref() == Some("rounds"));
     }
 
     // -- steps --------------------------------------------------------------
     fn draw_steps(self: &Rc<Self>) {
-        clear(&self.list);
+        self.list.remove_all();
         let rows = self.rows.borrow().clone();
         let real = rows.iter().filter(|r| r.kind != "Note").count();
-        self.count.set_label(&format!("{real} step{}", if real == 1 { "" } else { "s" }));
+        self.count.set_label(&plural(real, "step", "steps"));
         if rows.is_empty() {
-            self.list.append(&lbl("No steps yet. Add one below.", "noSteps").xalign(0.5));
+            self.list.append(&crate::ui::accounts::leader::placeholder(
+                "list-add-symbolic",
+                "No steps yet. Add one below.",
+            ));
         }
         for (i, r) in rows.iter().enumerate() {
             let mut kinds: Vec<&str> = STEP_TYPES.to_vec();
@@ -282,6 +288,9 @@ impl MacroDialog {
                 kinds.push(&r.kind);
             }
             let kind = gtk::DropDown::from_strings(&kinds);
+            kind.set_valign(Align::Center);
+            // One width for every type, so the values line up.
+            kind.set_width_request(104);
             kind.set_selected(kinds.iter().position(|k| *k == r.kind).unwrap_or(0) as u32);
             let (me, owned): (_, Vec<String>) =
                 (Rc::downgrade(self), kinds.iter().map(|k| (*k).to_owned()).collect());
@@ -294,9 +303,9 @@ impl MacroDialog {
                 .text(&r.value)
                 .placeholder_text(hint(&r.kind))
                 .hexpand(true)
+                .valign(Align::Center)
+                .css_classes(["monospace"])
                 .build();
-            value.add_css_class("sval");
-            value.add_css_class("mono");
             let me = Rc::downgrade(self);
             value.connect_changed(move |e| {
                 if let Some(d) = me.upgrade() {
@@ -307,37 +316,37 @@ impl MacroDialog {
             });
             let button = |ic: &str, tip: &str, on: bool, act: fn(&Rc<Self>, usize)| {
                 let me = Rc::downgrade(self);
-                let b = Btn::new(if ic == "delete" { "mini unlink" } else { "mini" })
-                    .icon(ic)
-                    .tip(tip)
-                    .build(move || {
-                        if let Some(d) = me.upgrade() {
-                            act(&d, i);
-                        }
-                    });
+                let b = Btn::new("flat circular").icon(ic).tip(tip).build(move || {
+                    if let Some(d) = me.upgrade() {
+                        act(&d, i);
+                    }
+                });
                 b.button.set_sensitive(on);
+                b.button.set_valign(Align::Center);
                 b.button
             };
             let len = rows.len();
-            self.list.append(&hbox!(
+            let line = hbox!(
                 8,
-                "estep",
-                lbl(&format!("{:02}", i + 1), "estepn mono").xalign(0.5).width(22),
-                hbox!(0, "stype", crate::ui::widgets::icon(step_icon(&r.kind), 16, ""), kind)
-                    .centered(),
+                "",
+                lbl(&format!("{}", i + 1), "number dimmed").xalign(1.0),
+                icon(step_icon(&r.kind)).css("dimmed"),
+                kind,
                 value,
-                hbox!(
-                    2,
-                    "",
-                    button("arrow_upward", "Move up", i > 0, |d, i| d.swap(i, i - 1)),
-                    button("arrow_downward", "Move down", i + 1 < len, |d, i| d.swap(i, i + 1)),
-                    button("delete", "Remove step", true, |d, i| {
-                        d.rows.borrow_mut().remove(i);
-                        d.draw_steps();
-                    })
-                )
-                .centered()
-            ));
+                button("go-up-symbolic", "Move up", i > 0, |d, i| d.swap(i, i - 1)),
+                button("go-down-symbolic", "Move down", i + 1 < len, |d, i| d.swap(i, i + 1)),
+                button("user-trash-symbolic", "Remove step", true, |d, i| {
+                    d.rows.borrow_mut().remove(i);
+                    d.draw_steps();
+                })
+            );
+            let row = gtk::ListBoxRow::builder()
+                .activatable(false)
+                .selectable(false)
+                .child(&line)
+                .build();
+            row.add_css_class("step-row");
+            self.list.append(&row);
         }
     }
 
@@ -365,10 +374,30 @@ impl MacroDialog {
     }
 
     // -- hotkey ---------------------------------------------------------------
+    fn draw_hotkey(&self) {
+        let key = self.hotkey.borrow().clone();
+        self.cap.remove_css_class("capturing");
+        self.cap.add_css_class("hotkey");
+        match key {
+            Some(k) => {
+                self.cap.set_child(Some(&keycaps(&k)));
+                self.cap.set_tooltip_text(Some(&format!(
+                    "{} — click to change",
+                    hotkey_label(Some(&k))
+                )));
+            }
+            None => {
+                self.cap.set_label("Set Hotkey…");
+                self.cap.set_tooltip_text(Some("Click, then press the keys"));
+            }
+        }
+        self.clear_key.set_visible(self.hotkey.borrow().is_some());
+    }
+
     fn capture(&self) {
         self.capturing.set(true);
-        self.cap.set_text("Press a key…");
-        self.cap.button.add_css_class("capturing");
+        self.cap.set_label("Press keys… (Esc cancels)");
+        self.cap.add_css_class("capturing");
     }
 
     fn on_key(&self, key: gdk::Key, state: gdk::ModifierType) -> glib::Propagation {
@@ -381,23 +410,17 @@ impl MacroDialog {
             return glib::Propagation::Stop; // a modifier alone is not a hotkey yet
         }
         self.capturing.set(false);
-        self.cap.button.remove_css_class("capturing");
         if name == "BackSpace" {
             self.hotkey.replace(None);
         } else if name != "Escape" {
             let mods = state & gtk::accelerator_get_default_mod_mask();
             self.hotkey.replace(Some(gtk::accelerator_name(key, mods).to_string()));
         }
-        let shown = self
-            .hotkey
-            .borrow()
-            .as_deref()
-            .map_or_else(|| "Set hotkey".to_owned(), |k| hotkey_label(Some(k)));
-        self.cap.set_text(&shown);
+        self.draw_hotkey();
         glib::Propagation::Stop
     }
 
-    // -- save -----------------------------------------------------------------
+    // -- save and delete ---------------------------------------------------------
     fn save(&self) {
         let text = grammar::to_text(&self.rows.borrow(), self.loops.get());
         let Some(w) = self.window.upgrade() else { return };
@@ -408,46 +431,23 @@ impl MacroDialog {
                 self.err.set_visible(true);
             }
             None => {
-                self.modal.dialog.close();
+                self.dialog.close();
             }
         }
     }
 
-    fn delete_or_discard(&self) {
-        if let (Some(old), Some(w)) = (&self.old, self.window.upgrade()) {
-            w.delete_macro(old);
-        }
-        self.modal.dialog.close();
+    fn delete(&self) {
+        let (Some(old), Some(w)) = (self.old.clone(), self.window.upgrade()) else { return };
+        let dialog = self.dialog.clone();
+        confirm::ask(
+            &w,
+            &format!("Delete {old}?"),
+            "Accounts that play it are left with no macro.",
+            "_Delete",
+            move |w| {
+                w.delete_macro(&old);
+                dialog.close();
+            },
+        );
     }
-}
-
-/// "How macros work": the help page.
-pub fn show_help(w: &Window) {
-    let text = gtk::Label::builder()
-        .label(include_str!("../../../resources/macro-help.markup"))
-        .use_markup(true)
-        .wrap(true)
-        .xalign(0.0)
-        .selectable(true)
-        .margin_top(6)
-        .margin_bottom(18)
-        .margin_start(18)
-        .margin_end(18)
-        .build();
-    let page = adw::ToolbarView::new();
-    page.add_top_bar(&adw::HeaderBar::new());
-    page.set_content(Some(
-        &gtk::ScrolledWindow::builder()
-            .child(&text)
-            .propagate_natural_height(true)
-            .hscrollbar_policy(PolicyType::Never)
-            .build(),
-    ));
-    adw::Dialog::builder()
-        .title("How macros work")
-        .child(&page)
-        .content_width(520)
-        .content_height(640)
-        .build()
-        .present(Some(w.gtk_window()));
 }

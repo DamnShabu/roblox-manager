@@ -1,22 +1,23 @@
-//! The accounts column: drawing it, and everything a row, card or dialog
+//! The accounts page: drawing it, and everything a row, section or dialog
 //! asks of the accounts and groups.
 
 use adw::prelude::*;
-use gtk::Align;
 use rbxmgr_core::accounts::Account;
 use rbxmgr_core::types::{Label, PlaceId, Profile, User, UserId};
 
 use super::Window;
-use crate::ui::accounts::group::group_card;
-use crate::ui::accounts::leader::leader_card;
+use crate::ui::accounts::group::group_section;
+use crate::ui::accounts::group_settings::GroupSettings;
+use crate::ui::accounts::leader::leader_section;
+use crate::ui::confirm;
 use crate::ui::login::AddAccountDialog;
-use crate::ui::widgets::{Fluent, LabelFluent, clear, icon, lbl};
+use crate::ui::widgets::{clear, plural};
 
 impl Window {
     pub fn refresh_accounts(&self) {
-        self.0.chips.borrow_mut().clear();
-        let accounts_box = &self.0.ui.accounts_box;
-        clear(accounts_box);
+        self.0.rows.borrow_mut().clear();
+        let ui = &self.0.ui;
+        clear(&ui.accounts_box);
         let (leader, followers, groups, sections) = {
             let s = self.state();
             let store = &s.accounts;
@@ -56,25 +57,20 @@ impl Window {
             )
         };
         let Some(leader) = leader else {
-            accounts_box.append(
-                &hbox!(
-                    8,
-                    "dashedbox",
-                    icon("person_add", 16, ""),
-                    lbl("No accounts yet -- add one with Add account; it signs in with Roblox Quick Login.", "").wrapped()
-                )
-                .halign(Align::Fill),
-            );
+            ui.pages.set_visible_child_name("welcome");
+            ui.launch_bar.set_visible(false);
             self.refresh_launch_state();
             return;
         };
-        accounts_box.append(&leader_card(self, leader.as_ref(), &followers));
+        ui.pages.set_visible_child_name("accounts");
+        ui.launch_bar.set_visible(true);
+        ui.accounts_box.append(&leader_section(self, leader.as_ref(), &followers));
         for (i, members) in sections.iter().enumerate() {
             let group = groups.get(i);
             if group.is_none() && members.is_empty() {
                 continue;
             }
-            accounts_box.append(&group_card(self, group, members));
+            ui.accounts_box.append(&group_section(self, group, members));
         }
         self.refresh_launch_state();
     }
@@ -129,15 +125,19 @@ impl Window {
         self.changed();
     }
 
-    pub fn toggle_selected(&self, id: UserId) {
-        let on = self.state().accounts.get(id).is_some_and(|a| a.selected);
-        self.state_mut().accounts.set_selected(&[id], !on);
-        self.changed();
-    }
-
+    /// Selection is drawn by the rows' redraws: nothing is rebuilt, so
+    /// a click keeps its place and its focus.
     pub fn select_accounts(&self, ids: &[UserId], on: bool) {
+        let changed = {
+            let s = self.state();
+            ids.iter().any(|id| s.accounts.get(*id).is_some_and(|a| a.selected != on))
+        };
+        if !changed {
+            return;
+        }
         self.state_mut().accounts.set_selected(ids, on);
-        self.changed();
+        self.save_accounts();
+        self.refresh_launch_state();
     }
 
     pub fn on_select_all(&self) {
@@ -149,32 +149,46 @@ impl Window {
         self.select_accounts(&ids, !every);
     }
 
-    pub fn toggle_account(&self, id: UserId) {
-        {
-            let mut s = self.state_mut();
-            if !s.open_accounts.remove(&id) {
-                s.open_accounts.insert(id);
-            }
-        }
-        self.refresh_accounts();
+    // -- groups -----------------------------------------------------------
+    /// A new group, and its settings open to name it.
+    pub fn add_group(&self) {
+        let gid = self.state_mut().accounts.add_group(chrono::Utc::now());
+        self.changed();
+        GroupSettings::open(self, &gid);
     }
 
-    // -- groups -----------------------------------------------------------
-    pub fn add_group(&self) {
-        {
-            let mut s = self.state_mut();
-            let gid = s.accounts.add_group(chrono::Utc::now());
-            s.edit_group = Some(gid);
-        }
-        self.changed();
+    pub fn confirm_delete_group(&self, gid: &str) {
+        self.confirm_delete_group_then(gid, || {});
+    }
+
+    /// Ask, then delete the group and run `after`.
+    pub fn confirm_delete_group_then(&self, gid: &str, after: impl Fn() + 'static) {
+        let Some((name, n)) = ({
+            let s = self.state();
+            let a = &s.accounts;
+            a.groups().iter().find(|g| g.id == gid).map(|g| {
+                let n = a.accounts().iter().filter(|x| a.group_of(x) == Some(gid)).count();
+                (if g.name.is_empty() { "Untitled group".to_owned() } else { g.name.clone() }, n)
+            })
+        }) else {
+            return;
+        };
+        let body = match n {
+            0 => "It has no accounts.".to_owned(),
+            n => format!(
+                "Its {} move to Ungrouped; none is removed.",
+                plural(n, "account", "accounts")
+            ),
+        };
+        let gid = gid.to_owned();
+        confirm::ask(self, &format!("Delete {name}?"), &body, "_Delete", move |w| {
+            w.delete_group(&gid);
+            after();
+        });
     }
 
     pub fn delete_group(&self, gid: &str) {
-        let gone = {
-            let mut s = self.state_mut();
-            s.edit_group = None;
-            s.accounts.delete_group(gid)
-        };
+        let gone = self.state_mut().accounts.delete_group(gid);
         self.changed();
         self.show_games();
         let name = gone
@@ -197,15 +211,6 @@ impl Window {
             }
         }
         self.changed();
-    }
-
-    pub fn toggle_group_edit(&self, gid: &str) {
-        {
-            let mut s = self.state_mut();
-            s.edit_group =
-                if s.edit_group.as_deref() == Some(gid) { None } else { Some(gid.to_owned()) };
-        }
-        self.refresh_accounts();
     }
 
     pub fn rename_group(&self, gid: &str, name: &str) {
@@ -247,6 +252,8 @@ impl Window {
         if new {
             self.toast(&format!("Added {label}"));
             self.log(&format!("Added {label} (@{})", user.name));
+            // Its favourites join the strip, and its picture its row.
+            self.reload_games();
         } else {
             self.toast(&format!("Signed {label} in again"));
             self.log(&format!("{label}: new session stored in the keyring"));
@@ -261,14 +268,13 @@ impl Window {
         }
         let new = match Label::parse(new) {
             Ok(l) => l,
-            Err(e) => return self.log(&e.to_string()),
+            Err(e) => return self.toast(&e.to_string()),
         };
         if self.state().accounts.by_label(new.as_str()).is_some() {
-            return self.log(&format!("'{new}' already exists"));
+            return self.toast(&format!("An account is already called {new}"));
         }
         if self.state().busy > 0 {
-            self.log("Wait for the current task to finish");
-            return self.refresh_accounts();
+            return self.toast("Wait for the current task to finish, then rename it");
         }
         let keyring = self.services().keyring.clone();
         let (from, to) = (old.clone(), new.clone());
@@ -284,10 +290,14 @@ impl Window {
                             w.toast(&format!("Renamed {old} → {new}"));
                             w.log(&format!("Renamed {old} → {new}"));
                         }
-                        Err(e) => w.log(&format!("Could not rename '{old}': {e}")),
+                        Err(e) => {
+                            w.toast(&format!("Could not rename {old}"));
+                            w.log(&format!("Could not rename '{old}': {e}"));
+                        }
                     }
                 }
                 Err(e) => {
+                    w.toast(&format!("Could not rename {old}"));
                     w.log(&format!("Could not rename '{old}': {e}"));
                     w.refresh_accounts();
                 }
@@ -295,12 +305,43 @@ impl Window {
         );
     }
 
+    pub fn confirm_remove(&self, id: UserId) {
+        self.confirm_remove_then(id, || {});
+    }
+
+    /// Ask, then remove the account and run `after`.
+    pub fn confirm_remove_then(&self, id: UserId, after: impl Fn() + 'static) {
+        let Some(label) = self.label_of(id) else { return };
+        confirm::ask(
+            self,
+            &format!("Remove {label}?"),
+            "Its session leaves the keyring and its client is closed. The Roblox account itself \
+             is untouched; add it again any time with Quick Login.",
+            "_Remove",
+            move |w| {
+                w.remove_account(id);
+                after();
+            },
+        );
+    }
+
+    /// Why the account's last launch failed, in full.
+    pub fn show_failure(&self, id: UserId) {
+        let (label, why) = {
+            let s = self.state();
+            (s.accounts.get(id).map(|a| a.name.to_string()), s.failures.get(&id).cloned())
+        };
+        if let (Some(label), Some(why)) = (label, why) {
+            confirm::tell(self, &format!("{label} Did Not Launch"), &capitalized(&why));
+        }
+    }
+
     /// Forget an account. Its client goes too -- once the account is gone
     /// Stop all no longer knows its profile -- and the sessions the manager
     /// gave its profile; the empty profile directory stays.
     pub fn remove_account(&self, id: UserId) {
         if self.state().busy > 0 {
-            return self.log("Wait for the current task to finish");
+            return self.toast("Wait for the current task to finish, then remove it");
         }
         let Some(label) = self.label_of(id) else { return };
         let playing = self.state_mut().macro_runs.remove(&id);
@@ -329,7 +370,7 @@ impl Window {
         {
             let mut s = self.state_mut();
             s.accounts.remove(id);
-            s.open_accounts.remove(&id);
+            s.failures.remove(&id);
         }
         self.save_accounts();
         self.refresh();

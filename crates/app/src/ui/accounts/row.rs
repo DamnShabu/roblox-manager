@@ -1,210 +1,295 @@
-//! One account: select, launch or stop, and a gear that opens everything else
-//! about it. Every account but the leader can be dragged -- onto another row
-//! to reorder or regroup, onto a group, or onto the leader to auto-join it.
+//! One account as a row: select it, see how it is, launch or stop it, and a
+//! menu for everything else (also on a right click). Every account but the
+//! leader can be dragged -- onto another row to reorder or regroup, onto a
+//! group, or onto the leader to auto-join it.
+
+use std::cell::Cell;
+use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{Align, gdk, glib};
+use gtk::{Align, gdk, gio, glib};
 use rbxmgr_core::accounts::{Account, relative_time};
 use rbxmgr_core::types::UserId;
 
-use super::settings;
 use crate::state::Chip;
-use crate::ui::widgets::{Btn, Fluent, LabelFluent, clear, dot, icon, icon_fill, icon_tile, lbl};
+use crate::ui::widgets::{Btn, Fluent, avatar, clear, icon, lbl, status, toggle_class};
 use crate::ui::window::Window;
 
-pub fn account_row(w: &Window, acct: &Account, first: bool) -> gtk::Box {
+pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
     let id = acct.user_id;
-    let (opened, macro_shown) = {
+    let (macro_shown, picture) = {
         let s = w.state();
         let m = acct.macro_name.clone().filter(|m| s.macros.contains(m));
-        (s.open_accounts.contains(&id), m)
+        (m, w.services().avatars.cached(&id.to_string()))
     };
-    let on = acct.selected;
+    let row = adw::ActionRow::builder()
+        .title(acct.name.as_str())
+        .subtitle(subtitle(acct, macro_shown.as_deref()))
+        .use_markup(false)
+        .title_lines(1)
+        .subtitle_lines(1)
+        .build();
+    row.add_css_class("account");
 
-    let lead_or_handle = if acct.leader {
-        icon_fill("star", 18, "amber").tip("Leader")
+    // A prefix goes in front of those already there: added last to first.
+    row.add_prefix(&avatar(acct.name.as_str(), picture.as_deref(), 34));
+    // Set while a redraw brings the box in line with the state, so the
+    // change is not taken for a click.
+    let quiet = Rc::new(Cell::new(false));
+    let check = gtk::CheckButton::builder()
+        .active(acct.selected)
+        .valign(Align::Center)
+        .tooltip_text("Include in Launch Selected")
+        .build();
+    {
+        let (weak, quiet) = (w.weak(), quiet.clone());
+        check.connect_toggled(move |c| {
+            if let (false, Some(w)) = (quiet.get(), weak.upgrade()) {
+                w.select_accounts(&[id], c.is_active());
+            }
+        });
+    }
+    row.add_prefix(&check);
+    row.set_activatable_widget(Some(&check));
+    if acct.leader {
+        row.add_prefix(&icon("starred-symbolic").css("leader-star").tip("The leader"));
     } else {
-        let h = icon("drag_indicator", 18, "handle")
-            .tip("Drag to reorder, move to a group, or drop on the leader");
-        h.set_cursor_from_name(Some("grab"));
-        h
-    };
-    let check = Btn::new(if on { "cbox on" } else { "cbox" })
-        .size(15)
-        .tip("Include in Launch selected")
-        .build(w.act(move |w| w.toggle_selected(id)));
-    check.button.set_valign(Align::Center);
-    if on {
-        check.button.set_child(Some(&icon("check", 15, "")));
+        row.add_prefix(
+            &icon("list-drag-handle-symbolic").css("dimmed").tip(
+                "Drag to reorder, onto a group to move it, or onto the leader to auto-join it",
+            ),
+        );
     }
 
-    let title =
-        hbox!(8, "", lbl(acct.name.as_str(), if on { "aname on" } else { "aname" }).ellipsize());
-    if let Some(user) = acct.username.as_deref().filter(|u| *u != acct.name.as_str()) {
-        title.set_tooltip_text(Some(&format!("@{user}")));
-    }
     if let Some(n) = acct.follow.filter(|_| !acct.leader) {
-        title.append(
-            &hbox!(4, "ajbadge", icon("link", 13, ""), lbl(&format!("Auto-join #{n}"), ""))
-                .centered(),
+        row.add_suffix(
+            &lbl(&format!("Auto-join #{n}"), "tag")
+                .centered()
+                .tip("Launch as Group sends it into the leader's server, in this place"),
         );
     }
     let note = acct.note.trim();
     if !note.is_empty() {
-        let n = icon_tile("noteic", "sticky_note_2", 16).centered();
-        n.set_tooltip_markup(Some(&format!(
-            "<span size='small' weight='bold' foreground='#e9bd6a'>NOTE</span>\n{}",
-            glib::markup_escape_text(note)
-        )));
-        n.set_cursor_from_name(Some("help"));
-        title.append(&n);
+        row.add_suffix(&icon("text-x-generic-symbolic").css("dimmed").tip(note));
     }
     if acct.low_power {
-        title.append(&icon("eco", 15, "eco").tip("Low-power client"));
+        row.add_suffix(
+            &icon("power-profile-power-saver-symbolic").css("dimmed").tip("Low-power client"),
+        );
     }
-    let sub = hbox!(
-        6,
-        "sub",
-        icon("schedule", 14, ""),
-        lbl(&relative_time(acct.last_launch.as_deref(), chrono::Utc::now()), "")
-    );
-    if let Some(m) = &macro_shown {
-        sub.append(&gtk::Box::new(gtk::Orientation::Horizontal, 0).css("bullet").centered());
-        sub.append(&icon("keyboard", 14, ""));
-        sub.append(&lbl(m, "").ellipsize());
-    }
-    let info = vbox!(3, "", title, sub).hexpand().centered();
-
-    let chipbox = hbox!(0, "").centered();
-    let play = Btn::new("playb")
-        .icon("play_arrow")
-        .size(20)
-        .fill()
+    let failure = Btn::new("flat circular error")
+        .icon("dialog-warning-symbolic")
+        .build(w.act(move |w| w.show_failure(id)));
+    failure.button.set_valign(Align::Center);
+    let status_box = hbox!(0, "").centered();
+    let play = Btn::new("flat circular")
+        .icon("media-playback-start-symbolic")
         .build(w.act(move |w| w.play_or_stop(id)));
     play.button.set_valign(Align::Center);
-    let gear = Btn::new(if opened { "setb open" } else { "setb" })
-        .icon("settings")
-        .size(20)
-        .tip("Account settings")
-        .build(w.act(move |w| w.toggle_account(id)));
-    gear.button.set_valign(Align::Center);
-    let css = format!(
-        "arow{}{}{}",
-        if first { " first" } else { "" },
-        if on { " sel" } else { "" },
-        if opened { " open" } else { "" }
-    );
-    let line = hbox!(
-        12,
-        &css,
-        lead_or_handle,
-        check.button,
-        info,
-        chipbox.clone(),
-        play.button.clone(),
-        gear.button
-    );
-    let row = vbox!(0, "", line.clone());
+    let model = menu(w, acct);
+    let more = gtk::MenuButton::builder()
+        .icon_name("view-more-symbolic")
+        .menu_model(&model)
+        .valign(Align::Center)
+        .tooltip_text("More")
+        .css_classes(["flat", "circular"])
+        .build();
+    row.add_suffix(&failure.button);
+    row.add_suffix(&status_box);
+    row.add_suffix(&play.button);
+    row.add_suffix(&more);
+    context_menu(&row, &model);
     if !acct.leader {
-        drag_and_drop(w, &line, id);
-    }
-    if opened {
-        row.append(&settings::panel(w, acct));
+        drag_and_drop(w, &row, id);
     }
 
-    let leader = acct.leader;
-    w.add_chip(Box::new(move |s| {
+    let (leader, shown) = (acct.leader, row.clone());
+    w.watch_accounts(Box::new(move |s| {
         let chip = s.chip(id);
-        clear(&chipbox);
-        chipbox.append(&chip_widget(chip, false));
-        let live = chip == Chip::Running;
-        play.set_icon(if live { "stop" } else { "play_arrow" });
-        if live {
-            play.button.add_css_class("stop");
-        } else {
-            play.button.remove_css_class("stop");
+        clear(&status_box);
+        if chip != Chip::Idle {
+            let (css, text, live) = chip.look();
+            status_box.append(&status(css, text, live));
         }
+        let live = chip == Chip::Running;
+        toggle_class(&shown, "live", live);
+        play.set_icon(if live {
+            "media-playback-stop-symbolic"
+        } else {
+            "media-playback-start-symbolic"
+        });
         play.button.set_sensitive(!matches!(chip, Chip::Starting | Chip::Joining));
         play.button.set_tooltip_text(Some(if live {
             "Close this account's client"
         } else if leader {
-            "Launch the leader, then auto-join the linked accounts"
+            "Launch the leader, then its auto-join accounts into its server"
         } else {
-            "Launch"
+            "Launch into the target"
         }));
+        if let Some(a) = s.accounts.get(id).filter(|a| a.selected != check.is_active()) {
+            quiet.set(true);
+            check.set_active(a.selected);
+            quiet.set(false);
+        }
+        match s.failures.get(&id) {
+            Some(why) => {
+                failure.button.set_visible(true);
+                failure.button.set_tooltip_text(Some(&format!("The last launch failed: {why}")));
+            }
+            None => failure.button.set_visible(false),
+        }
     }));
     row
 }
 
-/// A status chip.
-pub fn chip_widget(chip: Chip, small: bool) -> gtk::Box {
-    let (css, text, pulse) = chip.look();
-    hbox!(
-        6,
-        &format!("chip {css}{}", if small { " small" } else { "" }),
-        dot(css, pulse, 7),
-        lbl(text, "")
-    )
-    .centered()
+/// "@alt_one · launched 3h ago · plays Anti-AFK"
+fn subtitle(acct: &Account, macro_name: Option<&str>) -> String {
+    let mut parts = Vec::new();
+    if let Some(user) = acct.username.as_deref().filter(|u| *u != acct.name.as_str()) {
+        parts.push(format!("@{user}"));
+    }
+    parts.push(match acct.last_launch.as_deref() {
+        None => "never launched".to_owned(),
+        when => format!("launched {}", relative_time(when, chrono::Utc::now())),
+    });
+    if let Some(m) = macro_name {
+        parts.push(format!("plays {m}"));
+    }
+    parts.join(" · ")
+}
+
+/// The row's menu: window actions, aimed at this account.
+fn menu(w: &Window, acct: &Account) -> gio::Menu {
+    let id = acct.user_id.0;
+    let (has_leader, groups, current) = {
+        let s = w.state();
+        let groups: Vec<(String, String)> = std::iter::once((String::new(), "Ungrouped".into()))
+            .chain(s.accounts.groups().iter().map(|g| {
+                let name = if g.name.is_empty() { "Untitled group".into() } else { g.name.clone() };
+                (g.id.clone(), name)
+            }))
+            .collect();
+        let current = s.accounts.group_of(acct).unwrap_or_default().to_owned();
+        (s.accounts.leader().is_some(), groups, current)
+    };
+    let item = |label: &str, action: &str| {
+        let item = gio::MenuItem::new(Some(label), None);
+        item.set_action_and_target_value(Some(action), Some(&id.to_variant()));
+        item
+    };
+    let model = gio::Menu::new();
+    model.append_item(&item("Settings…", "win.account-settings"));
+    if !acct.leader {
+        let layout = gio::Menu::new();
+        layout.append_item(&item("Make Leader", "win.make-leader"));
+        if has_leader {
+            let follow =
+                if acct.follow.is_some() { "Stop Auto-joining" } else { "Auto-join the Leader" };
+            layout.append_item(&item(follow, "win.toggle-follow"));
+        }
+        let places = gio::Menu::new();
+        for (gid, name) in groups.into_iter().filter(|(gid, _)| *gid != current) {
+            // A menu label's underscores are mnemonics; a name's are text.
+            let entry = gio::MenuItem::new(Some(&name.replace('_', "__")), None);
+            entry.set_action_and_target_value(
+                Some("win.move-account"),
+                Some(&(id, gid).to_variant()),
+            );
+            places.append_item(&entry);
+        }
+        if places.n_items() > 0 {
+            layout.append_submenu(Some("Move To"), &places);
+        }
+        model.append_section(None, &layout);
+    }
+    let session = gio::Menu::new();
+    session.append_item(&item("Check Session", "win.check-session"));
+    session.append_item(&item("Sign In Again…", "win.sign-in-again"));
+    model.append_section(None, &session);
+    let danger = gio::Menu::new();
+    danger.append_item(&item("Remove…", "win.remove-account"));
+    model.append_section(None, &danger);
+    model
+}
+
+/// The same menu where the row is right-clicked.
+pub fn context_menu(row: &impl IsA<gtk::Widget>, model: &gio::Menu) {
+    let click = gtk::GestureClick::builder().button(gdk::BUTTON_SECONDARY).build();
+    let model = model.clone();
+    click.connect_pressed(move |g, _, x, y| {
+        let Some(widget) = g.widget() else { return };
+        g.set_state(gtk::EventSequenceState::Claimed);
+        let pop = gtk::PopoverMenu::from_model(Some(&model));
+        pop.set_parent(&widget);
+        pop.set_has_arrow(false);
+        pop.set_halign(Align::Start);
+        pop.set_pointing_to(Some(&gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+        // Unparented once any chosen action has found its group through it.
+        pop.connect_closed(|p| {
+            let p = p.clone();
+            glib::idle_add_local_once(move || p.unparent());
+        });
+        pop.popup();
+    });
+    row.add_controller(click);
 }
 
 /// The row as a drag source (its user id), and a drop target that marks
 /// where a dragged account would land: after this row when it comes from
 /// above, before it when from below.
-fn drag_and_drop(w: &Window, line: &gtk::Box, id: UserId) {
+fn drag_and_drop(w: &Window, row: &adw::ActionRow, id: UserId) {
     let src = gtk::DragSource::new();
     src.set_actions(gdk::DragAction::MOVE);
     src.connect_prepare(move |_, _, _| {
         Some(gdk::ContentProvider::for_value(&id.0.to_string().to_value()))
     });
-    let dragged = line.clone();
+    let dragged = row.clone();
     src.connect_drag_begin(move |s, _| {
         s.set_icon(Some(&gtk::WidgetPaintable::new(Some(&dragged))), 20, 20);
         dragged.add_css_class("dragging");
     });
-    let dragged = line.clone();
+    let dragged = row.clone();
     src.connect_drag_end(move |_, _, _| dragged.remove_css_class("dragging"));
-    line.add_controller(src);
+    row.add_controller(src);
 
     let drop = gtk::DropTarget::new(glib::Type::STRING, gdk::DragAction::MOVE);
     drop.set_preload(true);
-    let (marked, weak) = (line.clone(), w.weak());
+    let (marked, weak) = (row.clone(), w.weak());
     drop.connect_motion(move |t, _, _| {
         mark(&marked, None);
-        let from =
-            t.value().and_then(|v| v.get::<String>().ok()).and_then(|v| v.parse().ok()).map(UserId);
+        let from = dragged_id(t.value().as_ref());
         if let (Some(from), Some(w)) = (from.filter(|f| *f != id), weak.upgrade()) {
             let order: Vec<UserId> =
                 w.state().accounts.visual_order().iter().map(|a| a.user_id).collect();
             if let (Some(a), Some(b)) =
                 (order.iter().position(|x| *x == from), order.iter().position(|x| *x == id))
             {
-                mark(&marked, Some(if a < b { "below" } else { "above" }));
+                mark(&marked, Some(if a < b { "drop-below" } else { "drop-above" }));
             }
         }
         gdk::DragAction::MOVE
     });
-    let marked = line.clone();
+    let marked = row.clone();
     drop.connect_leave(move |_| mark(&marked, None));
-    let (marked, weak) = (line.clone(), w.weak());
+    let (marked, weak) = (row.clone(), w.weak());
     drop.connect_drop(move |_, value, _, _| {
         mark(&marked, None);
-        let from = value.get::<String>().ok().and_then(|v| v.parse().ok()).map(UserId);
-        if let (Some(from), Some(w)) = (from, weak.upgrade()) {
+        if let (Some(from), Some(w)) = (dragged_id(Some(value)), weak.upgrade()) {
             // Deferred: the row that took the drop is rebuilt by it.
             glib::idle_add_local_once(move || w.drop_on_row(from, id));
         }
         true
     });
-    line.add_controller(drop);
+    row.add_controller(drop);
 }
 
-fn mark(line: &gtk::Box, place: Option<&str>) {
-    for c in ["above", "below"] {
-        if Some(c) == place {
-            line.add_css_class(c);
-        } else {
-            line.remove_css_class(c);
-        }
+/// The account a drag carries.
+pub fn dragged_id(value: Option<&glib::Value>) -> Option<UserId> {
+    value.and_then(|v| v.get::<String>().ok()).and_then(|v| v.parse().ok()).map(UserId)
+}
+
+fn mark(row: &adw::ActionRow, place: Option<&str>) {
+    for c in ["drop-above", "drop-below"] {
+        toggle_class(row, c, Some(c) == place);
     }
 }

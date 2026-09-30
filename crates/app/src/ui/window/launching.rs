@@ -2,18 +2,17 @@
 //! session checks, and updating Roblox.
 
 use std::collections::HashSet;
-use std::time::Duration;
 
-use adw::prelude::*;
-use gtk::glib;
 use rbxmgr_core::cordial::roblox_build;
-use rbxmgr_core::launch::{LaunchAccount, LaunchRequest, Mode};
+use rbxmgr_core::launch::{LaunchAccount, LaunchReport, LaunchRequest, Mode};
 use rbxmgr_core::roblox::{FAVORITES_SHOWN, Game, Roblox, RobloxError};
 use rbxmgr_core::types::{Label, PlaceId, Profile, ServerId, UserId};
 
 use super::Window;
 use crate::state::{Chip, FriendTarget, Tile};
+use crate::ui::activity;
 use crate::ui::friends::FriendsDialog;
+use crate::ui::widgets::plural;
 
 impl Window {
     // -- the game bar and the target ---------------------------------------
@@ -74,22 +73,39 @@ impl Window {
         self.log(&format!("Target: join {display}"));
     }
 
-    /// Everyone's favourites from Roblox, and their icons.
+    /// Everyone's favourites from Roblox, their icons, and the accounts'
+    /// headshots.
     pub fn reload_games(&self) {
         let accounts: Vec<(UserId, Label)> =
             self.state().accounts.accounts().iter().map(|a| (a.user_id, a.name.clone())).collect();
         if accounts.is_empty() {
-            return self.log("Add an account first -- favourites come from your accounts");
+            return self.toast("Add an account first: favourites come from your accounts");
         }
         let total = accounts.len();
-        let (keyring, roblox, icons, log) = (
+        let (keyring, roblox, icons, avatars, log) = (
             self.services().keyring.clone(),
             self.services().roblox.clone(),
             self.services().icons.clone(),
+            self.services().avatars.clone(),
             self.logger(),
         );
         self.run_task(
             move || {
+                let users: Vec<UserId> = accounts.iter().map(|(id, _)| *id).collect();
+                match roblox.headshot_urls(&users) {
+                    Ok(urls) => {
+                        let failed = urls
+                            .iter()
+                            .filter_map(|(id, url)| {
+                                avatars.refresh(roblox.transport(), &id.to_string(), url).err()
+                            })
+                            .last();
+                        if let Some(e) = failed {
+                            log.line(format!("Some account pictures did not load: {e}"));
+                        }
+                    }
+                    Err(e) => log.line(format!("Could not load account pictures: {e}")),
+                }
                 let mut fresh: Vec<(UserId, Vec<Game>)> = Vec::new();
                 for (id, label) in accounts {
                     let got = keyring.cookie(&label).map_err(|e| e.to_string()).and_then(|c| {
@@ -137,7 +153,7 @@ impl Window {
         );
     }
 
-    /// The launch buttons, summary, target and select-all, as the state is.
+    /// The launch bar, the accounts' heading and select-all, as the state is.
     pub fn refresh_launch_state(&self) {
         let (n, total, leader, followers, target) = {
             let s = self.state();
@@ -151,17 +167,30 @@ impl Window {
             )
         };
         let ui = &self.0.ui;
-        ui.btn_each.button.set_sensitive(n >= 1);
-        ui.btn_each.set_text(&format!("Launch selected ({n})"));
-        ui.btn_group.button.set_sensitive(leader.is_some());
+        self.set_action_enabled("launch-selected", n >= 1);
+        self.set_action_enabled("launch-group", leader.is_some());
+        ui.btn_each.set_text(&if n == 0 {
+            "Launch Selected".to_owned()
+        } else {
+            format!("Launch {n} Selected")
+        });
         ui.summary.set_label(&leader.map_or_else(
-            || "No leader set".to_owned(),
-            |l| format!("Leader {l} · {followers} auto-join"),
+            || "No leader yet".to_owned(),
+            |l| match followers {
+                0 => format!("{l} leads"),
+                n => format!("{l} leads · {} follow", plural(n, "account", "accounts")),
+            },
         ));
-        ui.target_text.set_label(&target);
+        ui.target_text.set_label(&format!("Into {target}"));
+        ui.accounts_meta
+            .set_label(&format!("{} · {n} selected", plural(total, "account", "accounts")));
         let every = total > 0 && n == total;
-        ui.select_all.set_text(if every { "Deselect all" } else { "Select all" });
-        ui.select_all.set_icon(if every { "remove_done" } else { "done_all" });
+        ui.select_all.set_text(if every { "Select None" } else { "Select All" });
+        ui.select_all.set_icon(if every {
+            "edit-clear-all-symbolic"
+        } else {
+            "edit-select-all-symbolic"
+        });
         self.refresh_states();
     }
 
@@ -316,19 +345,53 @@ impl Window {
                         let now = chrono::Utc::now();
                         for id in &report.expired {
                             s.accounts.end_check(*id, Some(false), now);
+                            s.failures.remove(id);
                         }
                         for (id, user) in &report.launched {
                             s.accounts.record_launch(*id, user, place.as_ref(), now);
+                            s.failures.remove(id);
+                        }
+                        for (id, why) in &report.failed {
+                            s.failures.insert(*id, why.clone());
                         }
                     }
                 }
-                if let Err(e) = result {
-                    w.log(&format!("Launch failed: {e}"));
+                match result {
+                    Ok(report) => w.tell_report(&report),
+                    Err(e) => {
+                        w.log(&format!("Launch failed: {e}"));
+                        w.toast_with(
+                            "Nothing launched: Roblox could not be installed",
+                            "Details",
+                            activity::open_log,
+                        );
+                    }
                 }
                 w.save_accounts();
                 w.refresh_accounts();
             },
         );
+    }
+
+    /// A toast for a launch that did not all go through; one that did is
+    /// told by its rows turning to Running.
+    fn tell_report(&self, report: &LaunchReport) {
+        let (ok, expired, failed) =
+            (report.launched.len(), report.expired.len(), report.failed.len());
+        if expired + failed == 0 {
+            return;
+        }
+        let mut parts = Vec::new();
+        if ok > 0 {
+            parts.push(format!("{ok} launched"));
+        }
+        if expired > 0 {
+            parts.push(format!("{expired} signed out"));
+        }
+        if failed > 0 {
+            parts.push(format!("{failed} failed"));
+        }
+        self.toast_with(&parts.join(" · "), "Details", activity::open_log);
     }
 
     // -- stopping -----------------------------------------------------------
@@ -449,56 +512,42 @@ impl Window {
 
     pub fn refresh_all(&self) {
         let ids: Vec<UserId> = self.state().accounts.accounts().iter().map(|a| a.user_id).collect();
-        if !ids.is_empty() {
-            self.check_sessions(ids);
+        if ids.is_empty() {
+            return self.toast("Add an account first");
         }
+        self.check_sessions(ids);
         self.reload_games();
     }
 
     // -- updating Roblox ------------------------------------------------------
     /// Install the newest Roblox build any source has. Launches install one
     /// when there is none, but only this moves to a newer one: Roblox turns
-    /// old clients away, so this is the button for "the game says update".
+    /// old clients away, so this is the fix for "the game says update".
     pub fn on_update_roblox(&self) {
-        self.set_update("busy");
+        if self.state().updating {
+            return;
+        }
+        self.state_mut().updating = true;
+        self.set_action_enabled("update-roblox", false);
+        self.0.ui.banner.set_revealed(true);
         let (runner, log) = (self.services().runner.clone(), self.logger());
         self.run_task(
             move || roblox_build(&*runner, &|l| log.line(l), true),
-            |w, got| match got {
-                Ok(_) => {
-                    w.log("Roblox is up to date");
-                    w.set_update("done");
-                    let weak = w.weak();
-                    glib::timeout_add_local_once(Duration::from_millis(2600), move || {
-                        if let Some(w) = weak.upgrade() {
-                            w.set_update("idle");
-                        }
-                    });
-                }
-                Err(e) => {
-                    w.log(&format!("Could not update Roblox: {e}"));
-                    w.set_update("idle");
+            |w, got| {
+                w.state_mut().updating = false;
+                w.set_action_enabled("update-roblox", true);
+                w.0.ui.banner.set_revealed(false);
+                match got {
+                    Ok(_) => {
+                        w.log("Roblox is up to date");
+                        w.toast("Roblox is up to date");
+                    }
+                    Err(e) => {
+                        w.log(&format!("Could not update Roblox: {e}"));
+                        w.toast_with("Could not update Roblox", "Details", activity::open_log);
+                    }
                 }
             },
         );
-    }
-
-    fn set_update(&self, state: &str) {
-        let (ic, text) = match state {
-            "busy" => ("sync", "Updating…"),
-            "done" => ("check_circle", "Up to date"),
-            _ => ("download", "Update Roblox"),
-        };
-        let upd = &self.0.ui.upd;
-        upd.set_icon(ic);
-        upd.set_text(text);
-        for s in ["busy", "done"] {
-            if s == state {
-                upd.button.add_css_class(s);
-            } else {
-                upd.button.remove_css_class(s);
-            }
-        }
-        upd.button.set_sensitive(state != "busy");
     }
 }

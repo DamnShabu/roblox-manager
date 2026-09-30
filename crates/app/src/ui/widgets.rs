@@ -1,8 +1,12 @@
-//! Small builders: the design is a lot of labelled boxes, and GTK's
+//! Small builders: the window is a lot of labelled boxes, and GTK's
 //! constructors spell each one out at length.
 
-use gtk::prelude::*;
-use gtk::{Align, Label, Orientation, glib, pango};
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use adw::prelude::*;
+use gtk::{Align, Label, Orientation, gdk, pango};
 
 /// A box of `children`, in a direction, with CSS classes.
 macro_rules! boxed {
@@ -39,14 +43,19 @@ pub fn classes(w: &impl IsA<gtk::Widget>, css: &str) {
     }
 }
 
+/// Add or remove one CSS class.
+pub fn toggle_class(w: &impl IsA<gtk::Widget>, class: &str, on: bool) {
+    if on {
+        w.add_css_class(class);
+    } else {
+        w.remove_css_class(class);
+    }
+}
+
 /// Setters that hand the widget back, so a widget is built in one expression.
 pub trait Fluent: IsA<gtk::Widget> + Sized {
     fn valign(self, a: Align) -> Self {
         self.set_valign(a);
-        self
-    }
-    fn halign(self, a: Align) -> Self {
-        self.set_halign(a);
         self
     }
     fn centered(self) -> Self {
@@ -54,10 +63,6 @@ pub trait Fluent: IsA<gtk::Widget> + Sized {
     }
     fn hexpand(self) -> Self {
         self.set_hexpand(true);
-        self
-    }
-    fn vexpand(self) -> Self {
-        self.set_vexpand(true);
         self
     }
     fn tip(self, text: &str) -> Self {
@@ -70,6 +75,13 @@ pub trait Fluent: IsA<gtk::Widget> + Sized {
     }
     fn top(self, px: i32) -> Self {
         self.set_margin_top(px);
+        self
+    }
+    fn margins(self, px: i32) -> Self {
+        self.set_margin_top(px);
+        self.set_margin_bottom(px);
+        self.set_margin_start(px);
+        self.set_margin_end(px);
         self
     }
     fn visible(self, on: bool) -> Self {
@@ -108,6 +120,7 @@ impl LabelFluent for Label {
     }
     fn wrapped(self) -> Self {
         self.set_wrap(true);
+        self.set_wrap_mode(pango::WrapMode::WordChar);
         self
     }
     fn chars(self, n: i32) -> Self {
@@ -124,66 +137,46 @@ impl LabelFluent for Label {
     }
 }
 
-/// A Material Symbols glyph: the font turns the name into the icon.
-pub fn icon(name: &str, size: u32, css: &str) -> Label {
-    let l = Label::new(Some(name));
-    l.add_css_class("ms");
-    l.add_css_class(&format!("s{size}"));
-    classes(&l, css);
-    l.set_valign(Align::Center);
-    l.set_halign(Align::Center);
-    l
+/// A symbolic icon from the icon theme, at the theme's 16 px.
+pub fn icon(name: &str) -> gtk::Image {
+    gtk::Image::from_icon_name(name)
 }
 
-/// The same glyph, filled.
-pub fn icon_fill(name: &str, size: u32, css: &str) -> Label {
-    icon(name, size, &format!("fill {css}"))
-}
-
-/// A button of an optional icon and optional text, both kept for relabelling.
+/// A button of an optional icon and optional label, kept for relabelling.
 #[derive(Clone)]
 pub struct IconButton {
     pub button: gtk::Button,
-    pub icon: Option<Label>,
-    pub text: Option<Label>,
+    /// Set when the button shows both an icon and a label.
+    content: Option<adw::ButtonContent>,
 }
 
 impl IconButton {
     pub fn set_icon(&self, name: &str) {
-        if let Some(i) = &self.icon {
-            i.set_label(name);
+        match &self.content {
+            Some(c) => c.set_icon_name(name),
+            None => self.button.set_icon_name(name),
         }
     }
 
     pub fn set_text(&self, text: &str) {
-        if let Some(t) = &self.text {
-            t.set_label(text);
+        match &self.content {
+            Some(c) => c.set_label(text),
+            None => self.button.set_label(text),
         }
     }
 }
 
-/// Builds an [`IconButton`]: `Btn::new("css").text("Launch").icon("play_arrow")`.
+/// Builds an [`IconButton`]: `Btn::new("flat").text("Launch").icon("media-playback-start-symbolic")`.
 pub struct Btn {
     css: String,
     text: Option<String>,
     icon: Option<String>,
-    size: u32,
-    fill: bool,
-    gap: i32,
     tip: Option<String>,
 }
 
 impl Btn {
     pub fn new(css: &str) -> Self {
-        Btn {
-            css: css.to_owned(),
-            text: None,
-            icon: None,
-            size: 18,
-            fill: false,
-            gap: 6,
-            tip: None,
-        }
+        Btn { css: css.to_owned(), text: None, icon: None, tip: None }
     }
     pub fn text(mut self, t: &str) -> Self {
         self.text = Some(t.to_owned());
@@ -193,18 +186,6 @@ impl Btn {
         self.icon = Some(name.to_owned());
         self
     }
-    pub fn size(mut self, px: u32) -> Self {
-        self.size = px;
-        self
-    }
-    pub fn fill(mut self) -> Self {
-        self.fill = true;
-        self
-    }
-    pub fn gap(mut self, px: i32) -> Self {
-        self.gap = px;
-        self
-    }
     pub fn tip(mut self, t: &str) -> Self {
         self.tip = Some(t.to_owned());
         self
@@ -212,72 +193,39 @@ impl Btn {
 
     pub fn build(self, on_click: impl Fn() + 'static) -> IconButton {
         let button = gtk::Button::new();
-        button.add_css_class("b");
         classes(&button, &self.css);
         button.set_tooltip_text(self.tip.as_deref());
-        button.set_cursor_from_name(Some("pointer"));
-        let icon = self.icon.map(|i| {
-            if self.fill { icon_fill(&i, self.size, "") } else { icon(&i, self.size, "") }
-        });
-        let text = self.text.map(|t| Label::new(Some(&t)));
-        let content = hbox!(self.gap, "").halign(Align::Center);
-        if let Some(i) = &icon {
-            content.append(i);
-        }
-        if let Some(t) = &text {
-            content.append(t);
-        }
-        button.set_child(Some(&content));
+        let content = match (self.icon, self.text) {
+            (Some(icon), Some(text)) => {
+                let c = adw::ButtonContent::builder()
+                    .icon_name(icon)
+                    .label(text)
+                    .use_underline(true)
+                    .build();
+                button.set_child(Some(&c));
+                Some(c)
+            }
+            (Some(icon), None) => {
+                button.set_icon_name(&icon);
+                None
+            }
+            (None, Some(text)) => {
+                button.set_label(&text);
+                button.set_use_underline(true);
+                None
+            }
+            (None, None) => None,
+        };
         button.connect_clicked(move |_| on_click());
-        IconButton { button, icon, text }
+        IconButton { button, content }
     }
-}
-
-/// A destructive button that asks for a second click within 3 s.
-pub fn armed_btn(
-    text: &str,
-    armed_text: &str,
-    ic: &str,
-    action: impl Fn() + 'static,
-) -> gtk::Button {
-    let b = Btn::new("dbtn").text(text).icon(ic).size(17).gap(5).build(|| {});
-    let armed = std::rc::Rc::new(std::cell::Cell::new(None::<glib::SourceId>));
-    let (text, armed_text) = (text.to_owned(), armed_text.to_owned());
-    let label = b.text.clone();
-    let button = b.button.clone();
-    b.button.connect_clicked(move |_| {
-        if let Some(timer) = armed.take() {
-            timer.remove();
-            action();
-            return;
-        }
-        if let Some(l) = &label {
-            l.set_label(&armed_text);
-        }
-        button.add_css_class("armed");
-        let (armed2, label2, button2, text2) =
-            (armed.clone(), label.clone(), button.clone(), text.clone());
-        armed.set(Some(glib::timeout_add_local_once(
-            std::time::Duration::from_secs(3),
-            move || {
-                armed2.set(None);
-                if let Some(l) = &label2 {
-                    l.set_label(&text2);
-                }
-                button2.remove_css_class("armed");
-            },
-        )));
-    });
-    b.button.halign(Align::Start)
 }
 
 pub fn switch(active: bool, tip: Option<&str>, on_change: impl Fn(bool) + 'static) -> gtk::Switch {
     let sw = gtk::Switch::new();
     sw.set_active(active);
     sw.set_valign(Align::Center);
-    sw.add_css_class("sw");
     sw.set_tooltip_text(tip);
-    sw.set_cursor_from_name(Some("pointer"));
     sw.connect_active_notify(move |s| on_change(s.is_active()));
     sw
 }
@@ -293,56 +241,54 @@ pub fn wrap(spacing: i32, children: &[gtk::Widget]) -> adw::WrapBox {
     b
 }
 
-/// A status dot, optionally with a pulsing ring.
-pub fn dot(kind: &str, pulse: bool, size: u32) -> gtk::Widget {
-    let core = new_box(Orientation::Horizontal, 0, &format!("dot d{size} {kind}"))
-        .centered()
-        .halign(Align::Center);
-    if !pulse {
-        return core.upcast();
+/// A state in a pill: a dot and a word, coloured by `kind` (running,
+/// starting, joining, expired, failed, idle). A live state's dot pulses.
+pub fn status(kind: &str, text: &str, live: bool) -> gtk::Box {
+    let dot = new_box(Orientation::Horizontal, 0, if live { "dot live" } else { "dot" });
+    dot.set_valign(Align::Center);
+    hbox!(6, &format!("status {kind}"), dot, lbl(text, "")).centered()
+}
+
+/// A hotkey as keycaps: "Ctrl" "F7".
+pub fn keycaps(accel: &str) -> gtk::Box {
+    let b = hbox!(3, "").centered();
+    for key in hotkey_label(Some(accel)).split('+').filter(|k| !k.is_empty()) {
+        b.append(&lbl(key, "keycap").xalign(0.5));
     }
-    let o = gtk::Overlay::new();
-    o.set_child(Some(&core));
-    o.set_valign(Align::Center);
-    o.add_overlay(&new_box(Orientation::Horizontal, 0, &format!("dot d{size} {kind} ring")));
-    o.upcast()
+    b
 }
 
-/// A glyph centred in a tile its CSS sizes. The tile is the label itself,
-/// which centres its text both ways: a box would pack the glyph at the top,
-/// and expanding the glyph instead spreads up and stretches every ancestor.
-pub fn icon_tile(css: &str, ic: &str, size: u32) -> Label {
-    icon(ic, size, css)
+/// A heading over a list: a title, a dimmed line under it, then `suffix`.
+pub fn section_header(title: &str, sub: Option<&str>, suffix: &[gtk::Widget]) -> gtk::Box {
+    heading("title", title, sub, suffix)
 }
 
-/// A section heading: icon tile, title, subtitle, then `suffix`.
-pub fn section(ic: &str, title: &str, sub: &str, suffix: &[gtk::Widget]) -> gtk::Box {
-    let head = hbox!(
-        12,
-        "",
-        icon_tile("stile", ic, 19).centered(),
-        vbox!(1, "", lbl(title, "stitle"), lbl(sub, "ssub").ellipsize()).hexpand().centered()
-    );
+/// A heading over a part of the page, above its sections.
+pub fn page_header(title: &str, sub: Option<&str>, suffix: &[gtk::Widget]) -> gtk::Box {
+    heading("title-4", title, sub, suffix)
+}
+
+fn heading(css: &str, title: &str, sub: Option<&str>, suffix: &[gtk::Widget]) -> gtk::Box {
+    let text = vbox!(2, "", lbl(title, css));
+    if let Some(sub) = sub {
+        text.append(&lbl(sub, "caption dimmed").wrapped());
+    }
+    let head = hbox!(8, "section-header", text.hexpand().centered());
     for w in suffix {
         head.append(w);
     }
     head
 }
 
-/// One labelled row of a settings panel: a 124 px label column, then the content.
-pub fn setting(panel: &gtk::Box, title: &str, content: &impl IsA<gtk::Widget>, top: i32) {
-    content.set_hexpand(true);
-    let label = lbl(title, "plabel").valign(Align::Start).top(top).width(124).wrapped().chars(16);
-    panel.append(&hbox!(18, "", label, content.clone()));
+/// A list drawn as Adwaita's rounded card of rows.
+pub fn boxed_list() -> gtk::ListBox {
+    let l = gtk::ListBox::new();
+    l.set_selection_mode(gtk::SelectionMode::None);
+    l.add_css_class("boxed-list");
+    l
 }
 
 pub fn clear(b: &gtk::Box) {
-    while let Some(child) = b.first_child() {
-        b.remove(&child);
-    }
-}
-
-pub fn clear_wrap(b: &adw::WrapBox) {
     while let Some(child) = b.first_child() {
         b.remove(&child);
     }
@@ -357,56 +303,57 @@ pub fn hotkey_label(accel: Option<&str>) -> String {
     }
 }
 
+/// "1 account", "3 accounts".
+pub fn plural(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
 thread_local! {
-    /// Game icons, decoded once per run.
-    static TEXTURES: std::cell::RefCell<std::collections::HashMap<std::path::PathBuf, gtk::gdk::Texture>> =
-        std::cell::RefCell::default();
+    /// Images off disk (game icons, avatars), decoded once per run and
+    /// dropped when the file changes.
+    static TEXTURES: RefCell<HashMap<PathBuf, (std::time::SystemTime, gdk::Texture)>> =
+        RefCell::default();
 }
 
-/// A game's icon, `size` px square, or the striped placeholder.
-pub fn thumb(path: Option<&std::path::Path>, size: i32, css: &str) -> gtk::Box {
-    let b = new_box(Orientation::Horizontal, 0, &format!("thumb t{size} {css}"));
-    b.set_size_request(size, size);
-    b.set_valign(Align::Center);
-    b.set_halign(Align::Center);
-    b.set_overflow(gtk::Overflow::Hidden);
-    let texture = path.and_then(|p| {
-        TEXTURES.with_borrow_mut(|cache| {
-            if let Some(t) = cache.get(p) {
-                return Some(t.clone());
-            }
-            // A half-written cache entry is a placeholder, not an error.
-            let t = gtk::gdk::Texture::from_filename(p).ok()?;
-            cache.insert(p.to_owned(), t.clone());
-            Some(t)
-        })
-    });
-    match texture {
+/// The image at `path`, decoded once. A half-written cache entry is no
+/// texture, not an error: the caller draws its placeholder.
+pub fn texture(path: &Path) -> Option<gdk::Texture> {
+    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
+    TEXTURES.with_borrow_mut(|cache| {
+        if let Some((_, t)) = cache.get(path).filter(|(when, _)| *when == modified) {
+            return Some(t.clone());
+        }
+        let t = gdk::Texture::from_filename(path).ok()?;
+        cache.insert(path.to_owned(), (modified, t.clone()));
+        Some(t)
+    })
+}
+
+/// A game's icon, `size` px square with rounded corners, or a striped
+/// placeholder while it has none.
+pub fn thumb(path: Option<&Path>, size: i32, css: &str) -> gtk::Widget {
+    let frame = gtk::Box::new(Orientation::Horizontal, 0);
+    classes(&frame, css);
+    frame.set_size_request(size, size);
+    frame.set_valign(Align::Center);
+    frame.set_halign(Align::Center);
+    frame.set_overflow(gtk::Overflow::Hidden);
+    match path.and_then(texture) {
         // An Image, not a Picture: a Picture asks for the icon's own 150 px
-        // and would widen whatever holds it past the design's.
-        Some(t) => b.append(&gtk::Image::builder().paintable(&t).pixel_size(size).build()),
-        None => b.add_css_class("stripes"),
+        // and would widen whatever holds it.
+        Some(t) => frame.append(&gtk::Image::builder().paintable(&t).pixel_size(size).build()),
+        None => frame.add_css_class("placeholder-art"),
     }
-    b
+    frame.upcast()
 }
 
-/// A thumbnail-sized tile with a symbol, styled by `ic_css`, centred on its
-/// own background. Overlaid, not packed: centring a packed child takes
-/// hexpand, and that spreads up and stretches every tile in the row.
-pub fn symbol_thumb(
-    size: i32,
-    css: &str,
-    ic: &str,
-    ic_size: u32,
-    ic_css: &str,
-) -> (gtk::Overlay, gtk::Box) {
-    let b = new_box(Orientation::Horizontal, 0, &format!("thumb t{size} {css}"));
-    b.set_size_request(size, size);
-    b.set_overflow(gtk::Overflow::Hidden);
-    let over = gtk::Overlay::new();
-    over.set_child(Some(&b));
-    over.set_valign(Align::Center);
-    over.set_halign(Align::Center);
-    over.add_overlay(&icon(ic, ic_size, ic_css));
-    (over, b)
+/// An account's picture: its Roblox headshot when one is cached, else its
+/// initials on a colour of its own.
+pub fn avatar(label: &str, picture: Option<&Path>, size: i32) -> adw::Avatar {
+    let a = adw::Avatar::new(size, Some(label), true);
+    if let Some(t) = picture.and_then(texture) {
+        a.set_custom_image(Some(&t));
+    }
+    a.set_valign(Align::Center);
+    a
 }
