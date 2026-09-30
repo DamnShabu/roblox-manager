@@ -56,6 +56,12 @@ chosen in its main menu.
   accounts to join with. Nothing starts until Join; several accounts share
   one server. "Remember these accounts" picks the same ones next time.
   Private-server and follow-a-user links are not supported yet.
+  The Flatpak and the NixOS module register the handler themselves; if
+  another launcher (Sober, Vinegar) gets the links, or you run the AppImage
+  or a bare build, pick **Open Roblox Links Here** in the main menu. It
+  sets the default in `~/.config/mimeapps.list`, and for an AppImage or bare
+  build writes `~/.local/share/applications/io.github.mujo.RobloxManager.desktop`,
+  which follows the AppImage if you move it.
 - **Macros** (the side pane, F9) play keys and clicks into macro-ready
   clients; How Macros Work (F1) explains the steps and their timing.
 - **Activity** keeps what happened this run; Ctrl+L shows all of it.

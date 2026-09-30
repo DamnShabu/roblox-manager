@@ -137,7 +137,14 @@ impl LinkPopup {
 
     fn assemble(self: &Rc<Self>, w: &Window) {
         // -- the header: whose popup, and why it is here -----------------------
-        let app_icon = gtk::Image::from_icon_name(crate::APP_ID);
+        // An AppImage or a bare build may have no icon of its own installed.
+        let installed = gtk::gdk::Display::default()
+            .is_some_and(|d| gtk::IconTheme::for_display(&d).has_icon(crate::APP_ID));
+        let app_icon = gtk::Image::from_icon_name(if installed {
+            crate::APP_ID
+        } else {
+            "input-gaming-symbolic"
+        });
         app_icon.set_pixel_size(28);
         let heading = hbox!(
             10,
@@ -432,6 +439,22 @@ impl LinkPopup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Links reach the app as GApplication's open, which makes each argument
+    /// a GFile: the link must come back out of it unchanged.
+    #[test]
+    fn a_browsers_link_survives_the_trip_through_gio() {
+        for link in [
+            "roblox-player:1+launchmode:play+gameinfo:X+launchtime:1+placelauncherurl:\
+             https%3A%2F%2Fassetgame.roblox.com%2Fgame%2FPlaceLauncher.ashx%3Frequest%3D\
+             RequestGame%26placeId%3D1730877806+robloxLocale:en_us",
+            "roblox://experiences/start?placeId=1818&gameInstanceId=abc-1",
+        ] {
+            let uri = gtk::gio::File::for_commandline_arg(link).uri();
+            assert_eq!(uri.as_str(), link);
+            assert!(JoinLink::parse(&uri).is_ok(), "{uri}");
+        }
+    }
 
     #[test]
     fn player_counts_are_shortened() {

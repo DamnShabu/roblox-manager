@@ -123,6 +123,7 @@ impl Window {
             }
             None => glib::ControlFlow::Break,
         });
+        w.check_link_handler();
         let profiles = w.0.services.profiles.clone();
         let log = w.0.log.clone();
         w.run_task(

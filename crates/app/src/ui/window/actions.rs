@@ -39,7 +39,7 @@ type GroupAction = (&'static str, fn(&Window, &str));
 
 impl Window {
     pub(super) fn install_actions(&self) {
-        let actions: [Action; 16] = [
+        let actions: [Action; 17] = [
             ("add-account", Window::on_add),
             ("refresh", Window::refresh_all),
             ("update-roblox", Window::on_update_roblox),
@@ -52,6 +52,7 @@ impl Window {
             ("search", Window::start_search),
             ("reload-games", Window::reload_games),
             ("join-friend", Window::on_friends),
+            ("open-links-here", Window::open_links_here),
             ("activity-log", activity::open_log),
             ("macro-help", macros::help::show),
             ("shortcuts", show_shortcuts),
