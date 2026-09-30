@@ -75,6 +75,11 @@ impl Paths {
         self.state().join("macros.json")
     }
 
+    /// The newest Stacked, once updated to: a link to its Nix build.
+    pub fn stacked(&self) -> PathBuf {
+        self.state().join("stacked")
+    }
+
     /// Regenerable: game icons and client logs.
     pub fn cache(&self) -> PathBuf {
         self.cache_home.join("rbxmgr")

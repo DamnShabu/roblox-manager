@@ -1,7 +1,9 @@
 //! What the window asks Roblox, beyond launching: whether sessions still
-//! work, everyone's favourites and pictures, and installing the newest build.
+//! work, everyone's favourites and pictures, and installing the newest
+//! Roblox build or Stacked.
 
 use rbxmgr_core::cordial::roblox_build;
+use rbxmgr_core::cordial::stacked::{self, Host};
 use rbxmgr_core::roblox::{FAVORITES_SHOWN, Game, Roblox, RobloxError};
 use rbxmgr_core::types::{Label, UserId};
 
@@ -167,14 +169,18 @@ impl Window {
             return;
         }
         self.state_mut().updating = true;
-        self.set_action_enabled("update-roblox", false);
+        self.set_updates_enabled(false);
+        self.0
+            .ui
+            .banner
+            .set_title("Installing the newest Roblox build — this can take a few minutes");
         self.0.ui.banner.set_revealed(true);
         let (runner, log) = (self.services().runner.clone(), self.logger());
         self.run_task(
             move || roblox_build(&*runner, &|l| log.line(l), true),
             |w, got| {
                 w.state_mut().updating = false;
-                w.set_action_enabled("update-roblox", true);
+                w.set_updates_enabled(true);
                 w.0.ui.banner.set_revealed(false);
                 match got {
                     Ok(_) => {
@@ -190,5 +196,61 @@ impl Window {
                 }
             },
         );
+    }
+
+    // -- updating Stacked -----------------------------------------------------
+    /// Install the newest release of Stacked, the fork the engine comes from,
+    /// and launch every client on it from now on. Clients already running
+    /// keep the engine they started with.
+    pub fn on_update_stacked(&self) {
+        if self.state().updating {
+            return;
+        }
+        self.state_mut().updating = true;
+        self.set_updates_enabled(false);
+        self.0.ui.banner.set_title("Installing the newest Stacked — this can take a few minutes");
+        self.0.ui.banner.set_revealed(true);
+        let (runner, releases, paths, log) = (
+            self.services().runner.clone(),
+            self.services().releases.clone(),
+            self.services().paths.clone(),
+            self.logger(),
+        );
+        self.run_task(
+            move || stacked::update(&*runner, &*releases, &paths, Host::detect(), &|l| log.line(l)),
+            |w, got| {
+                w.state_mut().updating = false;
+                w.set_updates_enabled(true);
+                w.0.ui.banner.set_revealed(false);
+                match got {
+                    Ok(done) => {
+                        if let Some(why) = &done.left_behind {
+                            w.log(&format!("Older Stacked versions were not all deleted: {why}"));
+                        }
+                        let what = if done.fresh {
+                            format!("Stacked {} is installed", done.version)
+                        } else {
+                            format!("Stacked {} is already the newest", done.version)
+                        };
+                        w.log(&what);
+                        w.toast(&what);
+                        if done.fresh {
+                            w.notify(&what, "Clients launched from now on run it.");
+                        }
+                    }
+                    Err(e) => {
+                        w.log(&format!("Could not update Stacked: {e}"));
+                        w.toast_with("Could not update Stacked", "Details", activity::open_log);
+                        w.notify("Could not update Stacked", &sentence(&e.to_string()));
+                    }
+                }
+            },
+        );
+    }
+
+    /// One update at a time: both menu items wait while either runs.
+    fn set_updates_enabled(&self, on: bool) {
+        self.set_action_enabled("update-roblox", on);
+        self.set_action_enabled("update-stacked", on);
     }
 }

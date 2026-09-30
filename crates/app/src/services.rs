@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use rbxmgr_core::Paths;
+use rbxmgr_core::cordial::stacked::{GithubReleases, Releases};
 use rbxmgr_core::cordial::{CordialProfiles, ProcessView, Runner, SystemRunner, roblox_build};
 use rbxmgr_core::desktop::{Install, LinkHandler};
 use rbxmgr_core::keyring::{Attrs, DbusSecrets, Keyring, KeyringError, Secrets};
@@ -14,6 +15,8 @@ pub struct Services {
     pub keyring: Arc<Keyring>,
     pub roblox: Arc<HttpRoblox>,
     pub runner: Arc<dyn Runner>,
+    /// Stacked's releases, for Update Stacked.
+    pub releases: Arc<dyn Releases>,
     pub profiles: Arc<CordialProfiles>,
     pub launcher: Arc<Launcher>,
     pub icons: Arc<IconCache>,
@@ -52,8 +55,20 @@ impl Services {
         ));
         let icons = Arc::new(IconCache::new(paths.icons()));
         let avatars = Arc::new(IconCache::new(paths.avatars()));
+        let releases: Arc<dyn Releases> = Arc::new(GithubReleases::default());
         let links = Arc::new(LinkHandler::new(&paths, Install::detect()));
-        Services { paths, keyring, roblox, runner, profiles, launcher, icons, avatars, links }
+        Services {
+            paths,
+            keyring,
+            roblox,
+            runner,
+            releases,
+            profiles,
+            launcher,
+            icons,
+            avatars,
+            links,
+        }
     }
 }
 

@@ -330,6 +330,7 @@ fn main_menu() -> gio::Menu {
     let roblox = gio::Menu::new();
     roblox.append(Some("_Refresh Sessions and Favourites"), Some("win.refresh"));
     roblox.append(Some("_Update Roblox"), Some("win.update-roblox"));
+    roblox.append(Some("Update _Stacked"), Some("win.update-stacked"));
     roblox.append(Some("Open Roblox _Links Here"), Some("win.open-links-here"));
     menu.append_section(None, &roblox);
     let style = gio::Menu::new();

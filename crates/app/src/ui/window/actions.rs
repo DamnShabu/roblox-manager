@@ -39,10 +39,11 @@ type GroupAction = (&'static str, fn(&Window, &str));
 
 impl Window {
     pub(super) fn install_actions(&self) {
-        let actions: [Action; 17] = [
+        let actions: [Action; 18] = [
             ("add-account", Window::on_add),
             ("refresh", Window::refresh_all),
             ("update-roblox", Window::on_update_roblox),
+            ("update-stacked", Window::on_update_stacked),
             ("new-group", Window::add_group),
             ("new-macro", |w| macros::editor::MacroDialog::open(w, None)),
             ("launch-selected", Window::launch_selected),
