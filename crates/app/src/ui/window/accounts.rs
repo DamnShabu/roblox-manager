@@ -8,10 +8,11 @@ use rbxmgr_core::types::{Label, PlaceId, Profile, User, UserId};
 use super::Window;
 use crate::ui::accounts::group::group_section;
 use crate::ui::accounts::group_settings::GroupSettings;
-use crate::ui::accounts::leader::leader_section;
+use crate::ui::accounts::leader::{leader_section, placeholder};
+use crate::ui::accounts::row::account_row;
 use crate::ui::confirm;
 use crate::ui::login::AddAccountDialog;
-use crate::ui::widgets::{clear, plural};
+use crate::ui::widgets::{boxed_list, clear, plural, section_header, sentence};
 
 impl Window {
     pub fn refresh_accounts(&self) {
@@ -64,6 +65,11 @@ impl Window {
         };
         ui.pages.set_visible_child_name("accounts");
         ui.launch_bar.set_visible(true);
+        if !self.state().filter.is_empty() {
+            ui.accounts_box.append(&self.search_results());
+            self.refresh_launch_state();
+            return;
+        }
         ui.accounts_box.append(&leader_section(self, leader.as_ref(), &followers));
         for (i, members) in sections.iter().enumerate() {
             let group = groups.get(i);
@@ -73,6 +79,38 @@ impl Window {
             ui.accounts_box.append(&group_section(self, group, members));
         }
         self.refresh_launch_state();
+    }
+
+    /// Search the accounts: `query` narrows the page to the ones it finds.
+    pub fn set_filter(&self, query: &str) {
+        let query = query.trim().to_lowercase();
+        if self.state().filter == query {
+            return;
+        }
+        self.state_mut().filter = query;
+        self.refresh_accounts();
+    }
+
+    /// Open the search bar, or focus it when it is open.
+    pub fn start_search(&self) {
+        self.0.ui.search_bar.set_search_mode(true);
+        self.0.ui.search.grab_focus();
+    }
+
+    /// The accounts the search finds, as one list.
+    fn search_results(&self) -> gtk::Box {
+        let found: Vec<Account> = {
+            let s = self.state();
+            s.matching().into_iter().filter_map(|id| s.accounts.get(id).cloned()).collect()
+        };
+        let list = boxed_list();
+        for a in &found {
+            list.append(&account_row(self, a));
+        }
+        if found.is_empty() {
+            list.append(&placeholder("system-search-symbolic", "No account matches that search."));
+        }
+        vbox!(8, "", section_header(&plural(found.len(), "match", "matches"), None, &[]), list)
     }
 
     /// Save accounts.json and groups.json; a failure is shown, not lost.
@@ -116,7 +154,7 @@ impl Window {
         let refused = self.state_mut().accounts.set_group(id, group.as_deref());
         match refused {
             Ok(()) => self.changed(),
-            Err(e) => self.toast(&capitalized(&e.to_string())),
+            Err(e) => self.toast(&sentence(&e.to_string())),
         }
     }
 
@@ -332,7 +370,7 @@ impl Window {
             (s.accounts.get(id).map(|a| a.name.to_string()), s.failures.get(&id).cloned())
         };
         if let (Some(label), Some(why)) = (label, why) {
-            confirm::tell(self, &format!("{label} Did Not Launch"), &capitalized(&why));
+            confirm::tell(self, &format!("{label} Did Not Launch"), &sentence(&why));
         }
     }
 
@@ -377,9 +415,4 @@ impl Window {
         self.toast(&format!("Removed {shown}"));
         self.log(&format!("Removed {shown}"));
     }
-}
-
-fn capitalized(s: &str) -> String {
-    let mut c = s.chars();
-    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }

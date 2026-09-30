@@ -303,6 +303,13 @@ pub fn hotkey_label(accel: Option<&str>) -> String {
     }
 }
 
+/// Text as a sentence: its first letter capitalised. Error text from the
+/// core starts lower-case, to read inside a longer line.
+pub fn sentence(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+}
+
 /// "1 account", "3 accounts".
 pub fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })

@@ -344,7 +344,8 @@ impl Window {
             width,
             height,
             maximized: self.0.win.is_maximized(),
-            sidebar: self.0.ui.split.shows_sidebar(),
+            // A narrow window hides the pane by itself: that is no choice.
+            sidebar: self.0.ui.split.is_collapsed() || self.0.ui.split.shows_sidebar(),
         };
         if let Err(e) = state.save(&self.services().paths.window_state()) {
             eprintln!("roblox-manager: could not remember the window's size: {e}");

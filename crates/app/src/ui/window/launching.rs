@@ -167,6 +167,8 @@ impl Window {
             )
         };
         let ui = &self.0.ui;
+        self.set_action_enabled("refresh", total > 0);
+        self.set_action_enabled("reload-games", total > 0);
         self.set_action_enabled("launch-selected", n >= 1);
         self.set_action_enabled("launch-group", leader.is_some());
         ui.btn_each.set_text(&if n == 0 {

@@ -117,7 +117,10 @@ fn draw(block: &Block) -> gtk::Widget {
             l.upcast()
         }
         Code(text) => {
+            // Selectable to copy, but not focused on opening, which would
+            // select it all.
             let l = lbl(text, "monospace").selectable().wrapped();
+            l.set_focusable(false);
             let frame = gtk::Box::new(gtk::Orientation::Vertical, 0);
             frame.add_css_class("card");
             frame.append(&l.margins(12));

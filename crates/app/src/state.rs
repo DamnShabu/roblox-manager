@@ -87,6 +87,8 @@ pub struct AppState {
     pub macro_runs: HashMap<UserId, (StopFlag, String)>,
     /// The macros shown unfolded.
     pub open_macros: HashSet<String>,
+    /// What the account search holds, lower-cased; empty shows the layout.
+    pub filter: String,
     pub ungrouped_open: bool,
     /// A friend's server as the launch target, instead of the picked game.
     pub friend: Option<FriendTarget>,
@@ -113,6 +115,7 @@ impl AppState {
             joining: HashSet::new(),
             macro_runs: HashMap::new(),
             open_macros: HashSet::new(),
+            filter: String::new(),
             ungrouped_open: true,
             friend: None,
             place: None,
@@ -136,6 +139,30 @@ impl AppState {
         } else {
             Chip::Idle
         }
+    }
+
+    /// The accounts the search finds, in drawn order with the leader first:
+    /// its words against the label, the Roblox user and display names, and
+    /// the note.
+    pub fn matching(&self) -> Vec<UserId> {
+        let words: Vec<&str> = self.filter.split_whitespace().collect();
+        let a = &self.accounts;
+        a.leader()
+            .into_iter()
+            .chain(a.visual_order())
+            .filter(|acct| {
+                let hay = [
+                    acct.name.as_str(),
+                    acct.username.as_deref().unwrap_or_default(),
+                    acct.display.as_deref().unwrap_or_default(),
+                    &acct.note,
+                ]
+                .join("\n")
+                .to_lowercase();
+                words.iter().all(|w| hay.contains(w))
+            })
+            .map(|acct| acct.user_id)
+            .collect()
     }
 
     /// Whether any of `ids` has a client up or on its way: a group's header
@@ -238,6 +265,20 @@ mod tests {
         assert!(s.any_live(&group));
         assert!(!s.any_live(&[UserId(2)]));
         assert!(!s.any_live(&[]));
+    }
+
+    #[test]
+    fn the_search_matches_every_word_in_any_name_or_the_note() {
+        let (_d, mut s) = state();
+        s.accounts.set_note(UserId(2), "Has the Buddha fruit");
+        s.filter = "b".into();
+        assert_eq!(s.matching(), [UserId(2)], "label b");
+        s.filter = "buddha b".into();
+        assert_eq!(s.matching(), [UserId(2)], "both words, one in the note");
+        s.filter = "buddha x".into();
+        assert!(s.matching().is_empty());
+        s.filter = String::new();
+        assert_eq!(s.matching(), [UserId(1), UserId(2)], "no words: everyone, leader first");
     }
 
     #[test]

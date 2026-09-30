@@ -10,7 +10,7 @@ use gtk::{Align, PolicyType, glib};
 use rbxmgr_core::roblox::{Friend, FriendState, Roblox};
 use rbxmgr_core::types::{Label, UserId};
 
-use super::widgets::{Btn, Fluent, boxed_list, lbl};
+use super::widgets::{Btn, Fluent, boxed_list, lbl, sentence};
 use super::window::{WeakWindow, Window};
 use crate::state::FriendTarget;
 use crate::worker;
@@ -177,7 +177,7 @@ impl FriendsDialog {
             Err(e) => {
                 self.title.set_subtitle("");
                 self.problem.set_title("Could Not Load Friends");
-                self.problem.set_description(Some(&glib::markup_escape_text(e)));
+                self.problem.set_description(Some(&glib::markup_escape_text(&sentence(e))));
                 self.pages.set_visible_child_name("problem");
                 return;
             }

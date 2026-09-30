@@ -16,7 +16,7 @@ use rbxmgr_core::roblox::quick_login::{CONFIRM_URL, TIMEOUT};
 use rbxmgr_core::roblox::{QuickLoginError, QuickLoginEvents, QuickLoginStatus, quick_login};
 use rbxmgr_core::types::{Cookie, User};
 
-use super::widgets::{Btn, Fluent, IconButton, LabelFluent, lbl, toggle_class};
+use super::widgets::{Btn, Fluent, IconButton, LabelFluent, lbl, sentence, toggle_class};
 use super::window::{WeakWindow, Window};
 use crate::worker::Logger;
 
@@ -248,6 +248,7 @@ impl AddAccountDialog {
                 self.code_a.set_label(code.get(..half).unwrap_or(&code));
                 self.code_b.set_label(code.get(half..).unwrap_or(""));
                 self.code.replace(code);
+                self.copy.button.set_sensitive(true);
                 self.expires.set(Some(Instant::now() + TIMEOUT));
                 self.tick();
                 self.set_status("Waiting for approval…", false);
@@ -266,6 +267,7 @@ impl AddAccountDialog {
         let Some(w) = self.window.upgrade() else { return };
         let code_gen = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
         self.code.replace(String::new());
+        self.copy.button.set_sensitive(false);
         self.expires.set(None);
         self.code_a.set_label("···");
         self.code_b.set_label("···");
@@ -309,10 +311,10 @@ impl AddAccountDialog {
             self.relogin.as_ref().map_or_else(|| "new account".to_owned(), |a| a.name.to_string());
         if let Some(w) = self.window.upgrade() {
             w.log(&format!("Could not add '{name}': {why}"));
-            w.toast(&format!("Could not add '{name}'"));
         }
         self.expires.set(None);
-        self.set_status(why, true);
+        self.copy.button.set_sensitive(false);
+        self.set_status(&sentence(why), true);
     }
 
     /// Put the approved session in the keyring. The same Roblox user added

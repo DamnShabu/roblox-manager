@@ -45,6 +45,7 @@ pub fn line(entry: &Activity, full: bool) -> gtk::Box {
     let text = lbl(&entry.line, "");
     if full {
         text.set_selectable(true);
+        text.set_focusable(false);
         text.set_wrap(true);
         text.set_wrap_mode(gtk::pango::WrapMode::WordChar);
     } else {

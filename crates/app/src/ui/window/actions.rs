@@ -15,6 +15,7 @@ use crate::ui::{activity, macros};
 /// (action, what it does, its keys) -- the shortcuts list is drawn from this.
 pub const SHORTCUTS: &[(&str, &str, &[&str])] = &[
     ("win.add-account", "Add account", &["<Control>n"]),
+    ("win.search", "Search accounts", &["<Control>f"]),
     ("win.refresh", "Check sessions and reload favourites", &["<Control>r", "F5"]),
     ("win.launch-group", "Launch as group", &["<Control>Return"]),
     ("win.launch-selected", "Launch selected", &["<Control><Shift>Return"]),
@@ -37,7 +38,7 @@ type GroupAction = (&'static str, fn(&Window, &str));
 
 impl Window {
     pub(super) fn install_actions(&self) {
-        let actions: [Action; 14] = [
+        let actions: [Action; 16] = [
             ("add-account", Window::on_add),
             ("refresh", Window::refresh_all),
             ("update-roblox", Window::on_update_roblox),
@@ -47,7 +48,9 @@ impl Window {
             ("launch-group", Window::launch_chain),
             ("stop-all", Window::on_stop_all),
             ("select-all", Window::on_select_all),
+            ("search", Window::start_search),
             ("reload-games", Window::reload_games),
+            ("join-friend", Window::on_friends),
             ("activity-log", activity::open_log),
             ("macro-help", macros::help::show),
             ("shortcuts", show_shortcuts),

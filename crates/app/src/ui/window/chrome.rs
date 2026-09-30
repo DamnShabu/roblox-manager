@@ -28,6 +28,8 @@ pub struct Chrome {
     pub toasts: adw::ToastOverlay,
     pub shortcuts: gtk::ShortcutController,
     pub split: adw::OverlaySplitView,
+    pub search_bar: gtk::SearchBar,
+    pub search: gtk::SearchEntry,
 }
 
 impl Chrome {
@@ -63,23 +65,59 @@ impl Chrome {
             .active(sidebar)
             .build();
         header.pack_end(&sidebar_toggle);
+        let search_toggle = gtk::ToggleButton::builder()
+            .icon_name("system-search-symbolic")
+            .tooltip_text("Search Accounts (Ctrl+F)")
+            .build();
+        header.pack_end(&search_toggle);
+        let search = gtk::SearchEntry::builder()
+            .placeholder_text("Search accounts by name, Roblox user or note")
+            .hexpand(true)
+            .build();
+        let search_bar = gtk::SearchBar::builder()
+            .child(&adw::Clamp::builder().maximum_size(520).child(&search).build())
+            .show_close_button(false)
+            .build();
+        search_bar.connect_entry(&search);
+        search_toggle
+            .bind_property("active", &search_bar, "search-mode-enabled")
+            .bidirectional()
+            .build();
+        {
+            let w = w.clone();
+            search.connect_search_changed(move |e| {
+                if let Some(w) = w.upgrade() {
+                    w.set_filter(&e.text());
+                }
+            });
+        }
+        {
+            let w = w.clone();
+            search_bar.connect_search_mode_enabled_notify(move |bar| {
+                if let (false, Some(w)) = (bar.is_search_mode(), w.upgrade()) {
+                    w.set_filter("");
+                }
+            });
+        }
 
         let banner =
             adw::Banner::new("Installing the newest Roblox build — this can take a few minutes");
 
         // -- accounts page ----------------------------------------------------
         let games = GameBar::new(w.clone());
-        let reload_games = Btn::new("flat circular")
-            .icon("view-refresh-symbolic")
-            .tip("Reload Everyone's Favourites")
-            .build(w.act(|w| w.reload_games()));
+        let reload_games = action_button(
+            "view-refresh-symbolic",
+            "Reload Everyone's Favourites",
+            "win.reload-games",
+        )
+        .css("flat circular");
         let games_section = vbox!(
             8,
             "",
             page_header(
                 "Launch Into",
                 Some("A favourite game, Roblox's own games browser, or a friend's server"),
-                &[reload_games.button.centered().upcast()]
+                &[reload_games.centered().upcast()]
             ),
             games.root.clone()
         );
@@ -221,6 +259,7 @@ impl Chrome {
 
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&header);
+        toolbar.add_top_bar(&search_bar);
         toolbar.add_top_bar(&banner);
         toolbar.set_content(Some(&split));
         toolbar.add_bottom_bar(&launch_bar);
@@ -263,6 +302,8 @@ impl Chrome {
             toasts,
             shortcuts,
             split,
+            search_bar,
+            search,
         }
     }
 }

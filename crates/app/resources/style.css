@@ -100,7 +100,6 @@ list.boxed-list > row.drop-below { box-shadow: inset 0 -2px var(--accent-bg-colo
 .drop-zone:drop(active) > list.boxed-list,
 list.boxed-list.drop-zone:drop(active) { box-shadow: 0 0 0 2px var(--accent-bg-color); }
 row.account .leader-star { color: var(--accent-color); }
-row.account.live .title { font-weight: 700; }
 row.follower { padding: 6px 8px 6px 14px; }
 .order {
   min-width: 22px; min-height: 22px;
