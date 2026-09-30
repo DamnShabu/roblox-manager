@@ -116,7 +116,7 @@ impl Window {
     /// Save accounts.json and groups.json; a failure is shown, not lost.
     pub fn save_accounts(&self) {
         if let Err(e) = self.state().accounts.save() {
-            self.toast(&e.to_string());
+            self.toast(&sentence(&e.to_string()));
             self.log(&e.to_string());
         }
     }

@@ -207,6 +207,10 @@ impl Btn {
             }
             (Some(icon), None) => {
                 button.set_icon_name(&icon);
+                // An icon says nothing to a screen reader: its tip is its name.
+                if let Some(tip) = &self.tip {
+                    name(&button, tip);
+                }
                 None
             }
             (None, Some(text)) => {
@@ -221,11 +225,19 @@ impl Btn {
     }
 }
 
+/// What a screen reader calls a widget that shows no words.
+pub fn name(w: &impl IsA<gtk::Accessible>, label: &str) {
+    w.update_property(&[gtk::accessible::Property::Label(label)]);
+}
+
 pub fn switch(active: bool, tip: Option<&str>, on_change: impl Fn(bool) + 'static) -> gtk::Switch {
     let sw = gtk::Switch::new();
     sw.set_active(active);
     sw.set_valign(Align::Center);
     sw.set_tooltip_text(tip);
+    if let Some(tip) = tip {
+        name(&sw, tip);
+    }
     sw.connect_active_notify(move |s| on_change(s.is_active()));
     sw
 }

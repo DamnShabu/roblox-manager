@@ -6,7 +6,8 @@ use rbxmgr_core::macros::grammar::{self, loop_label};
 
 use super::editor::MacroDialog;
 use crate::ui::widgets::{
-    Btn, Fluent, LabelFluent, boxed_list, hotkey_label, icon, lbl, plural, switch, toggle_class,
+    self, Btn, Fluent, LabelFluent, boxed_list, hotkey_label, icon, lbl, plural, switch,
+    toggle_class,
 };
 use crate::ui::window::Window;
 
@@ -158,6 +159,7 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
             )
         };
         run.button.set_tooltip_text(Some(&tip));
+        widgets::name(&run.button, if playing > 0 { "Stop" } else { "Run" });
         run_on.button.set_tooltip_text(Some(&tip));
     }));
     list

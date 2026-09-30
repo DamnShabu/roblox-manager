@@ -7,7 +7,7 @@ use gtk::{Align, Label, PolicyType, gio};
 
 use super::WeakWindow;
 use crate::ui::games::GameBar;
-use crate::ui::widgets::{Btn, Fluent, IconButton, LabelFluent, lbl, page_header};
+use crate::ui::widgets::{Btn, Fluent, IconButton, LabelFluent, lbl, name, page_header};
 
 pub struct Chrome {
     pub title: adw::WindowTitle,
@@ -58,17 +58,20 @@ impl Chrome {
             .primary(true)
             .tooltip_text("Main Menu")
             .build();
+        name(&menu, "Main Menu");
         header.pack_end(&menu);
         let sidebar_toggle = gtk::ToggleButton::builder()
             .icon_name("sidebar-show-right-symbolic")
             .tooltip_text("Macros and Activity (F9)")
             .active(sidebar)
             .build();
+        name(&sidebar_toggle, "Macros and Activity");
         header.pack_end(&sidebar_toggle);
         let search_toggle = gtk::ToggleButton::builder()
             .icon_name("system-search-symbolic")
             .tooltip_text("Search Accounts (Ctrl+F)")
             .build();
+        name(&search_toggle, "Search Accounts");
         header.pack_end(&search_toggle);
         let search = gtk::SearchEntry::builder()
             .placeholder_text("Search accounts by name, Roblox user or note")
@@ -310,7 +313,9 @@ impl Chrome {
 
 /// An icon button that fires a window action.
 fn action_button(icon: &str, tip: &str, action: &str) -> gtk::Button {
-    gtk::Button::builder().icon_name(icon).tooltip_text(tip).action_name(action).build()
+    let b = gtk::Button::builder().icon_name(icon).tooltip_text(tip).action_name(action).build();
+    name(&b, tip);
+    b
 }
 
 fn main_menu() -> gio::Menu {

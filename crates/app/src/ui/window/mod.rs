@@ -6,13 +6,14 @@ mod actions;
 mod chrome;
 mod launching;
 mod macros;
+mod roblox;
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashSet;
 use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
-use gtk::glib;
+use gtk::{gio, glib};
 use rbxmgr_core::types::{Profile, UserId};
 use rbxmgr_core::window_state::WindowState;
 
@@ -205,6 +206,19 @@ impl Window {
         let act = self.act(action);
         toast.connect_button_clicked(move |_| act());
         self.0.ui.toasts.add_toast(toast);
+    }
+
+    /// Tell the desktop, for something that took a while and ended while
+    /// the window was not the one in use; the toast covers the other case.
+    pub fn notify(&self, title: &str, body: &str) {
+        if self.0.win.is_active() {
+            return;
+        }
+        if let Some(app) = self.0.win.application() {
+            let n = gio::Notification::new(title);
+            n.set_body(Some(body));
+            app.send_notification(Some("rbxmgr"), &n);
+        }
     }
 
     /// Run `work` on a thread under the busy count; `done` on the main loop.

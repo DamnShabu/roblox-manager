@@ -14,7 +14,8 @@ use super::leader::placeholder;
 use super::row::{account_row, context_menu, dragged_id};
 use crate::state::Tile;
 use crate::ui::widgets::{
-    Btn, Fluent, LabelFluent, boxed_list, clear, icon, lbl, plural, status, thumb, toggle_class,
+    Btn, Fluent, LabelFluent, boxed_list, clear, icon, lbl, name, plural, status, thumb,
+    toggle_class,
 };
 use crate::ui::window::Window;
 
@@ -124,15 +125,15 @@ pub fn group_section(w: &Window, group: Option<&Group>, members: &[Account]) -> 
     });
     if let Some(gid) = &gid {
         let model = group_menu(gid);
-        head.append(
-            &gtk::MenuButton::builder()
-                .icon_name("view-more-symbolic")
-                .menu_model(&model)
-                .valign(Align::Center)
-                .tooltip_text("More")
-                .css_classes(["flat", "circular"])
-                .build(),
-        );
+        let more = gtk::MenuButton::builder()
+            .icon_name("view-more-symbolic")
+            .menu_model(&model)
+            .valign(Align::Center)
+            .tooltip_text("More")
+            .css_classes(["flat", "circular"])
+            .build();
+        name(&more, &format!("More for {title}"));
+        head.append(&more);
         context_menu(&head, &model);
     }
 

@@ -33,6 +33,7 @@
 .status.joining { color: var(--warning-color); background: color-mix(in srgb, var(--warning-bg-color) 16%, transparent); }
 .status.expired,
 .status.failed { color: var(--error-color); background: color-mix(in srgb, var(--error-bg-color) 14%, transparent); }
+.status.macro { color: var(--accent-color); background: color-mix(in srgb, var(--accent-bg-color) 16%, transparent); }
 .status.idle { color: var(--dim-label-color, currentColor); background: color-mix(in srgb, currentColor 8%, transparent); }
 .status .dot.live { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse { 0% { opacity: 1; } 50% { opacity: .35; } 100% { opacity: 1; } }

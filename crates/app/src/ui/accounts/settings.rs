@@ -345,7 +345,7 @@ fn session_group(w: &Window, acct: &Account) -> adw::PreferencesGroup {
         let (title, sub, kind) = match &session {
             SessionState::Checking => ("Checking…", String::new(), "starting"),
             SessionState::Expired => {
-                ("Signed out", "Roblox no longer takes this session".to_owned(), "expired")
+                ("Expired", "Roblox no longer takes this session".to_owned(), "expired")
             }
             SessionState::Ok { checked: Some(when) } => (
                 "Signed in",

@@ -12,7 +12,7 @@ use rbxmgr_core::accounts::{Account, relative_time};
 use rbxmgr_core::types::UserId;
 
 use crate::state::Chip;
-use crate::ui::widgets::{Btn, Fluent, avatar, clear, icon, lbl, status, toggle_class};
+use crate::ui::widgets::{Btn, Fluent, avatar, clear, icon, lbl, name, status, toggle_class};
 use crate::ui::window::Window;
 
 pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
@@ -81,7 +81,7 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
         .icon("dialog-warning-symbolic")
         .build(w.act(move |w| w.show_failure(id)));
     failure.button.set_valign(Align::Center);
-    let status_box = hbox!(0, "").centered();
+    let status_box = hbox!(6, "").centered();
     let play = Btn::new("flat circular")
         .icon("media-playback-start-symbolic")
         .build(w.act(move |w| w.play_or_stop(id)));
@@ -94,6 +94,7 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
         .tooltip_text("More")
         .css_classes(["flat", "circular"])
         .build();
+    name(&more, &format!("More for {}", acct.name));
     row.add_suffix(&failure.button);
     row.add_suffix(&status_box);
     row.add_suffix(&play.button);
@@ -107,6 +108,9 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
     w.watch_accounts(Box::new(move |s| {
         let chip = s.chip(id);
         clear(&status_box);
+        if let Some((_, playing)) = s.macro_runs.get(&id) {
+            status_box.append(&status("macro", playing, true).tip("The macro playing on it"));
+        }
         if chip != Chip::Idle {
             let (css, text, live) = chip.look();
             status_box.append(&status(css, text, live));
@@ -119,13 +123,15 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
             "media-playback-start-symbolic"
         });
         play.button.set_sensitive(!matches!(chip, Chip::Starting | Chip::Joining));
-        play.button.set_tooltip_text(Some(if live {
+        let tip = if live {
             "Close this account's client"
         } else if leader {
             "Launch the leader, then its auto-join accounts into its server"
         } else {
             "Launch into the target"
-        }));
+        };
+        play.button.set_tooltip_text(Some(tip));
+        name(&play.button, tip);
         if let Some(a) = s.accounts.get(id).filter(|a| a.selected != check.is_active()) {
             quiet.set(true);
             check.set_active(a.selected);
@@ -133,8 +139,10 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
         }
         match s.failures.get(&id) {
             Some(why) => {
+                let tip = format!("The last launch failed: {why}");
                 failure.button.set_visible(true);
-                failure.button.set_tooltip_text(Some(&format!("The last launch failed: {why}")));
+                failure.button.set_tooltip_text(Some(&tip));
+                name(&failure.button, &tip);
             }
             None => failure.button.set_visible(false),
         }

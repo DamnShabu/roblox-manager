@@ -1,12 +1,11 @@
-//! Launching and stopping: the game bar and target, the launch buttons,
-//! session checks, and updating Roblox.
+//! Launching and stopping: the game strip and the target, the launch bar,
+//! and each way accounts are started and stopped.
 
 use std::collections::HashSet;
 
-use rbxmgr_core::cordial::roblox_build;
 use rbxmgr_core::launch::{LaunchAccount, LaunchReport, LaunchRequest, Mode};
-use rbxmgr_core::roblox::{FAVORITES_SHOWN, Game, Roblox, RobloxError};
-use rbxmgr_core::types::{Label, PlaceId, Profile, ServerId, UserId};
+use rbxmgr_core::roblox::FAVORITES_SHOWN;
+use rbxmgr_core::types::{PlaceId, Profile, ServerId, UserId};
 
 use super::Window;
 use crate::state::{Chip, FriendTarget, Tile};
@@ -61,7 +60,7 @@ impl Window {
         };
         match of {
             Some(id) => FriendsDialog::open(self, id),
-            None => self.log("Add an account first -- friends come from your accounts"),
+            None => self.toast("Add an account first: friends come from your accounts"),
         }
     }
 
@@ -71,86 +70,6 @@ impl Window {
         self.0.ui.games.draw(&self.state());
         self.refresh_launch_state();
         self.log(&format!("Target: join {display}"));
-    }
-
-    /// Everyone's favourites from Roblox, their icons, and the accounts'
-    /// headshots.
-    pub fn reload_games(&self) {
-        let accounts: Vec<(UserId, Label)> =
-            self.state().accounts.accounts().iter().map(|a| (a.user_id, a.name.clone())).collect();
-        if accounts.is_empty() {
-            return self.toast("Add an account first: favourites come from your accounts");
-        }
-        let total = accounts.len();
-        let (keyring, roblox, icons, avatars, log) = (
-            self.services().keyring.clone(),
-            self.services().roblox.clone(),
-            self.services().icons.clone(),
-            self.services().avatars.clone(),
-            self.logger(),
-        );
-        self.run_task(
-            move || {
-                let users: Vec<UserId> = accounts.iter().map(|(id, _)| *id).collect();
-                match roblox.headshot_urls(&users) {
-                    Ok(urls) => {
-                        let failed = urls
-                            .iter()
-                            .filter_map(|(id, url)| {
-                                avatars.refresh(roblox.transport(), &id.to_string(), url).err()
-                            })
-                            .last();
-                        if let Some(e) = failed {
-                            log.line(format!("Some account pictures did not load: {e}"));
-                        }
-                    }
-                    Err(e) => log.line(format!("Could not load account pictures: {e}")),
-                }
-                let mut fresh: Vec<(UserId, Vec<Game>)> = Vec::new();
-                for (id, label) in accounts {
-                    let got = keyring.cookie(&label).map_err(|e| e.to_string()).and_then(|c| {
-                        roblox.favorites(&c, id, FAVORITES_SHOWN).map_err(|e| e.to_string())
-                    });
-                    match got {
-                        Ok(games) => fresh.push((id, games)),
-                        // One account failing must not blank the bar: its
-                        // last-known favourites stay in the merge.
-                        Err(e) => log.line(format!("Could not load {label}'s favourites: {e}")),
-                    }
-                }
-                let universes: Vec<String> = fresh
-                    .iter()
-                    .flat_map(|(_, g)| g.iter().map(|g| g.universe_id.clone()))
-                    .collect();
-                match roblox.icon_urls(&universes) {
-                    Ok(urls) => {
-                        let failed = urls
-                            .iter()
-                            .filter_map(|(u, url)| icons.fetch(roblox.transport(), u, url).err())
-                            .last();
-                        if let Some(e) = failed {
-                            log.line(format!("Some game icons did not load: {e}"));
-                        }
-                    }
-                    Err(e) => log.line(format!("Could not load game icons: {e}")),
-                }
-                fresh
-            },
-            move |w, fresh| {
-                let ok = fresh.len();
-                {
-                    let mut s = w.state_mut();
-                    for (id, games) in fresh {
-                        s.accounts.set_favorites(id, games);
-                    }
-                }
-                w.save_accounts();
-                w.show_games();
-                w.refresh_accounts();
-                let n = w.state().game_list.len();
-                w.log(&format!("{n} game(s) from {ok}/{total} account(s)"));
-            },
-        );
     }
 
     /// The launch bar, the accounts' heading and select-all, as the state is.
@@ -203,7 +122,7 @@ impl Window {
             (s.accounts.selected().iter().map(|a| a.user_id).collect::<Vec<_>>(), s.target())
         };
         if ids.is_empty() {
-            return self.log("No accounts selected");
+            return self.toast("Select the accounts to launch");
         }
         self.launch(ids, Mode::Each, Some(target));
     }
@@ -215,7 +134,7 @@ impl Window {
             let s = self.state();
             let Some(leader) = s.accounts.leader() else {
                 drop(s);
-                return self.log("No leader set -- make an account the leader first");
+                return self.toast("Make an account the leader first");
             };
             let ids: Vec<UserId> = std::iter::once(leader.user_id)
                 .chain(s.accounts.followers().iter().map(|a| a.user_id))
@@ -251,9 +170,9 @@ impl Window {
                 self.log(&format!("Launching {name} · {game}"));
                 self.launch(ids, Mode::Each, Some((Some(place), None)));
             }
-            Some((_, _, name, _)) => self.log(&format!("{name} has no accounts to launch")),
+            Some((_, _, name, _)) => self.toast(&format!("{name} has no accounts to launch")),
             // No game: the group's settings are where one is picked.
-            None => self.log("Pick the group's game in its settings first"),
+            None => self.toast("Choose the group's game in its settings first"),
         }
     }
 
@@ -310,7 +229,7 @@ impl Window {
                 && ids.first().is_some_and(|l| accounts.first().is_none_or(|a| a.id != *l));
             if leader_skipped {
                 drop(s);
-                return self.log("Its leader is still launching -- try again once it is up");
+                return self.toast("Its leader is still starting: try again once it is up");
             }
             let joining: HashSet<UserId> = if mode == Mode::Group {
                 accounts.iter().skip(1).map(|a| a.id).collect()
@@ -381,6 +300,9 @@ impl Window {
         let (ok, expired, failed) =
             (report.launched.len(), report.expired.len(), report.failed.len());
         if expired + failed == 0 {
+            if ok > 0 {
+                self.notify("Launched", &format!("{} up", plural(ok, "client", "clients")));
+            }
             return;
         }
         let mut parts = Vec::new();
@@ -388,12 +310,13 @@ impl Window {
             parts.push(format!("{ok} launched"));
         }
         if expired > 0 {
-            parts.push(format!("{expired} signed out"));
+            parts.push(format!("{expired} expired"));
         }
         if failed > 0 {
             parts.push(format!("{failed} failed"));
         }
         self.toast_with(&parts.join(" · "), "Details", activity::open_log);
+        self.notify("Not every account launched", &parts.join(" · "));
     }
 
     // -- stopping -----------------------------------------------------------
@@ -451,105 +374,6 @@ impl Window {
                 Err(e) => log.line(format!("Could not stop the clients: {e}")),
             },
             |()| {},
-        );
-    }
-
-    // -- sessions -----------------------------------------------------------
-    /// Ask Roblox whether each stored session still works. Only asks: a
-    /// refused one says so on its row, and Sign in again is the fix.
-    pub fn check_sessions(&self, ids: Vec<UserId>) {
-        let accounts: Vec<(UserId, Label)> = {
-            let mut s = self.state_mut();
-            let found: Vec<_> = ids
-                .iter()
-                .filter_map(|id| s.accounts.get(*id).map(|a| (*id, a.name.clone())))
-                .collect();
-            for (id, _) in &found {
-                s.accounts.begin_check(*id);
-            }
-            found
-        };
-        self.refresh_accounts();
-        let (keyring, roblox, log) =
-            (self.services().keyring.clone(), self.services().roblox.clone(), self.logger());
-        self.run_task(
-            move || {
-                accounts
-                    .into_iter()
-                    .map(|(id, label)| {
-                        let verdict = match keyring
-                            .cookie(&label)
-                            .map_err(|e| e.to_string())
-                            .map(|c| roblox.whoami(&c))
-                        {
-                            Ok(Ok(_)) => Some(true),
-                            Ok(Err(RobloxError::Expired)) => {
-                                log.line(format!("{label}: session expired -- sign in again"));
-                                Some(false)
-                            }
-                            // Offline is not expired: the last verdict stands.
-                            Ok(Err(e)) => {
-                                log.line(format!("{label}: could not check the session: {e}"));
-                                None
-                            }
-                            Err(e) => {
-                                log.line(format!("{label}: could not check the session: {e}"));
-                                None
-                            }
-                        };
-                        (id, verdict)
-                    })
-                    .collect::<Vec<_>>()
-            },
-            |w, verdicts| {
-                let now = chrono::Utc::now();
-                for (id, verdict) in verdicts {
-                    w.state_mut().accounts.end_check(id, verdict, now);
-                }
-                w.save_accounts();
-                w.refresh_accounts();
-            },
-        );
-    }
-
-    pub fn refresh_all(&self) {
-        let ids: Vec<UserId> = self.state().accounts.accounts().iter().map(|a| a.user_id).collect();
-        if ids.is_empty() {
-            return self.toast("Add an account first");
-        }
-        self.check_sessions(ids);
-        self.reload_games();
-    }
-
-    // -- updating Roblox ------------------------------------------------------
-    /// Install the newest Roblox build any source has. Launches install one
-    /// when there is none, but only this moves to a newer one: Roblox turns
-    /// old clients away, so this is the fix for "the game says update".
-    pub fn on_update_roblox(&self) {
-        if self.state().updating {
-            return;
-        }
-        self.state_mut().updating = true;
-        self.set_action_enabled("update-roblox", false);
-        self.0.ui.banner.set_revealed(true);
-        let (runner, log) = (self.services().runner.clone(), self.logger());
-        self.run_task(
-            move || roblox_build(&*runner, &|l| log.line(l), true),
-            |w, got| {
-                w.state_mut().updating = false;
-                w.set_action_enabled("update-roblox", true);
-                w.0.ui.banner.set_revealed(false);
-                match got {
-                    Ok(_) => {
-                        w.log("Roblox is up to date");
-                        w.toast("Roblox is up to date");
-                    }
-                    Err(e) => {
-                        w.log(&format!("Could not update Roblox: {e}"));
-                        w.toast_with("Could not update Roblox", "Details", activity::open_log);
-                    }
-                }
-            },
         );
     }
 }

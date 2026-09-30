@@ -57,7 +57,7 @@ impl Chip {
             Chip::Running => ("running", "Running", true),
             Chip::Joining => ("joining", "Joining…", true),
             Chip::Starting => ("starting", "Starting…", true),
-            Chip::Expired => ("expired", "Signed out", false),
+            Chip::Expired => ("expired", "Expired", false),
             Chip::Idle => ("idle", "Idle", false),
         }
     }
