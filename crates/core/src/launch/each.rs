@@ -4,7 +4,8 @@ use super::{LaunchAccount, Run, url};
 use crate::types::{PlaceId, ServerId};
 
 /// Each account into `place` (into `server` when given). An account already
-/// running is skipped, and costs no wait; so does the first sign-in.
+/// running is skipped, and costs no wait; so does the first sign-in. A stop
+/// ends it before the next sign-in.
 pub(super) fn launch(
     run: &Run<'_>,
     accounts: &[LaunchAccount],
@@ -12,7 +13,10 @@ pub(super) fn launch(
     server: Option<&ServerId>,
 ) {
     let mut signed_in = false;
-    for a in accounts {
+    for (i, a) in accounts.iter().enumerate() {
+        if run.stopped() {
+            return run.give_up(&accounts[i..]);
+        }
         match run.running(a) {
             Ok(true) => {
                 run.log(format!("{}: already running -- skipping launch", a.label));
@@ -24,8 +28,8 @@ pub(super) fn launch(
                 continue;
             }
         }
-        if signed_in {
-            run.sleep(run.pacing().stagger);
+        if signed_in && !run.pause(run.pacing().stagger) {
+            return run.give_up(&accounts[i..]);
         }
         signed_in = true;
         match run.start(a, url(place, server)) {

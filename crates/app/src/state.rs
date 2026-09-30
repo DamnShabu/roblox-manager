@@ -85,6 +85,8 @@ pub struct AppState {
     pub joining: HashSet<UserId>,
     /// Each account's playing macro: what stops it, and its name.
     pub macro_runs: HashMap<UserId, (StopFlag, String)>,
+    /// Launches under way: what stops each, and the accounts it starts.
+    pub launches: Vec<(StopFlag, Vec<UserId>)>,
     /// The macros shown unfolded.
     pub open_macros: HashSet<String>,
     /// What the account search holds, lower-cased; empty shows the layout.
@@ -114,6 +116,7 @@ impl AppState {
             launching: HashSet::new(),
             joining: HashSet::new(),
             macro_runs: HashMap::new(),
+            launches: Vec::new(),
             open_macros: HashSet::new(),
             filter: String::new(),
             ungrouped_open: true,
@@ -163,6 +166,19 @@ impl AppState {
             })
             .map(|acct| acct.user_id)
             .collect()
+    }
+
+    /// Stop every launch under way that starts any of `ids` (every one,
+    /// for None) before its next sign-in. Returns how many were stopped.
+    pub fn stop_launches(&self, ids: Option<&[UserId]>) -> usize {
+        let mut n = 0;
+        for (stop, of) in &self.launches {
+            if ids.is_none_or(|ids| of.iter().any(|id| ids.contains(id))) && !stop.is_set() {
+                stop.set();
+                n += 1;
+            }
+        }
+        n
     }
 
     /// Whether any of `ids` has a client up or on its way: a group's header
@@ -279,6 +295,17 @@ mod tests {
         assert!(s.matching().is_empty());
         s.filter = String::new();
         assert_eq!(s.matching(), [UserId(1), UserId(2)], "no words: everyone, leader first");
+    }
+
+    #[test]
+    fn stopping_launches_stops_those_that_start_the_accounts_asked_for() {
+        let (_d, mut s) = state();
+        let (a, b) = (StopFlag::default(), StopFlag::default());
+        s.launches = vec![(a.clone(), vec![UserId(1)]), (b.clone(), vec![UserId(2)])];
+        assert_eq!(s.stop_launches(Some(&[UserId(2), UserId(9)])), 1);
+        assert!(!a.is_set() && b.is_set());
+        assert_eq!(s.stop_launches(None), 1, "the one already stopped is not counted");
+        assert!(a.is_set());
     }
 
     #[test]

@@ -16,6 +16,7 @@ use std::time::Duration;
 use crate::cordial::{Build, ClientOpts, CordialError, CordialProfiles};
 use crate::keyring::Keyring;
 use crate::roblox::{Presence, Roblox, RobloxError, join_url};
+use crate::stop::StopFlag;
 use crate::types::{Label, PlaceId, Profile, ServerId, User, UserId};
 
 /// How launches are spaced and how long a leader's server is waited for.
@@ -59,7 +60,7 @@ pub enum Mode {
     Group,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct LaunchRequest {
     /// In launch order. For a group, the first is the leader.
     pub accounts: Vec<LaunchAccount>,
@@ -68,6 +69,10 @@ pub struct LaunchRequest {
     pub place: Option<PlaceId>,
     /// A server to send everyone to (a friend's), in each mode.
     pub server: Option<ServerId>,
+    /// Set from another thread to end the launch before its next sign-in,
+    /// or while it waits for a leader's server. Clients already started
+    /// keep running: stopping those is the profiles' `stop`.
+    pub stop: StopFlag,
 }
 
 /// What happened, per account.
@@ -79,6 +84,8 @@ pub struct LaunchReport {
     pub expired: Vec<UserId>,
     /// Anything else, with why.
     pub failed: Vec<(UserId, String)>,
+    /// Never started: the launch was stopped before their turn.
+    pub cancelled: Vec<UserId>,
     /// The server a group joined, when its leader reported one.
     pub server: Option<ServerId>,
 }
@@ -120,7 +127,8 @@ impl Launcher {
         log: &dyn Fn(String),
     ) -> Result<LaunchReport, LaunchError> {
         let build = (self.build)(log)?;
-        let run = Run { launcher: self, build, log, report: RefCell::default() };
+        let run =
+            Run { launcher: self, build, log, stop: req.stop.clone(), report: RefCell::default() };
         match (req.mode, req.accounts.split_first()) {
             (_, None) => {}
             (Mode::Each, Some(_)) => {
@@ -141,6 +149,7 @@ struct Run<'a> {
     launcher: &'a Launcher,
     build: Build,
     log: &'a dyn Fn(String),
+    stop: StopFlag,
     report: RefCell<LaunchReport>,
 }
 
@@ -151,6 +160,30 @@ impl Run<'_> {
 
     fn sleep(&self, d: Duration) {
         (self.launcher.pacing.sleep)(d);
+    }
+
+    fn stopped(&self) -> bool {
+        self.stop.is_set()
+    }
+
+    /// Wait `d` unless the launch has been stopped; false when it has, by
+    /// the start or the end of the wait.
+    fn pause(&self, d: Duration) -> bool {
+        if self.stopped() {
+            return false;
+        }
+        self.sleep(d);
+        !self.stopped()
+    }
+
+    /// The launch was stopped: `rest` never start.
+    fn give_up(&self, rest: &[LaunchAccount]) {
+        if rest.is_empty() {
+            return;
+        }
+        let names: Vec<&str> = rest.iter().map(|a| a.label.as_str()).collect();
+        self.log(format!("Launch stopped -- {} not started", names.join(", ")));
+        self.report.borrow_mut().cancelled.extend(rest.iter().map(|a| a.id));
     }
 
     fn pacing(&self) -> &Pacing {

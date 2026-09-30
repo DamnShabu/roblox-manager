@@ -12,6 +12,7 @@ pub mod launch;
 pub mod macros;
 pub mod paths;
 pub mod roblox;
+pub mod stop;
 pub mod types;
 pub mod window_state;
 

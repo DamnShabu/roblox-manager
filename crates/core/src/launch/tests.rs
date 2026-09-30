@@ -6,6 +6,7 @@ use crate::cordial::process::recording::Recording;
 use crate::keyring::MemorySecrets;
 use crate::paths::Paths;
 use crate::roblox::{Friend, Game, QuickLoginCode, QuickLoginStatus};
+use crate::stop::StopFlag;
 use crate::types::Cookie;
 
 /// Roblox as the launch sees it: a cookie `u<id>` is user `id`, `expired` is
@@ -62,6 +63,8 @@ struct World {
     roblox: Arc<FakeRoblox>,
     runner: Arc<Recording>,
     slept: Arc<Mutex<Vec<Duration>>>,
+    /// Set during the nth wait (from 1), as a Stop pressed then would be.
+    stop_at_wait: Arc<Mutex<Option<(usize, StopFlag)>>>,
     logs: Mutex<Vec<String>>,
     launcher: Launcher,
 }
@@ -92,16 +95,25 @@ fn world(n: u64, sessions: &[(&str, &str)], running: &[u64]) -> World {
     ));
     let roblox = Arc::new(FakeRoblox::default());
     let slept = Arc::new(Mutex::new(Vec::new()));
-    let slept2 = Arc::clone(&slept);
+    let stop_at_wait: Arc<Mutex<Option<(usize, StopFlag)>>> = Arc::default();
+    let (slept2, stop2) = (Arc::clone(&slept), Arc::clone(&stop_at_wait));
     let pacing = Pacing {
         stagger: Duration::from_secs(8),
         leader_timeout: Duration::from_secs(9),
         poll: Duration::from_secs(3),
-        sleep: Arc::new(move |d| slept2.lock().unwrap().push(d)),
+        sleep: Arc::new(move |d| {
+            let mut slept = slept2.lock().unwrap();
+            slept.push(d);
+            if let Some((n, flag)) = &*stop2.lock().unwrap() {
+                if slept.len() == *n {
+                    flag.set();
+                }
+            }
+        }),
     };
     let build: BuildFn = Arc::new(|_log| Ok(Build { engine: "/l".into(), apk: "/a".into() }));
     let launcher = Launcher::new(keyring, roblox.clone(), profiles, build, pacing);
-    World { _dir: dir, roblox, runner, slept, logs: Mutex::new(Vec::new()), launcher }
+    World { _dir: dir, roblox, runner, slept, stop_at_wait, logs: Mutex::new(Vec::new()), launcher }
 }
 
 fn account(id: u64) -> LaunchAccount {
@@ -118,6 +130,7 @@ fn request(ids: &[u64], mode: Mode, place: Option<&str>, server: Option<&str>) -
         mode,
         place: place.map(|p| PlaceId::parse(p).unwrap()),
         server: server.map(|s| ServerId::parse(s).unwrap()),
+        stop: StopFlag::default(),
     }
 }
 
@@ -137,6 +150,11 @@ impl World {
                 (at("--profile").unwrap_or_default(), at("--join-url"))
             })
             .collect()
+    }
+
+    /// The request, stopped during its `n`th wait.
+    fn stop_at_wait(&self, n: usize, req: &LaunchRequest) {
+        *self.stop_at_wait.lock().unwrap() = Some((n, req.stop.clone()));
     }
 
     fn staggers(&self) -> usize {
@@ -298,4 +316,41 @@ fn a_session_that_is_another_user_starts_nobodys_client() {
     assert_eq!(r.failed.len(), 1);
     assert!(r.failed[0].1.contains("belongs to user2"), "{:?}", r.failed);
     assert!(w.started().is_empty());
+}
+
+#[test]
+fn a_stopped_launch_starts_nobody_after_the_stop() {
+    let w = world(3, &[], &[]);
+    let req = request(&[1, 2, 3], Mode::Each, Some("77"), None);
+    w.stop_at_wait(1, &req);
+    let r = w.launch(req);
+    assert_eq!(launched(&r), [1], "stopped during the wait before the second");
+    assert_eq!(r.cancelled, [UserId(2), UserId(3)]);
+    assert_eq!(w.started().len(), 1);
+    assert!(w.logged("Launch stopped -- a2, a3 not started"));
+}
+
+#[test]
+fn a_launch_stopped_before_it_began_starts_nobody() {
+    for mode in [Mode::Each, Mode::Group] {
+        let w = world(2, &[], &[]);
+        let req = request(&[1, 2], mode, Some("77"), None);
+        req.stop.set();
+        let r = w.launch(req);
+        assert!(r.launched.is_empty(), "{mode:?}");
+        assert_eq!(r.cancelled, [UserId(1), UserId(2)], "{mode:?}");
+        assert!(w.started().is_empty(), "{mode:?}");
+    }
+}
+
+#[test]
+fn a_group_stopped_while_it_waits_for_the_leaders_server_sends_nobody_after_it() {
+    let w = world(3, &[], &[]);
+    let req = request(&[1, 2, 3], Mode::Group, Some("77"), None);
+    w.stop_at_wait(1, &req);
+    let r = w.launch(req);
+    assert_eq!(launched(&r), [1], "the leader was already up");
+    assert_eq!(r.cancelled, [UserId(2), UserId(3)]);
+    assert_eq!(*w.roblox.presence_asks.lock().unwrap(), 0, "no poll after the stop");
+    assert!(!w.logged("followers get their own"));
 }

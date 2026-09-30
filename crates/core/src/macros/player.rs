@@ -2,7 +2,6 @@
 
 use std::io;
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::Duration;
 
 use chrono::{DateTime, Local};
@@ -10,6 +9,7 @@ use chrono::{DateTime, Local};
 use super::MacroError;
 use super::grammar::{Macro, Step, TAP_PRESS, TYPE_GAP, describe};
 use super::keys::SHIFT;
+pub use crate::stop::StopFlag;
 
 /// Where a macro's input goes. Adapters: [`super::wayland::VirtualInput`],
 /// and a recorder in the self-check. Dropping it lets go of the display.
@@ -17,38 +17,6 @@ pub trait Input {
     fn key(&mut self, code: u16, down: bool) -> io::Result<()>;
     fn motion(&mut self, dx: i32, dy: i32) -> io::Result<()>;
     fn button(&mut self, code: u16, down: bool) -> io::Result<()>;
-}
-
-/// Stops a playing macro, from any thread; waits end early when it is set.
-#[derive(Clone, Default)]
-pub struct StopFlag(Arc<(Mutex<bool>, Condvar)>);
-
-impl StopFlag {
-    pub fn set(&self) {
-        let (lock, wake) = &*self.0;
-        *lock.lock().unwrap_or_else(PoisonError::into_inner) = true;
-        wake.notify_all();
-    }
-
-    pub fn is_set(&self) -> bool {
-        *self.0.0.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Whether `other` is this flag (or a clone of it), not merely another.
-    pub fn same_as(&self, other: &StopFlag) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
-    }
-
-    /// Wait up to `secs`; true when stopped meanwhile.
-    pub fn wait(&self, secs: f64) -> bool {
-        let (lock, wake) = &*self.0;
-        let guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
-        let timeout = Duration::try_from_secs_f64(secs).unwrap_or_default();
-        let (stopped, _) = wake
-            .wait_timeout_while(guard, timeout, |stopped| !*stopped)
-            .unwrap_or_else(PoisonError::into_inner);
-        *stopped
-    }
 }
 
 /// A random moment in [lo, hi]: humans never press a key for the same few

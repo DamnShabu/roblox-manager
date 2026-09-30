@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 use rbxmgr_core::launch::{LaunchAccount, LaunchReport, LaunchRequest, Mode};
 use rbxmgr_core::roblox::FAVORITES_SHOWN;
+use rbxmgr_core::stop::StopFlag;
 use rbxmgr_core::types::{PlaceId, Profile, ServerId, UserId};
 
 use super::Window;
@@ -249,15 +250,19 @@ impl Window {
         if accounts.is_empty() {
             return;
         }
-        self.refresh_states();
         let ids: Vec<UserId> = accounts.iter().map(|a| a.id).collect();
-        let request = LaunchRequest { accounts, mode, place: place.clone(), server };
+        let stop = StopFlag::default();
+        self.state_mut().launches.push((stop.clone(), ids.clone()));
+        self.refresh_states();
+        let request =
+            LaunchRequest { accounts, mode, place: place.clone(), server, stop: stop.clone() };
         let (launcher, log) = (self.services().launcher.clone(), self.logger());
         self.run_task(
             move || launcher.launch(request, &|l| log.line(l)),
             move |w, result| {
                 {
                     let mut s = w.state_mut();
+                    s.launches.retain(|(flag, _)| !flag.same_as(&stop));
                     for id in &ids {
                         s.launching.remove(id);
                     }
@@ -297,13 +302,20 @@ impl Window {
     /// A toast for a launch that did not all go through; one that did is
     /// told by its rows turning to Running.
     fn tell_report(&self, report: &LaunchReport) {
-        let (ok, expired, failed) =
-            (report.launched.len(), report.expired.len(), report.failed.len());
-        if expired + failed == 0 {
+        let (ok, expired, failed, stopped) = (
+            report.launched.len(),
+            report.expired.len(),
+            report.failed.len(),
+            report.cancelled.len(),
+        );
+        if expired + failed + stopped == 0 {
             if ok > 0 {
                 self.notify("Launched", &format!("{} up", plural(ok, "client", "clients")));
             }
             return;
+        }
+        if expired + failed == 0 {
+            return self.toast(&format!("Launch stopped · {stopped} not started"));
         }
         let mut parts = Vec::new();
         if ok > 0 {
@@ -314,6 +326,9 @@ impl Window {
         }
         if failed > 0 {
             parts.push(format!("{failed} failed"));
+        }
+        if stopped > 0 {
+            parts.push(format!("{stopped} not started"));
         }
         self.toast_with(&parts.join(" · "), "Details", activity::open_log);
         self.notify("Not every account launched", &parts.join(" · "));
@@ -341,6 +356,14 @@ impl Window {
                 (name, members)
             })
         };
+        let ids: Vec<UserId> = {
+            let s = self.state();
+            let a = &s.accounts;
+            a.accounts().iter().filter(|x| a.group_of(x) == Some(gid)).map(|x| x.user_id).collect()
+        };
+        if self.state().stop_launches(Some(&ids)) > 0 {
+            self.log("Stopping the launch under way");
+        }
         if let Some((name, members)) = found.filter(|f| !f.1.is_empty()) {
             self.stop_profiles(name, members);
         }
@@ -360,6 +383,9 @@ impl Window {
     }
 
     pub fn on_stop_all(&self) {
+        if self.state().stop_launches(None) > 0 {
+            self.log("Stopping the launches under way");
+        }
         let profiles: HashSet<Profile> = {
             let s = self.state();
             for (stop, _) in s.macro_runs.values() {

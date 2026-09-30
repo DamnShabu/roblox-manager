@@ -13,6 +13,12 @@ pub(super) fn launch(
     followers: &[LaunchAccount],
     place: Option<&PlaceId>,
 ) -> Option<ServerId> {
+    if run.stopped() {
+        let everyone: Vec<LaunchAccount> =
+            std::iter::once(leader).chain(followers).cloned().collect();
+        run.give_up(&everyone);
+        return None;
+    }
     let already_running = match run.running(leader) {
         Ok(true) => {
             run.log(format!("{}: leader is already running, looking for its server", leader.label));
@@ -49,7 +55,11 @@ pub(super) fn launch(
     }
     let (server, leader_place) = wait_for_server(run, leader, already_running);
     let target = leader_place.as_ref().or(place);
-    for a in followers {
+    for (i, a) in followers.iter().enumerate() {
+        if run.stopped() {
+            run.give_up(&followers[i..]);
+            break;
+        }
         match run.running(a) {
             Ok(true) => {
                 run.log(format!("{}: already running -- skipping launch", a.label));
@@ -61,7 +71,10 @@ pub(super) fn launch(
                 continue;
             }
         }
-        run.sleep(run.pacing().stagger);
+        if !run.pause(run.pacing().stagger) {
+            run.give_up(&followers[i..]);
+            break;
+        }
         match run.start(a, url(target, server.as_ref())) {
             Ok(()) => match &server {
                 Some(s) => run.log(format!("{}: launched into {s}", a.label)),
@@ -73,9 +86,9 @@ pub(super) fn launch(
     server
 }
 
-/// Poll the leader's presence until it reports a server or time runs out.
-/// A leader that was already running is asked at once; a new one gets a
-/// poll's time to arrive first.
+/// Poll the leader's presence until it reports a server, time runs out, or
+/// the launch is stopped. A leader that was already running is asked at
+/// once; a new one gets a poll's time to arrive first.
 fn wait_for_server(
     run: &Run<'_>,
     leader: &LaunchAccount,
@@ -85,8 +98,8 @@ fn wait_for_server(
     let secs = pacing.leader_timeout.as_secs();
     let mut waited = std::time::Duration::ZERO;
     while waited < pacing.leader_timeout {
-        if !already_running || !waited.is_zero() {
-            run.sleep(pacing.poll);
+        if (!already_running || !waited.is_zero()) && !run.pause(pacing.poll) {
+            return (None, None);
         }
         waited += pacing.poll;
         match run.presence(leader) {
