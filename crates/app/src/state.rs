@@ -101,7 +101,7 @@ pub struct AppState {
     pub activity: Vec<Activity>,
     /// Why each account's last launch failed, until one succeeds.
     pub failures: HashMap<UserId, String>,
-    /// A Roblox update is being installed.
+    /// A Roblox or Stacked update is being installed.
     pub updating: bool,
     /// How many tasks are running; the window spins while any are.
     pub busy: u32,

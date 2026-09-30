@@ -129,9 +129,15 @@ pub fn with_low_power(mut env: Vec<(String, String)>) -> Vec<(String, String)> {
     env
 }
 
-/// One account's engine, with the arguments upstream's window starts it with.
-pub fn client_argv(profile: &Profile, url: Option<&str>, build: &Build) -> Vec<String> {
-    let mut argv: Vec<String> = ["cordial-run", "--lib-dir"].map(String::from).into();
+/// One account's engine, `program` (a `cordial-run`), with the arguments
+/// upstream's window starts it with.
+pub fn client_argv(
+    program: &str,
+    profile: &Profile,
+    url: Option<&str>,
+    build: &Build,
+) -> Vec<String> {
+    let mut argv = vec![program.to_owned(), "--lib-dir".into()];
     argv.push(build.engine.display().to_string());
     argv.push("--apk".into());
     argv.push(build.apk.display().to_string());
@@ -279,7 +285,8 @@ mod tests {
     #[test]
     fn the_engine_is_cordial_run_for_the_accounts_profile() {
         let build = Build { engine: PathBuf::from("/l"), apk: PathBuf::from("/a.apk") };
-        let argv = client_argv(&Profile::named("rbxmgr-7"), Some("roblox://x"), &build);
+        let argv =
+            client_argv("cordial-run", &Profile::named("rbxmgr-7"), Some("roblox://x"), &build);
         assert_eq!(
             argv,
             [
@@ -299,7 +306,8 @@ mod tests {
             ]
         );
         assert!(
-            !client_argv(&Profile::named("p"), None, &build).contains(&"--join-url".to_string())
+            !client_argv("cordial-run", &Profile::named("p"), None, &build)
+                .contains(&"--join-url".to_string())
         );
     }
 }

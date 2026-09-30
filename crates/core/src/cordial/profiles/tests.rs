@@ -113,7 +113,7 @@ fn a_client_that_stays_up_is_launched_with_its_log_rotated() {
     fs::write(logs.join("rbxmgr-7.log"), "old run").unwrap();
     w.profiles.launch(&p, Some("roblox://x"), &build(), ClientOpts::default()).unwrap();
     let (argv, env) = &w.runner.spawned()[0];
-    assert_eq!(argv, &engine::client_argv(&p, Some("roblox://x"), &build()));
+    assert_eq!(argv, &engine::client_argv("cordial-run", &p, Some("roblox://x"), &build()));
     assert!(env.contains(&("CORDIAL_SECRET_STORE".into(), "keyring".into())));
     assert_eq!(fs::read_to_string(logs.join("rbxmgr-7.log.1")).unwrap(), "old run");
     assert!(!flags(&w, &p).exists(), "a normal client writes no flags");

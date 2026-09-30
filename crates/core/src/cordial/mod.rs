@@ -10,6 +10,7 @@ mod migrate;
 pub mod process;
 mod profiles;
 pub mod session;
+pub mod stacked;
 
 pub use build::{Build, roblox_build};
 pub use process::{Child, Output, ProcessView, Runner, SystemRunner};
@@ -29,4 +30,6 @@ pub enum CordialError {
     ExitedAtOnce { reason: String, log: String },
     #[error("could not install Roblox: {0}")]
     Build(String),
+    #[error("could not update Stacked: {0}")]
+    Stacked(String),
 }

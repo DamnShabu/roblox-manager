@@ -9,6 +9,15 @@ it -- today only `0002`, which adds `cordial-fetch` (the fork has
 (`packaging/flatpak/io.github.mujo.RobloxManager.yml`) builds the same, and
 `crates/core/tests/cordial_pin.rs` fails `cargo test` when the two disagree.
 
+## Updating without a new manager build
+
+The main menu's **Update Stacked** builds the fork's newest commit from its
+own flake (`nix build --refresh github:DamnShabu/stacked?submodules=1`) into
+`~/.local/share/rbxmgr/stacked`, and launches from then on run that
+`cordial-run` instead of the pinned one (`crates/core/src/cordial/stacked.rs`).
+`cordial-fetch` stays the pinned one. It needs Nix on the host, so the Flatpak
+does not offer it. To go back to the pinned engine, delete that link.
+
 ## What the manager relies on
 
 Any source this points at must keep these, or `crates/core/src/cordial`

@@ -135,7 +135,8 @@ impl CordialProfiles {
         let log_path = self.rotate_log(profile)?;
         let log = File::create(&log_path)
             .map_err(|e| io(&format!("could not open {}", log_path.display()), e))?;
-        let mut argv = engine::client_argv(profile, url, build);
+        let program = super::stacked::engine_program(&self.paths);
+        let mut argv = engine::client_argv(&program, profile, url, build);
         if opts.low_power {
             argv.splice(0..0, ["nice", "-n", "10"].map(String::from));
         }
