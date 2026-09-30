@@ -331,6 +331,13 @@ fn main_menu() -> gio::Menu {
     roblox.append(Some("_Refresh Sessions and Favourites"), Some("win.refresh"));
     roblox.append(Some("_Update Roblox"), Some("win.update-roblox"));
     menu.append_section(None, &roblox);
+    let style = gio::Menu::new();
+    for (label, name) in [("Follow System", "system"), ("Light", "light"), ("Dark", "dark")] {
+        let item = gio::MenuItem::new(Some(label), None);
+        item.set_action_and_target_value(Some("win.style"), Some(&name.to_variant()));
+        style.append_item(&item);
+    }
+    menu.append_section(Some("Style"), &style);
     let help = gio::Menu::new();
     help.append(Some("Activity _Log"), Some("win.activity-log"));
     help.append(Some("How _Macros Work"), Some("win.macro-help"));

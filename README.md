@@ -33,7 +33,8 @@ NixOS: add this flake as an input and import `inputs.roblox-manager.nixosModules
 
 ## The window
 
-A GTK4/libadwaita app in your desktop's light or dark style.
+A GTK4/libadwaita app in your desktop's light or dark style, or the one
+chosen in its main menu.
 
 - **Accounts** sign in with Roblox Quick Login (the add button, Ctrl+N):
   you approve a short code on a device where you are already signed in, and

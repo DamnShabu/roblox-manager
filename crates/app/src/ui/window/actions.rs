@@ -5,6 +5,7 @@ use adw::prelude::*;
 use gtk::glib::variant::StaticVariantType;
 use gtk::{gio, glib};
 use rbxmgr_core::types::UserId;
+use rbxmgr_core::window_state::Style;
 
 use super::Window;
 use crate::ui::accounts::group_settings::GroupSettings;
@@ -70,6 +71,36 @@ impl Window {
             self.0.win.add_action(&action);
         }
         self.install_item_actions();
+    }
+
+    /// Light or dark: the style menu's radio items, and the style now.
+    pub(super) fn install_style(&self, style: Style) {
+        apply_style(style);
+        let action = gio::SimpleAction::new_stateful(
+            "style",
+            Some(glib::VariantTy::STRING),
+            &style.name().to_variant(),
+        );
+        action.connect_change_state(|a, value| {
+            let Some(style) = value.and_then(|v| v.get::<String>()).and_then(|n| Style::parse(&n))
+            else {
+                return;
+            };
+            a.set_state(&style.name().to_variant());
+            apply_style(style);
+        });
+        self.0.win.add_action(&action);
+    }
+
+    /// The style the menu shows as chosen.
+    pub(super) fn style(&self) -> Style {
+        self.0
+            .win
+            .lookup_action("style")
+            .and_then(|a| a.state())
+            .and_then(|v| v.get::<String>())
+            .and_then(|n| Style::parse(&n))
+            .unwrap_or_default()
     }
 
     /// Actions on one account or group, which rows' and headers' menus fire
@@ -147,6 +178,14 @@ impl Window {
             a.set_enabled(on);
         }
     }
+}
+
+fn apply_style(style: Style) {
+    adw::StyleManager::default().set_color_scheme(match style {
+        Style::System => adw::ColorScheme::Default,
+        Style::Light => adw::ColorScheme::ForceLight,
+        Style::Dark => adw::ColorScheme::ForceDark,
+    });
 }
 
 /// Set every shortcut in [`SHORTCUTS`] on the application.

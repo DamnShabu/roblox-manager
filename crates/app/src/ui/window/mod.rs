@@ -93,6 +93,7 @@ impl Window {
         });
         let w = Window(inner);
         w.install_actions();
+        w.install_style(saved.style);
         // The app owns the window's handle until the window closes: every
         // widget and task holds only a weak one.
         CURRENT.with_borrow_mut(|c| *c = Some(w.clone()));
@@ -360,6 +361,7 @@ impl Window {
             maximized: self.0.win.is_maximized(),
             // A narrow window hides the pane by itself: that is no choice.
             sidebar: self.0.ui.split.is_collapsed() || self.0.ui.split.shows_sidebar(),
+            style: self.style(),
         };
         if let Err(e) = state.save(&self.services().paths.window_state()) {
             eprintln!("roblox-manager: could not remember the window's size: {e}");
