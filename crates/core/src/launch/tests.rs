@@ -40,6 +40,12 @@ impl Roblox for FakeRoblox {
     ) -> Result<std::collections::HashMap<String, String>, RobloxError> {
         unimplemented!()
     }
+    fn headshot_urls(
+        &self,
+        _: &[UserId],
+    ) -> Result<std::collections::HashMap<UserId, String>, RobloxError> {
+        unimplemented!()
+    }
     fn quick_login_create(&self) -> Result<QuickLoginCode, RobloxError> {
         unimplemented!()
     }

@@ -10,6 +10,7 @@ pub struct Paths {
     data_home: PathBuf,
     config_home: PathBuf,
     cache_home: PathBuf,
+    state_home: PathBuf,
     runtime_dir: PathBuf,
 }
 
@@ -28,6 +29,7 @@ impl Paths {
             data_home: var("XDG_DATA_HOME").unwrap_or_else(|| home.join(".local/share")),
             config_home: var("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config")),
             cache_home: var("XDG_CACHE_HOME").unwrap_or_else(|| home.join(".cache")),
+            state_home: var("XDG_STATE_HOME").unwrap_or_else(|| home.join(".local/state")),
             runtime_dir: var("XDG_RUNTIME_DIR")
                 .unwrap_or_else(|| PathBuf::from(format!("/run/user/{uid}"))),
             home,
@@ -41,6 +43,7 @@ impl Paths {
             data_home: root.join("data"),
             config_home: root.join("config"),
             cache_home: root.join("cache"),
+            state_home: root.join("state"),
             runtime_dir: root.join("run"),
         }
     }
@@ -70,6 +73,17 @@ impl Paths {
     /// Leading `_` so no account label can claim it.
     pub fn icons(&self) -> PathBuf {
         self.cache().join("_icons")
+    }
+
+    /// Accounts' headshots, one PNG per user id.
+    pub fn avatars(&self) -> PathBuf {
+        self.cache().join("_avatars")
+    }
+
+    /// How the window was left: its size, and which panes were open.
+    /// Neither data nor a setting, so it is XDG state.
+    pub fn window_state(&self) -> PathBuf {
+        self.state_home.join("rbxmgr/window.json")
     }
 
     pub fn logs(&self) -> PathBuf {
@@ -111,6 +125,8 @@ mod tests {
         let p = paths(&[("HOME", "/home/u")]);
         assert_eq!(p.accounts(), PathBuf::from("/home/u/.local/share/rbxmgr/accounts.json"));
         assert_eq!(p.icons(), PathBuf::from("/home/u/.cache/rbxmgr/_icons"));
+        assert_eq!(p.avatars(), PathBuf::from("/home/u/.cache/rbxmgr/_avatars"));
+        assert_eq!(p.window_state(), PathBuf::from("/home/u/.local/state/rbxmgr/window.json"));
         assert_eq!(p.cordial_shell_json(), PathBuf::from("/home/u/.config/cordial/shell.json"));
         assert_eq!(p.runtime_dir(), Path::new("/run/user/1000"));
     }
@@ -128,8 +144,10 @@ mod tests {
             ("HOME", "/home/u"),
             ("XDG_DATA_HOME", "/d"),
             ("XDG_CACHE_HOME", "/c"),
+            ("XDG_STATE_HOME", "/s"),
             ("XDG_RUNTIME_DIR", "/r"),
         ]);
+        assert_eq!(p.window_state(), PathBuf::from("/s/rbxmgr/window.json"));
         assert_eq!(p.macros(), PathBuf::from("/d/rbxmgr/macros.json"));
         assert_eq!(p.logs(), PathBuf::from("/c/rbxmgr/logs"));
         assert_eq!(p.runtime_dir(), Path::new("/r"));

@@ -1,5 +1,6 @@
-//! Game icons: where Roblox serves them, and a cache on disk so each is
-//! downloaded once. Icons are public; no cookie is sent for them.
+//! Game icons and account headshots: where Roblox serves them, and a cache
+//! on disk so each is downloaded once. Both are public; no cookie is sent
+//! for them.
 
 use std::collections::HashMap;
 use std::fs;
@@ -9,11 +10,35 @@ use serde::Deserialize;
 
 use super::RobloxError;
 use super::http::{self, Request, Transport};
+use crate::types::UserId;
 
 /// {universe id: icon url} for the icons Roblox has finished rendering.
 pub(super) fn urls(
     t: &dyn Transport,
     universes: &[String],
+) -> Result<HashMap<String, String>, RobloxError> {
+    rendered(t, "https://thumbnails.roblox.com/v1/games/icons?universeIds=", universes)
+}
+
+/// {user id: headshot url} for the headshots Roblox has finished rendering.
+pub(super) fn headshot_urls(
+    t: &dyn Transport,
+    users: &[UserId],
+) -> Result<HashMap<UserId, String>, RobloxError> {
+    let ids: Vec<String> = users.iter().map(ToString::to_string).collect();
+    let found =
+        rendered(t, "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=", &ids)?;
+    Ok(found.into_iter().filter_map(|(id, url)| Some((UserId(id.parse().ok()?), url))).collect())
+}
+
+/// {id: image url} from one of the thumbnails endpoints, which all answer
+/// the same shape. Every account's favourites together repeat games, and the
+/// endpoints take a bounded number of ids: each is asked for once, in
+/// batches.
+fn rendered(
+    t: &dyn Transport,
+    endpoint: &str,
+    targets: &[String],
 ) -> Result<HashMap<String, String>, RobloxError> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -27,18 +52,12 @@ pub(super) fn urls(
         #[serde(default)]
         data: Vec<Thumb>,
     }
-    // Every account's favourites together repeat games, and the endpoint
-    // takes a bounded number of ids: each asked for once, in batches.
-    let mut ids: Vec<&str> =
-        universes.iter().map(String::as_str).filter(|u| !u.is_empty()).collect();
+    let mut ids: Vec<&str> = targets.iter().map(String::as_str).filter(|u| !u.is_empty()).collect();
     ids.sort_unstable();
     ids.dedup();
     let mut found = HashMap::new();
     for batch in ids.chunks(BATCH) {
-        let url = format!(
-            "https://thumbnails.roblox.com/v1/games/icons?universeIds={}&size=150x150&format=Png&isCircular=false",
-            batch.join(",")
-        );
+        let url = format!("{endpoint}{}&size=150x150&format=Png&isCircular=false", batch.join(","));
         let page: Page = http::ok(http::send(t, Request::get(url))?, false)?.json()?;
         found.extend(
             page.data
@@ -50,10 +69,11 @@ pub(super) fn urls(
     Ok(found)
 }
 
-/// The universe ids per request the icons endpoint takes.
+/// The ids per request the thumbnails endpoints take.
 const BATCH: usize = 100;
 
-/// Icons on disk, one PNG per universe. Regenerable, so it lives in the cache.
+/// Images on disk, one PNG per universe (game icons) or per user
+/// (headshots). Regenerable, so it lives in the cache.
 pub struct IconCache {
     dir: PathBuf,
 }
@@ -85,8 +105,14 @@ impl IconCache {
         if let Some(path) = self.cached(universe) {
             return Ok(path);
         }
-        let path =
-            self.path(universe).ok_or_else(|| IconError::NotAUniverse(universe.to_owned()))?;
+        self.refresh(t, universe, url)
+    }
+
+    /// Download the image from `url` whether or not one is on disk: for a
+    /// headshot, which changes with the avatar. The old one stays until the
+    /// new one is whole.
+    pub fn refresh(&self, t: &dyn Transport, key: &str, url: &str) -> Result<PathBuf, IconError> {
+        let path = self.path(key).ok_or_else(|| IconError::NotAUniverse(key.to_owned()))?;
         let resp = http::ok(http::send(t, Request::get(url))?, false)?;
         write_atomically(&path, &resp.body).map_err(|e| IconError::Write(e.to_string()))?;
         Ok(path)
@@ -99,7 +125,7 @@ pub enum IconError {
     Fetch(#[from] RobloxError),
     #[error("could not save the icon: {0}")]
     Write(String),
-    #[error("{0:?} is not a universe id")]
+    #[error("{0:?} is not a universe or user id")]
     NotAUniverse(String),
 }
 
@@ -151,6 +177,24 @@ mod tests {
     }
 
     #[test]
+    fn headshots_are_asked_for_by_user_id_and_come_back_keyed_by_it() {
+        let t = Canned::new().answer(
+            200,
+            r#"{"data": [
+                {"targetId": 7, "state": "Completed", "imageUrl": "https://t/7.png"},
+                {"targetId": 8, "state": "Blocked", "imageUrl": "https://t/blocked.png"}
+            ]}"#,
+        );
+        let got = headshot_urls(&t, &[UserId(8), UserId(7)]).unwrap();
+        assert_eq!(got, HashMap::from([(UserId(7), "https://t/7.png".to_string())]));
+        assert_eq!(
+            t.asked()[0].url,
+            "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=7,8&size=150x150&format=Png&isCircular=false"
+        );
+        assert!(t.asked()[0].cookie.is_none());
+    }
+
+    #[test]
     fn no_universes_asks_nothing() {
         let t = Canned::new();
         assert!(urls(&t, &[]).unwrap().is_empty());
@@ -166,6 +210,17 @@ mod tests {
         assert_eq!(cache.fetch(&t, "7", "https://t/7.png").unwrap(), path.clone());
         assert_eq!(t.asked().len(), 1);
         assert_eq!(cache.cached("7"), Some(path));
+    }
+
+    #[test]
+    fn a_refresh_downloads_again_over_the_old_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = IconCache::new(dir.path());
+        let t = Canned::new().answer(200, "OLD").answer(200, "NEW");
+        cache.fetch(&t, "7", "https://t/7.png").unwrap();
+        let path = cache.refresh(&t, "7", "https://t/7.png").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"NEW");
+        assert_eq!(t.asked().len(), 2);
     }
 
     #[test]

@@ -66,6 +66,8 @@ pub trait Roblox: Send + Sync {
     ) -> Result<Vec<Game>, RobloxError>;
     /// {universe id: icon url} for the icons Roblox has rendered.
     fn icon_urls(&self, universes: &[String]) -> Result<HashMap<String, String>, RobloxError>;
+    /// {user id: headshot url} for the headshots Roblox has rendered.
+    fn headshot_urls(&self, users: &[UserId]) -> Result<HashMap<UserId, String>, RobloxError>;
     fn quick_login_create(&self) -> Result<QuickLoginCode, RobloxError>;
     fn quick_login_status(&self, code: &QuickLoginCode) -> Result<QuickLoginStatus, RobloxError>;
     /// The session an approved code stands for.
@@ -112,6 +114,9 @@ impl Roblox for HttpRoblox {
 
     fn icon_urls(&self, universes: &[String]) -> Result<HashMap<String, String>, RobloxError> {
         icons::urls(&*self.transport, universes)
+    }
+    fn headshot_urls(&self, users: &[UserId]) -> Result<HashMap<UserId, String>, RobloxError> {
+        icons::headshot_urls(&*self.transport, users)
     }
 
     fn quick_login_create(&self) -> Result<QuickLoginCode, RobloxError> {
