@@ -205,7 +205,6 @@ modules:
       # The window asks for these names; the launcher's icon must carry the
       # app id to be exported.
       - install -Dm644 packaging/icons/roblox-manager.svg /app/share/icons/hicolor/scalable/apps/roblox-manager.svg
-      - install -Dm644 packaging/icons/roblox-manager-mark.svg /app/share/icons/hicolor/scalable/apps/roblox-manager-mark.svg
       - install -Dm644 packaging/icons/roblox-manager.svg /app/share/icons/hicolor/scalable/apps/io.github.mujo.RobloxManager.svg
       - install -Dm644 packaging/flatpak/io.github.mujo.RobloxManager.desktop /app/share/applications/io.github.mujo.RobloxManager.desktop
       - install -Dm644 packaging/flatpak/io.github.mujo.RobloxManager.metainfo.xml /app/share/metainfo/io.github.mujo.RobloxManager.metainfo.xml

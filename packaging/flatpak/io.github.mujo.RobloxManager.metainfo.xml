@@ -6,15 +6,50 @@
   <metadata_license>CC0-1.0</metadata_license>
   <!-- The manager is MIT; the Cordial runtime it bundles is GPL-3.0+. -->
   <project_license>MIT AND GPL-3.0-or-later</project_license>
+  <developer id="io.github.mujo">
+    <name>mujō</name>
+  </developer>
   <description>
     <p>
       Signs in several Roblox accounts, launches them together into one
       server behind a leader, and plays input macros into them.
     </p>
+    <ul>
+      <li>Accounts sign in with Roblox Quick Login; sessions stay in the keyring</li>
+      <li>A leader launches first and its auto-join accounts follow into its server</li>
+      <li>Groups of accounts, each with a game of its own</li>
+      <li>Launch into a favourite game, Roblox's games browser, or a friend's server</li>
+      <li>Macros play keys and clicks into a client while you use other windows</li>
+      <li>Low-power clients for accounts along for the ride</li>
+    </ul>
+    <p>
+      Roblox's rules treat simultaneous clients as a policy violation, and
+      community reports tie them to anti-cheat flags. The second client only
+      ever starts on an explicit click.
+    </p>
   </description>
   <launchable type="desktop-id">io.github.mujo.RobloxManager.desktop</launchable>
+  <url type="homepage">https://github.com/DamnShabu/roblox-manager</url>
+  <url type="bugtracker">https://github.com/DamnShabu/roblox-manager/issues</url>
+  <branding>
+    <color type="primary" scheme_preference="light">#f3d9a8</color>
+    <color type="primary" scheme_preference="dark">#5a4424</color>
+  </branding>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.0" date="2026-09-30">
+      <description>
+        <p>A new window on libadwaita, in the system's light or dark style.</p>
+        <ul>
+          <li>Accounts as native rows, with Roblox avatars, live status and a menu</li>
+          <li>Account and group settings in dialogs of their own</li>
+          <li>Search accounts by name, Roblox user or note</li>
+          <li>The whole activity log, and desktop notifications for long launches</li>
+          <li>Keyboard shortcuts, and a dialog listing them</li>
+          <li>Removing or deleting anything asks first</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-09-29"/>
   </releases>
 </component>

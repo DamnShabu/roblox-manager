@@ -36,11 +36,11 @@ in
     # needs a session bus and a real keyring is ignored by default.
     nativeCheckInputs = [pkgs.bash pkgs.coreutils];
 
-    # The design's mark, "stacked accounts": on a dark tile for launchers,
-    # bare in the window's title bar. The Flatpak installs the same files.
+    # The app's icon, "stacked accounts" on a dark tile, under the app id
+    # (docks and the About dialog look it up by that) and its old name. The
+    # Flatpak installs the same files.
     postInstall = ''
       install -Dm644 ${./packaging/icons/roblox-manager.svg} $out/share/icons/hicolor/scalable/apps/roblox-manager.svg
-      install -Dm644 ${./packaging/icons/roblox-manager-mark.svg} $out/share/icons/hicolor/scalable/apps/roblox-manager-mark.svg
       install -Dm644 ${./packaging/icons/roblox-manager.svg} $out/share/icons/hicolor/scalable/apps/io.github.mujo.RobloxManager.svg
     '';
 
