@@ -22,15 +22,13 @@
   # matched to the host driver if that ever matters.
   mesa = pkgs.mesa;
 
-  # Host fonts first; DejaVu so a host without fontconfig still has text,
-  # then the manager's own typefaces and icon font.
+  # Host fonts first; DejaVu so a host without fontconfig still has text.
   fontsConf = pkgs.writeText "fonts.conf" ''
     <?xml version="1.0"?>
     <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
     <fontconfig>
       <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
       <dir>${pkgs.dejavu_fonts}/share/fonts</dir>
-      ${lib.concatMapStrings (d: "<dir>${d}</dir>\n") roblox-manager.fontDirs}
       <cachedir prefix="xdg">fontconfig</cachedir>
     </fontconfig>
   '';

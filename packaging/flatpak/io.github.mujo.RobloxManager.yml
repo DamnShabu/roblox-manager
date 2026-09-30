@@ -54,35 +54,6 @@ finish-args:
   - --talk-name=org.freedesktop.Flatpak
 
 modules:
-  # -- the design's typefaces and icon font, the versions nixpkgs ships ------
-  - name: font-source-sans
-    buildsystem: simple
-    build-commands:
-      - install -Dm644 -t /app/share/fonts/source-sans TTF/*.ttf
-    sources:
-      - type: archive
-        url: https://github.com/adobe-fonts/source-sans/archive/3.052R.zip
-        sha256: 8740ef8bee3a3144b3dbb8b673264bfc685dab944610b884b14e6146ded9a50a
-
-  - name: font-jetbrains-mono
-    buildsystem: simple
-    build-commands:
-      - install -Dm644 -t /app/share/fonts/jetbrains-mono fonts/ttf/*.ttf
-    sources:
-      - type: archive
-        url: https://github.com/jetbrains/jetbrainsmono/archive/refs/tags/v2.304.tar.gz
-        sha256: d8dab5ff24fc9e345d6c7987f2746cf8df4f870561ea89c14630b8d1729fd727
-
-  - name: font-material-symbols
-    buildsystem: simple
-    build-commands:
-      - install -Dm644 -t /app/share/fonts/material-symbols MaterialSymbolsRounded.ttf
-    sources:
-      - type: file
-        url: https://raw.githubusercontent.com/google/material-design-icons/5d5d1fdd5476f3df3749e9fb872e32021ec7a750/variablefont/MaterialSymbolsRounded%5BFILL%2CGRAD%2Copsz%2Cwght%5D.ttf
-        sha256: 9c6297110371a3668112f8e71112d3deec13769b2ab5b9ea5e53999bef8466eb
-        dest-filename: MaterialSymbolsRounded.ttf
-
   # -- cage: the nested compositor a macro-ready client runs in -------------
   # cage only ever runs nested inside the user's session, but its sources
   # include wlroots' DRM-lease and session headers unconditionally, and
