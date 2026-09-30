@@ -102,11 +102,21 @@ fn lines(text: &str) -> impl Iterator<Item = Line<'_>> {
             Some(note) => ("#".to_owned(), note.trim()),
             None => {
                 let (cmd, rest) = line.split_once(' ').unwrap_or((line, ""));
-                (cmd.to_lowercase(), rest.trim())
+                (alias(&cmd.to_lowercase()).to_owned(), rest.trim())
             }
         };
         Some(Line { number: i + 1, command, rest, text: line })
     })
+}
+
+/// A command by the name the editor shows its step type under ("key" for
+/// "tap", "note" for "#"), as the help writes them: text written either way
+/// reads the same.
+fn alias(command: &str) -> &str {
+    STEP_TYPES
+        .iter()
+        .find(|(kind, _)| kind.eq_ignore_ascii_case(command))
+        .map_or(command, |(_, cmd)| cmd)
 }
 
 /// A macro as the editor's rows, and its loop count (0 until stopped). A
@@ -393,6 +403,19 @@ mod tests {
         let row = |k: &str, v: &str| Row { kind: k.into(), value: v.into() };
         let text = to_text(&[row("Key", "e"), row("Wait", "0.5"), row("Click", "960 540")], 1);
         assert_eq!(parse(&text).unwrap().loops, 1);
+    }
+
+    #[test]
+    fn the_editors_names_read_as_the_commands_they_stand_for() {
+        let src = "Start 45\nKey j\nNote farm the boss\nWait 60-70\nloop 2\n";
+        let m = parse(src).unwrap();
+        assert_eq!((m.loops, m.steps.len()), (2, 3), "the note is no step");
+        let (r, loops) = rows(src);
+        assert_eq!(
+            r.iter().map(|r| r.kind.as_str()).collect::<Vec<_>>(),
+            ["Start", "Key", "Note", "Wait"]
+        );
+        assert_eq!(to_text(&r, loops), "start 45\ntap j\n# farm the boss\nwait 60-70\nloop 2\n");
     }
 
     #[test]

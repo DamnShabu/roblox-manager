@@ -11,7 +11,7 @@ use rbxmgr_core::macros::grammar::{self, Row};
 use super::card::step_icon;
 use crate::ui::confirm;
 use crate::ui::widgets::{
-    Btn, Fluent, LabelFluent, hotkey_label, icon, keycaps, lbl, plural, wrap,
+    Btn, Fluent, LabelFluent, hotkey_label, icon, keycaps, lbl, plural, sentence, wrap,
 };
 use crate::ui::window::{WeakWindow, Window};
 
@@ -47,6 +47,11 @@ pub struct MacroDialog {
     rounds: adw::SpinRow,
     count: gtk::Label,
     list: gtk::ListBox,
+    /// Steps as rows, or the macro as text to paste or copy.
+    view: adw::ToggleGroup,
+    views: gtk::Stack,
+    text: gtk::TextView,
+    repeat_group: adw::PreferencesGroup,
     err: gtk::Label,
 }
 
@@ -100,6 +105,16 @@ impl MacroDialog {
             rounds,
             count: lbl("", "dimmed"),
             list: crate::ui::widgets::boxed_list(),
+            view: adw::ToggleGroup::builder().valign(Align::Center).build(),
+            views: gtk::Stack::builder().vhomogeneous(false).build(),
+            text: gtk::TextView::builder()
+                .monospace(true)
+                .top_margin(10)
+                .bottom_margin(10)
+                .left_margin(12)
+                .right_margin(12)
+                .build(),
+            repeat_group: adw::PreferencesGroup::builder().title("Repeat").build(),
             err: lbl("", "error").wrapped().visible(false),
         });
         d.assemble(new);
@@ -176,7 +191,7 @@ impl MacroDialog {
         self.dialog.add_controller(keys);
 
         // -- repeat ---------------------------------------------------------------
-        let repeat_group = adw::PreferencesGroup::builder().title("Repeat").build();
+        let repeat_group = &self.repeat_group;
         for (name, label) in [("once", "Once"), ("rounds", "Rounds"), ("until", "Until Stopped")] {
             self.repeat.add(adw::Toggle::builder().name(name).label(label).build());
         }
@@ -226,14 +241,50 @@ impl MacroDialog {
                     .upcast()
             })
             .collect();
-        let steps_group =
-            adw::PreferencesGroup::builder().title("Steps").header_suffix(&self.count).build();
-        steps_group.add(&self.list);
+        for (name, label) in [("steps", "Steps"), ("text", "Text")] {
+            self.view.add(adw::Toggle::builder().name(name).label(label).build());
+        }
+        self.view.set_active_name(Some("steps"));
+        let me = Rc::downgrade(self);
+        self.view.connect_active_name_notify(move |_| {
+            if let Some(d) = me.upgrade() {
+                d.switch_view();
+            }
+        });
+        let steps_group = adw::PreferencesGroup::builder()
+            .title("Steps")
+            .header_suffix(&hbox!(12, "", self.count.clone().centered(), self.view.clone()))
+            .build();
         let add_box = wrap(6, &adds);
         add_box.set_margin_top(12);
-        steps_group.add(&add_box);
+        self.views.add_named(&vbox!(0, "", self.list.clone(), add_box), Some("steps"));
+        let text = gtk::ScrolledWindow::builder()
+            .child(&self.text)
+            .min_content_height(220)
+            .max_content_height(420)
+            .propagate_natural_height(true)
+            .build();
+        let frame = gtk::Frame::builder().child(&text).build();
+        frame.add_css_class("view");
+        self.views.add_named(
+            &vbox!(
+                8,
+                "",
+                frame,
+                lbl(
+                    "One step a line, as How Macros Work writes them: Key e, Wait 60-240, \
+                     Click 960 540. A last line “loop 5” plays it five times; with none it \
+                     plays until stopped.",
+                    "caption dimmed"
+                )
+                .wrapped()
+            ),
+            Some("text"),
+        );
+        steps_group.add(&self.views);
 
-        let page = vbox!(24, "", about, repeat_group, steps_group, self.err.clone()).margins(18);
+        let page =
+            vbox!(24, "", about, repeat_group.clone(), steps_group, self.err.clone()).margins(18);
         if !new {
             let delete = adw::ButtonRow::builder().title("Delete Macro…").build();
             delete.add_css_class("destructive-action");
@@ -270,6 +321,47 @@ impl MacroDialog {
             _ => 0,
         });
         self.rounds.set_visible(mode.as_deref() == Some("rounds"));
+    }
+
+    // -- steps or text ------------------------------------------------------
+    /// Show the steps as rows or as text, carrying every change across.
+    fn switch_view(self: &Rc<Self>) {
+        self.err.set_visible(false);
+        if self.view.active_name().as_deref() == Some("text") {
+            let text = grammar::to_text(&self.rows.borrow(), self.loops.get());
+            self.text.buffer().set_text(&text);
+            self.views.set_visible_child_name("text");
+            // The text's loop line is its repeat.
+            self.repeat_group.set_visible(false);
+            self.count.set_visible(false);
+        } else {
+            self.take_text();
+            self.views.set_visible_child_name("steps");
+            self.repeat_group.set_visible(true);
+            self.count.set_visible(true);
+            self.draw_steps();
+        }
+    }
+
+    /// The text as rows and a repeat, into the steps view.
+    fn take_text(&self) {
+        let b = self.text.buffer();
+        let (rows, loops) = grammar::rows(&b.text(&b.start_iter(), &b.end_iter(), false));
+        self.rows.replace(rows);
+        // Rounds before the mode: the mode reads them as it changes.
+        if loops > 1 {
+            self.rounds.set_value(f64::from(loops));
+        }
+        self.repeat.set_active_name(Some(match loops {
+            1 => "once",
+            0 => "until",
+            _ => "rounds",
+        }));
+        self.loops.set(loops);
+    }
+
+    fn in_text(&self) -> bool {
+        self.view.active_name().as_deref() == Some("text")
     }
 
     // -- steps --------------------------------------------------------------
@@ -424,6 +516,16 @@ impl MacroDialog {
 
     // -- save and delete ---------------------------------------------------------
     fn save(&self) {
+        if self.in_text() {
+            // Checked as typed, so an error names the line the user sees.
+            let b = self.text.buffer();
+            if let Err(e) = grammar::parse(&b.text(&b.start_iter(), &b.end_iter(), false)) {
+                self.err.set_label(&sentence(&e.to_string()));
+                self.err.set_visible(true);
+                return;
+            }
+            self.take_text();
+        }
         let text = grammar::to_text(&self.rows.borrow(), self.loops.get());
         let Some(w) = self.window.upgrade() else { return };
         let hotkey = self.hotkey.borrow().clone();
