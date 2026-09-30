@@ -213,10 +213,8 @@ impl Window {
         };
         let body = match n {
             0 => "It has no accounts.".to_owned(),
-            n => format!(
-                "Its {} move to Ungrouped; none is removed.",
-                plural(n, "account", "accounts")
-            ),
+            1 => "Its account moves to Ungrouped; it is not removed.".to_owned(),
+            n => format!("Its {n} accounts move to Ungrouped; none is removed."),
         };
         let gid = gid.to_owned();
         confirm::ask(self, &format!("Delete {name}?"), &body, "_Delete", move |w| {

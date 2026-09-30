@@ -31,7 +31,7 @@ pub fn leader_section(
     head.set_child(Some(&hbox!(
         8,
         "",
-        icon("insert-link-symbolic").css("dimmed"),
+        icon("media-playlist-consecutive-symbolic").css("dimmed"),
         lbl(&format!("Auto-join after {name}"), "caption-heading").ellipsize(),
         lbl(&plural(followers.len(), "account", "accounts"), "caption dimmed")
     )));

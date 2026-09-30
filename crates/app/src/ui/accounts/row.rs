@@ -104,7 +104,7 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
         drag_and_drop(w, &row, id);
     }
 
-    let (leader, shown) = (acct.leader, row.clone());
+    let leader = acct.leader;
     w.watch_accounts(Box::new(move |s| {
         let chip = s.chip(id);
         clear(&status_box);
@@ -116,7 +116,6 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
             status_box.append(&status(css, text, live));
         }
         let live = chip == Chip::Running;
-        toggle_class(&shown, "live", live);
         play.set_icon(if live {
             "media-playback-stop-symbolic"
         } else {

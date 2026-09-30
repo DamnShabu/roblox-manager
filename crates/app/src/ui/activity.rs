@@ -33,7 +33,7 @@ pub fn icon_for(kind: &str) -> &'static str {
         "update" => "software-update-available-symbolic",
         "friend" => "avatar-default-symbolic",
         "error" => "dialog-warning-symbolic",
-        "join" => "insert-link-symbolic",
+        "join" => "go-jump-symbolic",
         _ => "dialog-information-symbolic",
     }
 }
