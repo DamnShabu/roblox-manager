@@ -46,21 +46,41 @@ pub fn by_hand(install: &Install) -> &'static str {
     }
 }
 
+/// Which Flatpak installation a copy runs from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlatpakInstallation {
+    /// `~/.local/share/flatpak`: the user installs into it freely.
+    User,
+    /// `/var/lib/flatpak`: installing asks polkit, which asks for a password.
+    System,
+}
+
+impl FlatpakInstallation {
+    /// The one `/.flatpak-info`'s `app-path` is in.
+    pub fn of(flatpak_info: &str) -> Self {
+        let user = flatpak_info
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("app-path="))
+            .any(|p| p.contains("/.local/share/flatpak/"));
+        if user { Self::User } else { Self::System }
+    }
+}
+
 /// The program that installs a downloaded Flatpak bundle on the host, in
-/// the installation (per-user or system) this copy runs from, as
-/// `/.flatpak-info`'s `app-path` says.
-pub fn flatpak_install(flatpak_info: &str, bundle: &Path) -> Vec<String> {
-    let user = flatpak_info
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix("app-path="))
-        .any(|p| p.contains("/.local/share/flatpak/"));
+/// `installation`.
+pub fn flatpak_install(installation: FlatpakInstallation, bundle: &Path) -> Vec<String> {
     [
         "flatpak-spawn",
         "--host",
         "flatpak",
         "install",
-        if user { "--user" } else { "--system" },
-        "--noninteractive",
+        match installation {
+            FlatpakInstallation::User => "--user",
+            FlatpakInstallation::System => "--system",
+        },
+        // Not `--noninteractive`: that also stops polkit from asking for the
+        // password a system installation needs, and the install is refused.
+        "--assumeyes",
         "--reinstall",
         "--bundle",
     ]
@@ -125,9 +145,13 @@ mod tests {
     fn a_bundle_goes_where_this_copy_was_installed() {
         let user = "[Instance]\napp-path=/home/u/.local/share/flatpak/app/x/current/active/files\n";
         let system = "[Instance]\napp-path=/var/lib/flatpak/app/x/current/active/files\n";
-        assert_eq!(flatpak_install(user, Path::new("/c/b.flatpak"))[4], "--user");
-        let argv = flatpak_install(system, Path::new("/c/b.flatpak"));
+        assert_eq!(FlatpakInstallation::of(user), FlatpakInstallation::User);
+        assert_eq!(FlatpakInstallation::of(system), FlatpakInstallation::System);
+        let bundle = Path::new("/c/b.flatpak");
+        assert_eq!(flatpak_install(FlatpakInstallation::User, bundle)[4], "--user");
+        let argv = flatpak_install(FlatpakInstallation::System, bundle);
         assert_eq!(argv[4], "--system");
+        assert!(!argv.iter().any(|a| a == "--noninteractive"), "polkit must be able to ask");
         assert_eq!(argv.last().unwrap(), "/c/b.flatpak");
     }
 

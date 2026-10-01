@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use super::UpdateError;
-use super::channel::{self, asset_name};
+use super::channel::{self, FlatpakInstallation, asset_name};
 use super::packagekit::PackageInstaller;
 use crate::cordial::Runner;
 use crate::github::{GithubClient, GithubError, Release};
@@ -145,7 +145,12 @@ impl SelfUpdate<'_> {
             }
             Install::Flatpak => {
                 let info = fs::read_to_string(self.flatpak_info).unwrap_or_default();
-                let argv = channel::flatpak_install(&info, file);
+                let installation = FlatpakInstallation::of(&info);
+                if installation == FlatpakInstallation::System {
+                    log("Roblox Manager is installed system-wide: enter your password when asked"
+                        .into());
+                }
+                let argv = channel::flatpak_install(installation, file);
                 let out = self.runner.run(&argv, Duration::from_secs(1800)).map_err(|e| {
                     UpdateError::Install(format!("could not run flatpak on the host: {e}"))
                 })?;
@@ -153,7 +158,13 @@ impl SelfUpdate<'_> {
                     return Ok(());
                 }
                 let why = crate::cordial::process::last_line(&out.stderr);
-                Err(UpdateError::Install(format!("flatpak could not install it: {why}")))
+                let hint = match installation {
+                    FlatpakInstallation::System => {
+                        " (a system-wide install needs an administrator's password)"
+                    }
+                    FlatpakInstallation::User => "",
+                };
+                Err(UpdateError::Install(format!("flatpak could not install it: {why}{hint}")))
             }
             Install::Package(_) => {
                 // A copy where the package can be found again if PackageKit
