@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use super::*;
 use crate::cordial::SystemRunner;
@@ -11,20 +12,14 @@ fn sandbox() -> (tempfile::TempDir, Paths) {
     (dir, paths)
 }
 
-/// A release whose "AppImage" is a shell script that unpacks like one: a
-/// `squashfs-root` with an engine that prints how it was started.
+/// A release whose AppImage holds an engine that prints how it was started.
 #[derive(Default)]
 struct FakeReleases {
     version: Mutex<String>,
     downloads: Mutex<u32>,
 }
 
-const FAKE_APPIMAGE: &str = r#"#!/bin/sh
-[ "$1" = --appimage-extract ] || exit 2
-mkdir -p squashfs-root/usr/bin squashfs-root/usr/lib
-printf '#!/bin/sh\necho "$0 $*"\necho "$LD_LIBRARY_PATH"\n' > squashfs-root/usr/bin/cordial-run
-chmod +x squashfs-root/usr/bin/cordial-run
-"#;
+const FAKE_ENGINE: &[u8] = b"#!/bin/sh\necho \"$0 $*\"\necho \"$LD_LIBRARY_PATH\"\n";
 
 impl FakeReleases {
     fn at(version: &str) -> Self {
@@ -41,7 +36,11 @@ impl Releases for FakeReleases {
     }
     fn download(&self, _url: &str, to: &Path) -> Result<(), CordialError> {
         *self.downloads.lock().unwrap() += 1;
-        fs::write(to, FAKE_APPIMAGE).map_err(|e| CordialError::Io(e.to_string()))
+        let image = appimage::fake::appimage(
+            &[("usr/bin/cordial-run", FAKE_ENGINE, 0o755), ("usr/lib/libx.so", b"", 0o644)],
+            &[],
+        );
+        fs::write(to, image).map_err(|e| CordialError::Io(e.to_string()))
     }
 }
 
@@ -128,6 +127,18 @@ fn an_appimage_that_does_not_unpack_leaves_launches_alone() {
         CordialError::Stacked("could not unpack the AppImage (not an AppImage)".into())
     );
     assert_eq!(engine_program(&paths), "cordial-run");
+}
+
+#[test]
+fn a_host_with_the_loader_or_nixos_stand_in_for_it_is_told_apart() {
+    let dir = tempfile::tempdir().unwrap();
+    let real = dir.path().join("ld-linux-x86-64.so.2");
+    fs::write(&real, b"\x7fELF...ld.so").unwrap();
+    assert_eq!(Host::with_loader(&real), Host::Portable);
+    let stub = dir.path().join("stub-ld");
+    fs::write(&stub, b"\x7fELF...see:\nhttps://nix.dev/permalink/stub-ld\n").unwrap();
+    assert_eq!(Host::with_loader(&stub), Host::Nix);
+    assert_eq!(Host::with_loader(&dir.path().join("none")), Host::Nix);
 }
 
 #[test]

@@ -1,8 +1,8 @@
 //! Stacked, the fork the engine comes from, at its newest release rather than
 //! the commit this build pinned.
 //!
-//! Updating downloads the release's AppImage, unpacks it into
-//! `<data>/rbxmgr/stacked/<version>` and puts a small script at its
+//! Updating downloads the release's AppImage, unpacks it (without running
+//! it) into `<data>/rbxmgr/stacked/<version>` and puts a small script at its
 //! `bin/cordial-run` that starts the engine with the libraries the AppImage
 //! bundles. A host that cannot run a downloaded program (NixOS) builds the
 //! fork's flake with Nix instead, linked at `stacked/nix`. Either way
@@ -10,6 +10,7 @@
 //! `current/bin/cordial-run` instead of the bundled engine. Delete
 //! `stacked/current` to go back.
 
+pub mod appimage;
 pub mod nix;
 pub mod releases;
 
@@ -18,10 +19,9 @@ use std::io;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
 
 use super::CordialError;
-use super::process::{Runner, last_line};
+use super::process::Runner;
 use crate::paths::Paths;
 pub use releases::{GithubReleases, Release, Releases};
 
@@ -40,7 +40,8 @@ pub struct Updated {
 pub enum Host {
     /// It has the standard program loader: the release's AppImage runs.
     Portable,
-    /// It has none (NixOS): only a Nix build runs.
+    /// It has none, or NixOS's stand-in that only says it cannot run
+    /// anything: only a Nix build runs.
     Nix,
 }
 
@@ -49,17 +50,25 @@ const LOADER: &str = "/lib/ld-linux-aarch64.so.1";
 #[cfg(not(target_arch = "aarch64"))]
 const LOADER: &str = "/lib64/ld-linux-x86-64.so.2";
 
+/// In NixOS's stub-ld (its default `/lib64` loader since 24.05), which
+/// explains that it runs nothing, and in no real loader.
+const STUB_LD: &[u8] = b"nix.dev/permalink/stub-ld";
+
 impl Host {
     pub fn detect() -> Self {
-        if Path::new(LOADER).exists() { Host::Portable } else { Host::Nix }
+        Self::with_loader(Path::new(LOADER))
+    }
+
+    fn with_loader(loader: &Path) -> Self {
+        match fs::read(loader) {
+            Ok(bytes) if !bytes.windows(STUB_LD.len()).any(|w| w == STUB_LD) => Host::Portable,
+            _ => Host::Nix,
+        }
     }
 }
 
 const CURRENT: &str = "current";
 const NIX_LINK: &str = "nix";
-
-/// Unpacking is a copy of a few hundred megabytes.
-const EXTRACT_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// One at a time: two updates must not unpack into the same directory.
 static UPDATING: Mutex<()> = Mutex::new(());
@@ -97,7 +106,7 @@ pub fn update(
                 && engine(&dir.join(&target)).is_file();
             if !have {
                 log(format!("Downloading Stacked {}...", release.version));
-                install_appimage(runner, releases, &dir, &release)?;
+                install_appimage(releases, &dir, &release)?;
             }
             (release.version, target, !have)
         }
@@ -134,7 +143,6 @@ fn current_target(dir: &Path) -> Option<String> {
 
 /// Download the release's AppImage and unpack it into `dir/<version>`.
 fn install_appimage(
-    runner: &dyn Runner,
     releases: &dyn Releases,
     dir: &Path,
     release: &Release,
@@ -142,28 +150,11 @@ fn install_appimage(
     let appimage = dir.join(format!(".download-{}.AppImage", release.version));
     let work = dir.join(format!(".unpack-{}", release.version));
     remove(&work)?;
-    fs::create_dir_all(&work).map_err(|e| io_error("could not create", &work, e))?;
     releases.download(&release.url, &appimage)?;
-    fs::set_permissions(&appimage, fs::Permissions::from_mode(0o755))
-        .map_err(|e| io_error("could not make runnable", &appimage, e))?;
-    // An AppImage unpacks itself into ./squashfs-root, with no FUSE needed.
-    let argv: Vec<String> =
-        ["sh", "-c", r#"cd "$1" && exec "$2" --appimage-extract >/dev/null"#, "sh"]
-            .into_iter()
-            .map(String::from)
-            .chain([work.display().to_string(), appimage.display().to_string()])
-            .collect();
-    let out = runner.run(&argv, EXTRACT_TIMEOUT)?;
+    let unpacked = appimage::unpack(&appimage, &work);
     remove(&appimage)?;
-    if !out.success() {
-        let why = last_line(&out.stderr);
-        return Err(CordialError::Stacked(format!(
-            "could not unpack the AppImage ({})",
-            if why.is_empty() { format!("exit status {}", out.status) } else { why }
-        )));
-    }
-    let unpacked = work.join("squashfs-root");
-    if !unpacked.join("usr/bin/cordial-run").is_file() {
+    unpacked?;
+    if !work.join("usr/bin/cordial-run").is_file() {
         return Err(CordialError::Stacked(format!(
             "Stacked {}'s AppImage has no usr/bin/cordial-run",
             release.version
@@ -171,8 +162,7 @@ fn install_appimage(
     }
     let target = dir.join(&release.version);
     remove(&target)?;
-    fs::rename(&unpacked, &target).map_err(|e| io_error("could not move into", &target, e))?;
-    remove(&work)?;
+    fs::rename(&work, &target).map_err(|e| io_error("could not move into", &target, e))?;
     write_launcher(&target)
 }
 

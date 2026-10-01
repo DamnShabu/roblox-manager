@@ -13,13 +13,16 @@ it -- today only `0002`, which adds `cordial-fetch` (the fork has
 
 The main menu's **Update Stacked** installs the fork's newest GitHub release
 (`crates/core/src/cordial/stacked/`): it downloads
-`Stacked-<version>-<arch>.AppImage`, unpacks it with `--appimage-extract`
-into `~/.local/share/rbxmgr/stacked/<version>`, and writes a
-`bin/cordial-run` script there that starts the unpacked engine with the
-libraries the AppImage bundles (what its AppRun would set). No FUSE, no root,
-and it works inside the Flatpak too. A host with no standard program loader
-(`/lib64/ld-linux-x86-64.so.2` -- NixOS) cannot run that, so there it builds
-the fork's flake with Nix instead (`stacked/nix`).
+`Stacked-<version>-<arch>.AppImage`, reads the SquashFS image out of it
+(without running it: NixOS sends every AppImage through appimage-run, which
+a sandboxed manager cannot reach) into
+`~/.local/share/rbxmgr/stacked/<version>`, and writes a `bin/cordial-run`
+script there that starts the unpacked engine with the libraries the AppImage
+bundles (what its AppRun would set). No FUSE, no root, and it works inside the
+Flatpak too. A host with no standard program loader
+(`/lib64/ld-linux-x86-64.so.2`, or NixOS's stub-ld standing in for it) cannot
+run that, so there it builds the fork's flake with Nix instead
+(`stacked/nix`).
 
 `stacked/current` points at whichever was installed last, and launches run
 `current/bin/cordial-run` in place of the pinned one; the version before is
