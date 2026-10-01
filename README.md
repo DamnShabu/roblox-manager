@@ -21,7 +21,17 @@ Roblox's rules treat simultaneous clients as a policy violation, and community
 reports tie them to anti-cheat flags. The exposure starts when the second
 client is launched, which is always an explicit click.
 
-## Use
+## Install
+
+Every [release](https://github.com/DamnShabu/roblox-manager/releases) has
+the app for any x86_64 distro: a `.deb` (Debian, Ubuntu, Mint, Pop!_OS), an
+`.rpm` (Fedora, openSUSE), a `.pkg.tar.zst` (Arch, Manjaro), a `.flatpak`
+bundle and an AppImage. The packages hold the same bundle as the AppImage,
+unpacked under `/opt/roblox-manager`, so they need nothing from the distro
+but a Secret Service (gnome-keyring, KWallet) and, for macros, a Wayland
+session.
+
+From source:
 
 ```bash
 nix run .                               # the manager
@@ -65,6 +75,17 @@ chosen in its main menu.
 - **Macros** (the side pane, F9) play keys and clicks into macro-ready
   clients; How Macros Work (F1) explains the steps and their timing.
 - **Activity** keeps what happened this run; Ctrl+L shows all of it.
+- **Update** (the main menu's Update All) brings everything up to date in
+  one go: the newest Roblox build, the newest Stacked, and Roblox Manager
+  itself. The app checks GitHub at start and every six hours, and an
+  Update button appears in the header bar when it or Stacked has a newer
+  release. The app replaces itself the way it was installed: an AppImage
+  swaps its own file, the Flatpak reinstalls its bundle, and a `.deb`,
+  `.rpm` or Arch package is installed through PackageKit (your desktop's
+  password prompt; on Arch without PackageKit you are told where the file
+  is). Every download is checked against the release's `SHA256SUMS`. A
+  Nix or hand-built copy only says that a new version is out. Restart, in
+  the banner, starts the new version.
 
 <p>
   <img src="docs/screenshots/window-light.png" width="49%" alt="The window in the light style">
@@ -102,16 +123,29 @@ Data lives in `~/.local/share/rbxmgr`, `~/.local/share/cordial`,
 A Rust workspace:
 
 - `crates/core` (`rbxmgr-core`): everything except drawing, one directory per
-  area -- `accounts`, `keyring`, `roblox`, `cordial`, `launch`, `macros`. No
-  GTK; every seam into the outside world (Secret Service, Roblox's web API,
-  processes, the Wayland display) is a trait with a production adapter and
-  the one the tests use.
+  area -- `accounts`, `keyring`, `roblox`, `cordial`, `launch`, `macros`,
+  `update`. No GTK; every seam into the outside world (Secret Service,
+  Roblox's web API, GitHub, PackageKit, processes, the Wayland display) is a
+  trait with a production adapter and the one the tests use.
 - `crates/app` (`roblox-manager`): the GTK4/libadwaita window on top of it.
   Slow work runs on worker threads; results come back to the main loop.
   `resources/style.css` holds the little the window adds to Adwaita: the
   amber accent, the warm surfaces (`style-dark.css` for the dark style), and
   a few pieces Adwaita has no class for. Every icon is one of Adwaita's
   symbolic icons.
+
+## Releasing
+
+```bash
+packaging/release.sh 0.3.0        # version in Cargo.toml, Cargo.lock, metainfo; commit; tag
+git push origin main v0.3.0       # the tag starts .github/workflows/release.yml
+```
+
+The workflow runs the checks below, builds the AppImage with Nix, the
+distribution packages from it (`packaging/linux/build.sh`, with nfpm), and
+the Flatpak bundle, and publishes them with their `SHA256SUMS` as the
+GitHub release that Update reads. A tag with a pre-release part
+(`v0.3.0-rc.1`) is published as a pre-release, which Update never offers.
 
 ## Checks
 

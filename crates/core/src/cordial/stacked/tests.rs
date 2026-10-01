@@ -163,3 +163,17 @@ fn a_host_without_the_loader_builds_with_nix_and_links_that() {
     assert!(engine_program(&paths).ends_with("current/bin/cordial-run"));
     assert_eq!(logs.borrow().len(), 1);
 }
+
+#[test]
+fn a_newer_release_is_offered_until_it_is_installed() {
+    let (_dir, paths) = sandbox();
+    // Before any update, launches run the pinned version.
+    let pinned = installed_version(&paths).unwrap();
+    assert_eq!(newer(&FakeReleases::at(&pinned), &paths).unwrap(), None);
+    assert_eq!(newer(&FakeReleases::at("99.0.0"), &paths).unwrap(), Some("99.0.0".into()));
+
+    let releases = FakeReleases::at("99.0.0");
+    update_portable(&paths, &releases);
+    assert_eq!(installed_version(&paths).as_deref(), Some("99.0.0"));
+    assert_eq!(newer(&releases, &paths).unwrap(), None);
+}

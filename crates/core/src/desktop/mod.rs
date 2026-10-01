@@ -26,29 +26,7 @@ const GENERATED: &str = "X-RobloxManager-Generated=true";
 #[error("could not make this app open Roblox links: {0}")]
 pub struct DesktopError(#[from] io::Error);
 
-/// How this copy of the app was installed.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Install {
-    /// Its entry is exported by Flatpak.
-    Flatpak,
-    /// Runs from this AppImage file, which may move.
-    AppImage(PathBuf),
-    /// Anything else: this binary, with or without an installed entry.
-    Native(PathBuf),
-}
-
-impl Install {
-    pub fn detect() -> Self {
-        if Path::new("/.flatpak-info").exists() {
-            return Install::Flatpak;
-        }
-        // The AppImage runtime names the file it runs from.
-        if let Some(image) = std::env::var_os("APPIMAGE").filter(|v| !v.is_empty()) {
-            return Install::AppImage(image.into());
-        }
-        Install::Native(std::env::current_exe().unwrap_or_else(|_| "roblox-manager".into()))
-    }
-}
+pub use crate::install::Install;
 
 /// Who opens Roblox's links now.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -119,7 +97,8 @@ impl LinkHandler {
     /// installed entry covers. None when the install brings its own.
     fn exec_to_write(&self) -> Option<PathBuf> {
         match &self.install {
-            Install::Flatpak => None,
+            // The Flatpak and a distribution package install their own.
+            Install::Flatpak | Install::Package(_) => None,
             Install::AppImage(image) => Some(image.clone()),
             Install::Native(exe) => (!self.installed_entry()).then(|| exe.clone()),
         }

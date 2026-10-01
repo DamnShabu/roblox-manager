@@ -1,5 +1,7 @@
 //! The macros pane, and running macros on accounts.
 
+use std::path::PathBuf;
+
 use adw::prelude::*;
 use rbxmgr_core::macros::{self, Player, StopFlag, VirtualInput, nested, random_pick};
 use rbxmgr_core::types::{Profile, UserId};
@@ -183,6 +185,20 @@ impl Window {
         self.refresh_macros();
         self.refresh_accounts();
         self.log(&format!("Deleted {name}"));
+    }
+
+    /// The clients up in a macro-ready window, as (label, display link): the
+    /// ones a macro's point can be picked in.
+    pub fn macro_ready_clients(&self) -> Vec<(String, PathBuf)> {
+        let s = self.state();
+        let runtime = self.services().paths.runtime_dir();
+        s.accounts
+            .accounts()
+            .iter()
+            .filter(|a| s.running.contains(&a.user_id))
+            .map(|a| (a.name.to_string(), nested::display_file(runtime, &Profile::of(a.user_id))))
+            .filter(|(_, display)| display.exists())
+            .collect()
     }
 
     /// Play `name` into the account's macro-ready client, on a thread.

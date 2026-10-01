@@ -53,7 +53,10 @@ const PAGE: &[Block] = &[
         ("Key KEY [SECONDS]", "press and release a key"),
         ("Hold KEY SECONDS", "keep a key down"),
         ("Type TEXT", "type text, e.g. into chat"),
-        ("Click [left|right|middle] [X Y]", "click, optionally at a point"),
+        (
+            "Click [left|right|middle] [X Y]",
+            "click, optionally at a point you pick in a running client",
+        ),
         ("Move DX DY", "move the mouse by an amount"),
         ("Wait SECONDS", "pause"),
         ("Start SECONDS", "pause once, before the first round only"),

@@ -7,6 +7,8 @@
 pub mod accounts;
 pub mod cordial;
 pub mod desktop;
+pub mod github;
+pub mod install;
 pub mod json_file;
 pub mod keyring;
 pub mod launch;
@@ -15,6 +17,8 @@ pub mod paths;
 pub mod roblox;
 pub mod stop;
 pub mod types;
+pub mod update;
+pub mod version;
 pub mod window_state;
 
 pub use keyring::{Keyring, KeyringError};

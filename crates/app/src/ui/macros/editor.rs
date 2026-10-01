@@ -9,6 +9,7 @@ use gtk::{Align, PolicyType, gdk, glib};
 use rbxmgr_core::macros::grammar::{self, Row};
 
 use super::card::step_icon;
+use super::point;
 use crate::ui::confirm;
 use crate::ui::widgets::{
     Btn, Fluent, LabelFluent, hotkey_label, icon, keycaps, lbl, plural, sentence, wrap,
@@ -434,6 +435,10 @@ impl MacroDialog {
                     d.draw_steps();
                 })
             );
+            if r.kind == "Click" {
+                let pick = point::button(&self.window, &value, &self.err);
+                line.insert_child_after(&pick, Some(&value));
+            }
             let row = gtk::ListBoxRow::builder()
                 .activatable(false)
                 .selectable(false)

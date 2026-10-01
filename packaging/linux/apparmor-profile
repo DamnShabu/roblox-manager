@@ -1,0 +1,12 @@
+# Roblox Manager runs from a bundle whose AppRun puts it in a user namespace
+# of its own, which Ubuntu (23.10 and later) refuses unconfined programs.
+# This lets it, and nothing more; the package's postinst installs it only
+# where that restriction exists.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile roblox-manager /opt/roblox-manager/AppRun flags=(unconfined) {
+  userns,
+
+  include if exists <local/roblox-manager>
+}

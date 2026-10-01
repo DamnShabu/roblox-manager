@@ -9,6 +9,7 @@ use rbxmgr_core::accounts::{AccountStore, SessionState};
 use rbxmgr_core::macros::{MacroLibrary, StopFlag};
 use rbxmgr_core::roblox::{Friend, Game};
 use rbxmgr_core::types::{PlaceId, ServerId, UserId};
+use rbxmgr_core::update::Available;
 
 /// A game as the bar shows it: its icon, when one is cached.
 #[derive(Clone, Debug, PartialEq)]
@@ -103,8 +104,12 @@ pub struct AppState {
     pub playing: HashMap<UserId, PlaceId>,
     /// Why each account's last launch failed, until one succeeds.
     pub failures: HashMap<UserId, String>,
-    /// A Roblox or Stacked update is being installed.
+    /// An Update is being installed.
     pub updating: bool,
+    /// What has a newer release, from the last check.
+    pub available: Available,
+    /// The app version an Update installed, which a restart starts.
+    pub restart_to: Option<String>,
     /// How many tasks are running; the window spins while any are.
     pub busy: u32,
 }
@@ -129,6 +134,8 @@ impl AppState {
             playing: HashMap::new(),
             failures: HashMap::new(),
             updating: false,
+            available: Available::default(),
+            restart_to: None,
             busy: 0,
         }
     }

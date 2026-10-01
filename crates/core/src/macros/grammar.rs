@@ -280,6 +280,15 @@ fn click(args: &[&str]) -> Result<Step, String> {
     Ok(Step::Click { button, at })
 }
 
+/// A click step's value aimed at (`x`, `y`): its button word stays, any
+/// point it had is replaced.
+pub fn click_at(value: &str, x: i32, y: i32) -> String {
+    match value.split_whitespace().next() {
+        Some(button) if button.chars().all(char::is_alphabetic) => format!("{button} {x} {y}"),
+        _ => format!("{x} {y}"),
+    }
+}
+
 /// What a key, text, click or move step does, for the status line.
 pub fn describe(step: &Step) -> String {
     match step {
@@ -416,6 +425,15 @@ mod tests {
             ["Start", "Key", "Note", "Wait"]
         );
         assert_eq!(to_text(&r, loops), "start 45\ntap j\n# farm the boss\nwait 60-70\nloop 2\n");
+    }
+
+    #[test]
+    fn a_picked_point_replaces_the_clicks_point_and_keeps_its_button() {
+        assert_eq!(click_at("", 960, 540), "960 540");
+        assert_eq!(click_at("10 20", 960, 540), "960 540");
+        assert_eq!(click_at("right", 5, 6), "right 5 6");
+        assert_eq!(click_at(" middle 1 2 ", 5, 6), "middle 5 6");
+        assert!(click(&["right", "5", "6"]).is_ok(), "what it writes parses");
     }
 
     #[test]

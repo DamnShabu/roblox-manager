@@ -5,10 +5,13 @@ mod state;
 mod ui;
 mod worker;
 
+use std::time::Duration;
+
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use rbxmgr_core::accounts::AccountStore;
 use rbxmgr_core::macros::MacroLibrary;
+use rbxmgr_core::update;
 
 use crate::services::Services;
 use crate::state::AppState;
@@ -68,7 +71,16 @@ fn main() -> glib::ExitCode {
             None => w.present(),
         }
     });
-    app.run()
+    // Started by Restart: the old copy may still hold the app's name, and
+    // would take this launch over and then exit.
+    let mut args: Vec<String> = std::env::args().collect();
+    if let Some(at) = args.iter().position(|a| a == update::RESTARTED) {
+        args.remove(at);
+        if !update::wait_for_predecessor(Duration::from_secs(20)) {
+            eprintln!("roblox-manager: the previous copy was still running; starting anyway");
+        }
+    }
+    app.run_with_args(&args)
 }
 
 /// The window, made (and not yet shown) if there is none.

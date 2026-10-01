@@ -1,14 +1,10 @@
 //! Stacked's published releases on GitHub: which is the newest, and its
 //! AppImage for this machine.
 
-use std::fs::File;
-use std::io;
 use std::path::Path;
-use std::time::Duration;
-
-use serde::Deserialize;
 
 use crate::cordial::CordialError;
+use crate::github::{self, GithubClient, GithubError};
 
 /// The fork's newest release: its version and the AppImage to download.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,92 +21,46 @@ pub trait Releases: Send + Sync {
     fn download(&self, url: &str, to: &Path) -> Result<(), CordialError>;
 }
 
-const LATEST: &str = "https://api.github.com/repos/DamnShabu/stacked/releases/latest";
+const REPO: &str = "DamnShabu/stacked";
 
-/// An AppImage is about a hundred megabytes, on whatever line there is.
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(3600);
-
-/// HTTPS to GitHub through ureq.
+/// The fork's releases on GitHub.
+#[derive(Default)]
 pub struct GithubReleases {
-    agent: ureq::Agent,
-}
-
-impl Default for GithubReleases {
-    fn default() -> Self {
-        let config = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .timeout_global(Some(DOWNLOAD_TIMEOUT))
-            // GitHub's API turns away a request without one.
-            .user_agent(concat!("roblox-manager/", env!("CARGO_PKG_VERSION")))
-            .build();
-        GithubReleases { agent: ureq::Agent::new_with_config(config) }
-    }
+    github: GithubClient,
 }
 
 impl Releases for GithubReleases {
     fn latest(&self) -> Result<Release, CordialError> {
-        let mut resp = self.agent.get(LATEST).call().map_err(offline)?;
-        let status = resp.status().as_u16();
-        if status != 200 {
-            return Err(CordialError::Stacked(format!(
-                "GitHub answered HTTP {status} when asked for the newest release"
-            )));
-        }
-        let body = resp.body_mut().read_to_vec().map_err(offline)?;
-        parse_latest(&body, std::env::consts::ARCH)
+        let release = self.github.latest(REPO).map_err(stacked)?;
+        appimage_for(release, std::env::consts::ARCH)
     }
 
     fn download(&self, url: &str, to: &Path) -> Result<(), CordialError> {
-        let resp = self.agent.get(url).call().map_err(offline)?;
-        let status = resp.status().as_u16();
-        if status != 200 {
-            return Err(CordialError::Stacked(format!("the download answered HTTP {status}")));
-        }
-        let mut file = File::create(to)
-            .map_err(|e| CordialError::Io(format!("could not create {}: {e}", to.display())))?;
-        let (_, body) = resp.into_parts();
-        io::copy(&mut body.into_reader(), &mut file)
-            .map_err(|e| CordialError::Stacked(format!("the download broke off: {e}")))?;
-        file.sync_all()
-            .map_err(|e| CordialError::Io(format!("could not write {}: {e}", to.display())))
+        self.github.download(url, to).map_err(stacked)
     }
 }
 
-fn offline(e: ureq::Error) -> CordialError {
-    CordialError::Stacked(format!("GitHub could not be reached: {e}"))
+fn stacked(e: GithubError) -> CordialError {
+    match e {
+        GithubError::Io(why) => CordialError::Io(why),
+        other => CordialError::Stacked(other.to_string()),
+    }
 }
 
 /// The release GitHub describes, with its AppImage for `arch`
 /// (`Stacked-<version>-<arch>.AppImage`).
 pub fn parse_latest(json: &[u8], arch: &str) -> Result<Release, CordialError> {
-    #[derive(Deserialize)]
-    struct Latest {
-        tag_name: String,
-        #[serde(default)]
-        assets: Vec<Asset>,
-    }
-    #[derive(Deserialize)]
-    struct Asset {
-        name: String,
-        browser_download_url: String,
-    }
-    let latest: Latest = serde_json::from_slice(json)
-        .map_err(|e| CordialError::Stacked(format!("GitHub's answer was not a release ({e})")))?;
-    let version = latest.tag_name.trim_start_matches('v').to_owned();
-    // It names a directory, so nothing that could leave it.
-    let usable = version.starts_with(|c: char| c.is_ascii_alphanumeric())
-        && version.chars().all(|c| c.is_ascii_alphanumeric() || ".-_+".contains(c));
-    if !usable {
-        return Err(CordialError::Stacked(format!(
-            "the newest release has an unusable tag, {:?}",
-            latest.tag_name
-        )));
-    }
+    appimage_for(github::parse_release(json).map_err(stacked)?, arch)
+}
+
+fn appimage_for(release: github::Release, arch: &str) -> Result<Release, CordialError> {
     let suffix = format!("-{arch}.AppImage");
-    let asset = latest.assets.into_iter().find(|a| a.name.ends_with(&suffix)).ok_or_else(|| {
-        CordialError::Stacked(format!("release {version} has no AppImage for {arch}"))
-    })?;
-    Ok(Release { version, url: asset.browser_download_url })
+    let version = release.version;
+    let asset =
+        release.assets.into_iter().find(|a| a.name.ends_with(&suffix)).ok_or_else(|| {
+            CordialError::Stacked(format!("release {version} has no AppImage for {arch}"))
+        })?;
+    Ok(Release { version, url: asset.url })
 }
 
 #[cfg(test)]
