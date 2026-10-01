@@ -26,10 +26,10 @@ fi
 
 # The workspace's version: the first `version =` line, under [workspace.package].
 sed -i "0,/^version = \".*\"/s//version = \"$version\"/" Cargo.toml
-# Cargo.lock records the workspace's crates' versions too.
+# Cargo.lock records the workspace's crates' versions too; only those change.
 cargo=(cargo)
 command -v cargo >/dev/null || cargo=(nix develop -c cargo)
-"${cargo[@]}" metadata --format-version 1 --offline >/dev/null
+"${cargo[@]}" update --workspace --quiet
 
 # The metainfo's release list, newest first, for software centres. A
 # pre-release is not listed.
