@@ -3,3 +3,4 @@
 pub mod card;
 pub mod editor;
 pub mod help;
+pub mod point;
