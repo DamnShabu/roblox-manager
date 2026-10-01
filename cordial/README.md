@@ -11,7 +11,7 @@ it -- today only `0002`, which adds `cordial-fetch` (the fork has
 
 ## Updating without a new manager build
 
-The main menu's **Update Stacked** installs the fork's newest GitHub release
+**Update** (the header bar's button, or the main menu's **Update All**) installs the fork's newest GitHub release
 (`crates/core/src/cordial/stacked/`): it downloads
 `Stacked-<version>-<arch>.AppImage`, reads the SquashFS image out of it
 (without running it: NixOS sends every AppImage through appimage-run, which

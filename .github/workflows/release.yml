@@ -1,0 +1,107 @@
+# A release, from a tag: push `vX.Y.Z` (packaging/release.sh makes one) and
+# this checks the code, builds every package, and publishes them as the
+# GitHub release the app's Update reads (crates/core/src/update).
+#
+#   roblox-manager-VERSION-x86_64.AppImage     any distro
+#   roblox-manager_VERSION_amd64.deb            Debian, Ubuntu, Mint, Pop!_OS
+#   roblox-manager-VERSION-1.x86_64.rpm         Fedora, openSUSE
+#   roblox-manager-VERSION-1-x86_64.pkg.tar.zst Arch, Manjaro, EndeavourOS
+#   roblox-manager-VERSION-x86_64.flatpak       Flatpak, on any distro
+#   SHA256SUMS                                  what Update checks each against
+#
+# A tag with a pre-release part (v0.3.0-rc.1) is published as a pre-release,
+# which Update never offers.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: The tag is the version Cargo.toml says
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::the tag is $GITHUB_REF_NAME, but Cargo.toml says $version"
+            exit 1
+          fi
+      - run: nix develop -c cargo fmt --check
+      - run: nix develop -c cargo clippy --all-targets -- -D warnings
+      - run: nix develop -c cargo test
+
+  linux:
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - name: AppImage
+        run: |
+          nix build .#roblox-manager-appimage --print-build-logs
+          mkdir -p dist
+          install -m755 result "dist/roblox-manager-${VERSION}-x86_64.AppImage"
+      - name: deb, rpm and Arch packages
+        run: packaging/linux/build.sh "dist/roblox-manager-${VERSION}-x86_64.AppImage" "$VERSION" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+          if-no-files-found: error
+
+  flatpak:
+    needs: check
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-50
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: packaging/flatpak/io.github.mujo.RobloxManager.yml
+          bundle: roblox-manager-${{ env.VERSION }}-x86_64.flatpak
+          cache-key: flatpak-builder-${{ github.sha }}
+          upload-artifact: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flatpak
+          path: roblox-manager-${{ env.VERSION }}-x86_64.flatpak
+          if-no-files-found: error
+
+  publish:
+    needs: [linux, flatpak]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS
+      - name: The release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          pre=()
+          if [[ "$version" == *-* ]]; then pre=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Roblox Manager $version" \
+            --generate-notes "${pre[@]}"

@@ -13,6 +13,8 @@ pub struct Chrome {
     pub title: adw::WindowTitle,
     pub spinner: adw::Spinner,
     pub banner: adw::Banner,
+    /// Shown while a newer Roblox Manager or Stacked is out.
+    pub update_button: gtk::Button,
     /// "welcome" with no accounts, else "accounts".
     pub pages: gtk::Stack,
     pub accounts_box: gtk::Box,
@@ -60,6 +62,21 @@ impl Chrome {
             .build();
         name(&menu, "Main Menu");
         header.pack_end(&menu);
+        // Hidden until a check finds something newer; the menu's Update All
+        // is always there.
+        let update_button = gtk::Button::builder()
+            .child(
+                &adw::ButtonContent::builder()
+                    .icon_name("software-update-available-symbolic")
+                    .label("Update")
+                    .build(),
+            )
+            .action_name("win.update")
+            .css_classes(["suggested-action"])
+            .visible(false)
+            .build();
+        name(&update_button, "Update");
+        header.pack_end(&update_button);
         let sidebar_toggle = gtk::ToggleButton::builder()
             .icon_name("sidebar-show-right-symbolic")
             .tooltip_text("Macros and Activity (F9)")
@@ -293,6 +310,7 @@ impl Chrome {
             title,
             spinner,
             banner,
+            update_button,
             pages,
             accounts_box,
             accounts_meta,
@@ -329,8 +347,7 @@ fn main_menu() -> gio::Menu {
     menu.append_section(None, &add);
     let roblox = gio::Menu::new();
     roblox.append(Some("_Refresh Sessions and Favourites"), Some("win.refresh"));
-    roblox.append(Some("_Update Roblox"), Some("win.update-roblox"));
-    roblox.append(Some("Update _Stacked"), Some("win.update-stacked"));
+    roblox.append(Some("_Update All"), Some("win.update"));
     roblox.append(Some("Open Roblox _Links Here"), Some("win.open-links-here"));
     menu.append_section(None, &roblox);
     let style = gio::Menu::new();

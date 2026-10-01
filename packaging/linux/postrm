@@ -1,0 +1,14 @@
+#!/bin/sh
+# Takes away the AppArmor profile postinst added -- on removal, not on an
+# upgrade (where the new version's postinst puts it back anyway).
+set -e
+case "${1:-}" in
+    upgrade|1) exit 0 ;;
+esac
+if [ -f /etc/apparmor.d/roblox-manager ] && [ ! -e /opt/roblox-manager/AppRun ]; then
+    if command -v apparmor_parser >/dev/null 2>&1; then
+        apparmor_parser -R /etc/apparmor.d/roblox-manager || true
+    fi
+    rm -f /etc/apparmor.d/roblox-manager
+fi
+exit 0

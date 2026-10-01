@@ -85,6 +85,11 @@ impl Paths {
         self.cache_home.join("rbxmgr")
     }
 
+    /// Downloaded updates, until they are installed.
+    pub fn updates(&self) -> PathBuf {
+        self.cache().join("_updates")
+    }
+
     /// Leading `_` so no account label can claim it.
     pub fn icons(&self) -> PathBuf {
         self.cache().join("_icons")

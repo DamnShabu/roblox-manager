@@ -23,6 +23,7 @@ use std::sync::{Mutex, PoisonError};
 use super::CordialError;
 use super::process::Runner;
 use crate::paths::Paths;
+use crate::version::is_newer;
 pub use releases::{GithubReleases, Release, Releases};
 
 /// What an update did.
@@ -135,6 +136,34 @@ pub fn update(
     Ok(Updated { version, fresh, left_behind })
 }
 
+/// The Stacked launches run now: the version last updated to, else the one
+/// this build came with (`cordial/source.json`).
+pub fn installed_version(paths: &Paths) -> Option<String> {
+    let dir = paths.stacked();
+    match current_target(&dir).as_deref() {
+        Some(NIX_LINK) => {
+            let store = fs::read_link(dir.join(NIX_LINK)).ok()?;
+            Some(nix::version(&store.to_string_lossy()))
+        }
+        Some(v) if engine(&dir.join(v)).is_file() => Some(v.to_owned()),
+        _ => pinned_version(),
+    }
+}
+
+/// The version of the Stacked this build pinned.
+fn pinned_version() -> Option<String> {
+    let source: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../../cordial/source.json")).ok()?;
+    source["version"].as_str().map(str::to_owned)
+}
+
+/// The newest release, when it is newer than what launches run.
+pub fn newer(releases: &dyn Releases, paths: &Paths) -> Result<Option<String>, CordialError> {
+    let latest = releases.latest()?.version;
+    let fresher = installed_version(paths).is_none_or(|have| is_newer(&latest, &have));
+    Ok(fresher.then_some(latest))
+}
+
 /// What `current` points at, by name.
 fn current_target(dir: &Path) -> Option<String> {
     let target = fs::read_link(dir.join(CURRENT)).ok()?;
@@ -174,7 +203,7 @@ fn write_launcher(target: &Path) -> Result<(), CordialError> {
     let script = format!(
         r#"#!/bin/sh
 # Stacked's engine, with the libraries its AppImage bundles. Written by the
-# Roblox manager's Update Stacked.
+# Roblox manager's Update.
 d={quoted}
 LD_LIBRARY_PATH="$d/usr/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
 GSETTINGS_SCHEMA_DIR="$d/usr/share/glib-2.0/schemas"

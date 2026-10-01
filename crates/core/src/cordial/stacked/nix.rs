@@ -44,7 +44,7 @@ pub fn build(runner: &dyn Runner, out_link: &Path) -> Result<String, CordialErro
 }
 
 /// `/nix/store/<hash>-stacked-0.21.0` is 0.21.0; anything else as it is.
-fn version(store_path: &str) -> String {
+pub(super) fn version(store_path: &str) -> String {
     let name = store_path.rsplit('/').next().unwrap_or(store_path);
     match name.split_once("-stacked-") {
         Some((_, v)) if !v.is_empty() => v.to_owned(),

@@ -3,3 +3,4 @@ result-*
 /.superpowers
 /target
 /roblox-manager.flatpak
+__pycache__/

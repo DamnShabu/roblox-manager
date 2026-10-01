@@ -9,14 +9,21 @@ use rbxmgr_core::desktop::{Install, LinkHandler};
 use rbxmgr_core::keyring::{Attrs, DbusSecrets, Keyring, KeyringError, Secrets};
 use rbxmgr_core::launch::{BuildFn, Launcher, Pacing};
 use rbxmgr_core::roblox::{HttpRoblox, IconCache, UreqTransport};
+use rbxmgr_core::update::{AppReleases, GithubAppReleases, PackageInstaller, PackageKit};
 
 pub struct Services {
     pub paths: Paths,
     pub keyring: Arc<Keyring>,
     pub roblox: Arc<HttpRoblox>,
     pub runner: Arc<dyn Runner>,
-    /// Stacked's releases, for Update Stacked.
+    /// Stacked's releases, for checking and updating.
     pub releases: Arc<dyn Releases>,
+    /// The app's own releases.
+    pub app_releases: Arc<dyn AppReleases>,
+    /// Installs a downloaded distribution package.
+    pub packages: Arc<dyn PackageInstaller>,
+    /// How this copy was installed: how it updates itself.
+    pub install: Install,
     pub profiles: Arc<CordialProfiles>,
     pub launcher: Arc<Launcher>,
     pub icons: Arc<IconCache>,
@@ -56,13 +63,17 @@ impl Services {
         let icons = Arc::new(IconCache::new(paths.icons()));
         let avatars = Arc::new(IconCache::new(paths.avatars()));
         let releases: Arc<dyn Releases> = Arc::new(GithubReleases::default());
-        let links = Arc::new(LinkHandler::new(&paths, Install::detect()));
+        let install = Install::detect();
+        let links = Arc::new(LinkHandler::new(&paths, install.clone()));
         Services {
             paths,
             keyring,
             roblox,
             runner,
             releases,
+            app_releases: Arc::new(GithubAppReleases::default()),
+            packages: Arc::new(PackageKit),
+            install,
             profiles,
             launcher,
             icons,

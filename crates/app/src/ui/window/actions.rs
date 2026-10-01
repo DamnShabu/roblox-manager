@@ -42,8 +42,8 @@ impl Window {
         let actions: [Action; 18] = [
             ("add-account", Window::on_add),
             ("refresh", Window::refresh_all),
-            ("update-roblox", Window::on_update_roblox),
-            ("update-stacked", Window::on_update_stacked),
+            ("update", Window::on_update),
+            ("restart", Window::on_restart),
             ("new-group", Window::add_group),
             ("new-macro", |w| macros::editor::MacroDialog::open(w, None)),
             ("launch-selected", Window::launch_selected),
