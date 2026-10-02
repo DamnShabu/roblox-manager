@@ -8,30 +8,10 @@ use adw::prelude::*;
 use gtk::{Align, PolicyType, gdk, glib};
 use rbxmgr_core::macros::grammar::{self, Row};
 
-use super::card::step_icon;
-use super::point;
+use super::record::Record;
 use crate::ui::confirm;
-use crate::ui::widgets::{
-    Btn, Fluent, LabelFluent, hotkey_label, icon, keycaps, lbl, plural, sentence, wrap,
-};
+use crate::ui::widgets::{Btn, Fluent, LabelFluent, hotkey_label, keycaps, lbl, sentence};
 use crate::ui::window::{WeakWindow, Window};
-
-const STEP_TYPES: [&str; 8] = ["Key", "Hold", "Type", "Click", "Move", "Wait", "Start", "Note"];
-
-/// What a step's value looks like, as the entry's placeholder.
-fn hint(kind: &str) -> &'static str {
-    match kind {
-        "Key" => "e  ·  shift+w  ·  space",
-        "Hold" => "w 2  ·  shift+w 0.5-1",
-        "Type" => "text to type",
-        "Click" => "960 540  ·  right  ·  left 10 20",
-        "Move" => "40 0",
-        "Wait" => "0.5  ·  60-240",
-        "Start" => "45",
-        "Note" => "what this part does",
-        _ => "",
-    }
-}
 
 pub struct MacroDialog {
     window: WeakWindow,
@@ -54,6 +34,8 @@ pub struct MacroDialog {
     text: gtk::TextView,
     repeat_group: adw::PreferencesGroup,
     err: gtk::Label,
+    /// Steps recorded from a running client.
+    record: Rc<Record>,
 }
 
 impl MacroDialog {
@@ -117,6 +99,7 @@ impl MacroDialog {
                 .build(),
             repeat_group: adw::PreferencesGroup::builder().title("Repeat").build(),
             err: lbl("", "error").wrapped().visible(false),
+            record: Record::new(w.weak()),
         });
         d.assemble(new);
         let held = RefCell::new(Some(d.clone()));
@@ -221,68 +204,7 @@ impl MacroDialog {
         });
         self.rounds.set_visible(self.repeat.active_name().as_deref() == Some("rounds"));
 
-        // -- steps ----------------------------------------------------------------
-        let adds: Vec<gtk::Widget> = ["Key", "Wait", "Click", "Type", "Hold", "Move", "Note"]
-            .into_iter()
-            .map(|kind| {
-                let me = Rc::downgrade(self);
-                Btn::new("")
-                    .text(kind)
-                    .icon("list-add-symbolic")
-                    .tip(&format!("Add a {} step", kind.to_lowercase()))
-                    .build(move || {
-                        if let Some(d) = me.upgrade() {
-                            d.rows
-                                .borrow_mut()
-                                .push(Row { kind: kind.to_owned(), value: String::new() });
-                            d.draw_steps();
-                        }
-                    })
-                    .button
-                    .upcast()
-            })
-            .collect();
-        for (name, label) in [("steps", "Steps"), ("text", "Text")] {
-            self.view.add(adw::Toggle::builder().name(name).label(label).build());
-        }
-        self.view.set_active_name(Some("steps"));
-        let me = Rc::downgrade(self);
-        self.view.connect_active_name_notify(move |_| {
-            if let Some(d) = me.upgrade() {
-                d.switch_view();
-            }
-        });
-        let steps_group = adw::PreferencesGroup::builder()
-            .title("Steps")
-            .header_suffix(&hbox!(12, "", self.count.clone().centered(), self.view.clone()))
-            .build();
-        let add_box = wrap(6, &adds);
-        add_box.set_margin_top(12);
-        self.views.add_named(&vbox!(0, "", self.list.clone(), add_box), Some("steps"));
-        let text = gtk::ScrolledWindow::builder()
-            .child(&self.text)
-            .min_content_height(220)
-            .max_content_height(420)
-            .propagate_natural_height(true)
-            .build();
-        let frame = gtk::Frame::builder().child(&text).build();
-        frame.add_css_class("view");
-        self.views.add_named(
-            &vbox!(
-                8,
-                "",
-                frame,
-                lbl(
-                    "One step a line, as How Macros Work writes them: Key e, Wait 60-240, \
-                     Click 960 540. A last line “loop 5” plays it five times; with none it \
-                     plays until stopped.",
-                    "caption dimmed"
-                )
-                .wrapped()
-            ),
-            Some("text"),
-        );
-        steps_group.add(&self.views);
+        let steps_group = self.steps_group();
 
         let page =
             vbox!(24, "", about, repeat_group.clone(), steps_group, self.err.clone()).margins(18);
@@ -363,113 +285,6 @@ impl MacroDialog {
 
     fn in_text(&self) -> bool {
         self.view.active_name().as_deref() == Some("text")
-    }
-
-    // -- steps --------------------------------------------------------------
-    fn draw_steps(self: &Rc<Self>) {
-        self.list.remove_all();
-        let rows = self.rows.borrow().clone();
-        let real = rows.iter().filter(|r| r.kind != "Note").count();
-        self.count.set_label(&plural(real, "step", "steps"));
-        if rows.is_empty() {
-            self.list.append(&crate::ui::accounts::leader::placeholder(
-                "list-add-symbolic",
-                "No steps yet. Add one below.",
-            ));
-        }
-        for (i, r) in rows.iter().enumerate() {
-            let mut kinds: Vec<&str> = STEP_TYPES.to_vec();
-            if !kinds.contains(&r.kind.as_str()) {
-                kinds.push(&r.kind);
-            }
-            let kind = gtk::DropDown::from_strings(&kinds);
-            kind.set_valign(Align::Center);
-            // One width for every type, so the values line up.
-            kind.set_width_request(104);
-            kind.set_selected(kinds.iter().position(|k| *k == r.kind).unwrap_or(0) as u32);
-            let (me, owned): (_, Vec<String>) =
-                (Rc::downgrade(self), kinds.iter().map(|k| (*k).to_owned()).collect());
-            kind.connect_selected_notify(move |d| {
-                if let (Some(me), Some(k)) = (me.upgrade(), owned.get(d.selected() as usize)) {
-                    me.retype(i, k.clone());
-                }
-            });
-            let value = gtk::Entry::builder()
-                .text(&r.value)
-                .placeholder_text(hint(&r.kind))
-                .hexpand(true)
-                .valign(Align::Center)
-                .css_classes(["monospace"])
-                .build();
-            let me = Rc::downgrade(self);
-            value.connect_changed(move |e| {
-                if let Some(d) = me.upgrade() {
-                    if let Some(row) = d.rows.borrow_mut().get_mut(i) {
-                        row.value = e.text().to_string();
-                    }
-                }
-            });
-            let button = |ic: &str, tip: &str, on: bool, act: fn(&Rc<Self>, usize)| {
-                let me = Rc::downgrade(self);
-                let b = Btn::new("flat circular").icon(ic).tip(tip).build(move || {
-                    if let Some(d) = me.upgrade() {
-                        act(&d, i);
-                    }
-                });
-                b.button.set_sensitive(on);
-                b.button.set_valign(Align::Center);
-                b.button
-            };
-            let len = rows.len();
-            let line = hbox!(
-                8,
-                "",
-                lbl(&format!("{}", i + 1), "number dimmed").xalign(1.0),
-                icon(step_icon(&r.kind)).css("dimmed"),
-                kind,
-                value,
-                button("go-up-symbolic", "Move up", i > 0, |d, i| d.swap(i, i - 1)),
-                button("go-down-symbolic", "Move down", i + 1 < len, |d, i| d.swap(i, i + 1)),
-                button("user-trash-symbolic", "Remove step", true, |d, i| {
-                    d.rows.borrow_mut().remove(i);
-                    d.draw_steps();
-                })
-            );
-            if r.kind == "Click" {
-                let pick = point::button(&self.window, &value, &self.err);
-                line.insert_child_after(&pick, Some(&value));
-            }
-            let row = gtk::ListBoxRow::builder()
-                .activatable(false)
-                .selectable(false)
-                .child(&line)
-                .build();
-            row.add_css_class("step-row");
-            self.list.append(&row);
-        }
-    }
-
-    fn retype(self: &Rc<Self>, i: usize, kind: String) {
-        let changed = self.rows.borrow_mut().get_mut(i).is_some_and(|r| {
-            let changed = r.kind != kind;
-            r.kind = kind;
-            changed
-        });
-        if changed {
-            // Deferred: the dropdown whose popover just closed is one of the
-            // widgets being replaced.
-            let me = Rc::downgrade(self);
-            glib::idle_add_local_once(move || {
-                if let Some(d) = me.upgrade() {
-                    d.draw_steps();
-                }
-            });
-        }
-    }
-
-    fn swap(self: &Rc<Self>, i: usize, j: usize) {
-        self.rows.borrow_mut().swap(i, j);
-        self.draw_steps();
     }
 
     // -- hotkey ---------------------------------------------------------------
@@ -560,3 +375,5 @@ impl MacroDialog {
         );
     }
 }
+
+mod steps;

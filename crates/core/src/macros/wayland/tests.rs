@@ -15,6 +15,15 @@ use super::*;
 const GLOBALS: [&str; 3] =
     ["wl_seat", "zwp_virtual_keyboard_manager_v1", "zwlr_virtual_pointer_manager_v1"];
 
+/// A display that also says how big its output is.
+const SIZED: [&str; 5] = [
+    "wl_seat",
+    "zwp_virtual_keyboard_manager_v1",
+    "zwlr_virtual_pointer_manager_v1",
+    "wl_output",
+    "zxdg_output_manager_v1",
+];
+
 /// What the compositor saw: (object, opcode, body), and the keymap it was sent.
 #[derive(Default)]
 struct Seen {
@@ -35,10 +44,22 @@ fn compositor(
     offer: &'static [&'static str],
     seen: Arc<Mutex<Seen>>,
 ) -> thread::JoinHandle<()> {
+    sized_compositor(path, offer, &[], seen)
+}
+
+/// [`compositor`], whose output tells its xdg-output each of `sizes` in turn,
+/// as a display that changes size does.
+fn sized_compositor(
+    path: &Path,
+    offer: &'static [&'static str],
+    sizes: &'static [(u32, u32)],
+    seen: Arc<Mutex<Seen>>,
+) -> thread::JoinHandle<()> {
     let listener = UnixListener::bind(path).unwrap();
     thread::spawn(move || {
         let (mut conn, _) = listener.accept().unwrap();
         let mut buf = Vec::new();
+        let mut xdg_outputs = 0;
         loop {
             let mut data = [0u8; 4096];
             let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
@@ -88,6 +109,18 @@ fn compositor(
                         }
                     }
                     (DISPLAY, 0) => send(&mut conn, word(&body, 0), 0, &words(&[0])),
+                    _ if op == 0
+                        && read_str(&body, 4).as_deref() == Some("zxdg_output_manager_v1") =>
+                    {
+                        // The bind's new id follows the name, the string and the version.
+                        let at = 4 + wire_str("zxdg_output_manager_v1").len() + 4;
+                        xdg_outputs = word(&body, at);
+                    }
+                    (o, 1) if o == xdg_outputs => {
+                        for &(w, h) in sizes {
+                            send(&mut conn, word(&body, 0), 1, &words(&[w, h])); // logical_size
+                        }
+                    }
                     _ => seen.lock().unwrap().requests.push((obj, op, body)),
                 }
             }
@@ -157,9 +190,110 @@ fn no_display_is_not_found() {
     assert_eq!(err.kind(), io::ErrorKind::NotFound);
 }
 
+/// The requests that reached the virtual pointer, as (opcode, words): the
+/// object made just after the keyboard.
+fn on_pointer(seen: &Seen, pointer: u32) -> Vec<(u16, Vec<u32>)> {
+    seen.requests
+        .iter()
+        .filter(|(o, _, _)| *o == pointer)
+        .map(|(_, op, body)| (*op, body.chunks(4).map(|c| word(c, 0)).collect()))
+        .collect()
+}
+
 #[test]
-fn wire_strings_are_nul_terminated_and_padded() {
-    assert_eq!(wire_str("abc"), [words(&[4]), b"abc\0".to_vec()].concat());
-    assert_eq!(wire_str("abcd").len(), 4 + 8);
-    assert_eq!(read_str(&wire_str("wl_seat"), 0).as_deref(), Some("wl_seat"));
+fn a_point_is_aimed_at_absolutely_on_a_display_that_says_its_size() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("wl");
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let server = sized_compositor(&path, &SIZED, &[(1280, 720)], Arc::clone(&seen));
+    let mut input = VirtualInput::connect(&path).unwrap();
+    let pointer = input.pointer;
+    input.move_to(640, 360).unwrap();
+    input.move_to(-5, 9999).unwrap();
+    drop(input);
+    server.join().unwrap();
+
+    let moves: Vec<(u16, Vec<u32>)> = on_pointer(&seen.lock().unwrap(), pointer)
+        .into_iter()
+        .filter(|(op, _)| *op == 1)
+        .map(|(op, w)| (op, w[1..].to_vec()))
+        .collect();
+    assert_eq!(
+        moves,
+        [(1, vec![640, 360, 1280, 720]), (1, vec![0, 720, 1280, 720])],
+        "motion_absolute, held to the display"
+    );
+}
+
+#[test]
+fn the_display_s_latest_size_is_the_one_aimed_by() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("wl");
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let server = sized_compositor(&path, &SIZED, &[(1280, 720), (1920, 1080)], Arc::clone(&seen));
+    let mut input = VirtualInput::connect(&path).unwrap();
+    let pointer = input.pointer;
+    input.move_to(10, 20).unwrap();
+    drop(input);
+    server.join().unwrap();
+
+    let aimed = on_pointer(&seen.lock().unwrap(), pointer)
+        .into_iter()
+        .find(|(op, _)| *op == 1)
+        .map(|(_, w)| w[1..].to_vec());
+    assert_eq!(aimed, Some(vec![10, 20, 1920, 1080]));
+}
+
+#[test]
+fn with_no_size_to_aim_by_a_point_is_reached_from_the_far_corner() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("wl");
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let server = compositor(&path, &GLOBALS, Arc::clone(&seen));
+    let mut input = VirtualInput::connect(&path).unwrap();
+    let pointer = input.pointer;
+    input.move_to(10, 20).unwrap();
+    drop(input);
+    server.join().unwrap();
+
+    let motions: Vec<(i32, i32)> = on_pointer(&seen.lock().unwrap(), pointer)
+        .into_iter()
+        .filter(|(op, _)| *op == 0)
+        .map(|(_, w)| (w[1] as i32 / 256, w[2] as i32 / 256))
+        .collect();
+    assert_eq!(motions, [(-100_000, -100_000), (10, 20)]);
+}
+
+#[test]
+fn a_scroll_is_whole_wheel_notches() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("wl");
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let server = compositor(&path, &GLOBALS, Arc::clone(&seen));
+    let mut input = VirtualInput::connect(&path).unwrap();
+    let pointer = input.pointer;
+    input.scroll(false, -3).unwrap();
+    input.scroll(true, 2).unwrap();
+    drop(input);
+    server.join().unwrap();
+
+    let sent: Vec<(u16, Vec<u32>)> = on_pointer(&seen.lock().unwrap(), pointer)
+        .into_iter()
+        .filter(|(op, _)| [4, 5, 7].contains(op))
+        // Times vary; the axis_discrete's is dropped.
+        .map(|(op, w)| (op, if op == 7 { w[1..].to_vec() } else { w }))
+        .collect();
+    let fixed = |notches: i32| (notches * 15 * 256) as u32;
+    assert_eq!(
+        sent,
+        [
+            (5, vec![0]),
+            (7, vec![0, fixed(-3), -3i32 as u32]),
+            (4, vec![]),
+            (5, vec![0]),
+            (7, vec![1, fixed(2), 2]),
+            (4, vec![]),
+        ],
+        "a wheel's source, its notches (15 apiece), and a frame"
+    );
 }

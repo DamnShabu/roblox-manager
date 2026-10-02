@@ -13,14 +13,19 @@ pub const TYPE_GAP: (f64, f64) = (0.05, 0.16);
 const LONGEST_SECS: f64 = 86_400.0;
 /// The furthest a move or click may reach from where it starts.
 const FURTHEST: i32 = 65_535;
+/// The most wheel notches one scroll turns.
+const MOST_NOTCHES: i32 = 1000;
 
 /// The editor's step types and the command each is in a macro's text.
-const STEP_TYPES: [(&str, &str); 8] = [
+const STEP_TYPES: [(&str, &str); 11] = [
     ("Key", "tap"),
     ("Hold", "hold"),
+    ("Press", "press"),
+    ("Release", "release"),
     ("Type", "type"),
     ("Click", "click"),
     ("Move", "move"),
+    ("Scroll", "scroll"),
     ("Wait", "wait"),
     ("Start", "start"),
     ("Note", "#"),
@@ -54,6 +59,23 @@ pub enum Step {
     Wait(f64, f64),
     /// A wait before the first round only.
     Start(f64, f64),
+    /// Keys or buttons pressed and left down, until a Release.
+    Press(Vec<u16>),
+    /// Keys or buttons let go of, in the order written.
+    Release(Vec<u16>),
+    /// The pointer to a point (from the display's corner): at once, or
+    /// gliding there over a time in [lo, hi].
+    MoveTo {
+        x: i32,
+        y: i32,
+        lo: f64,
+        hi: f64,
+    },
+    /// The wheel turned some notches: down or right are positive.
+    Scroll {
+        horizontal: bool,
+        notches: i32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -211,8 +233,16 @@ fn step(line: &Line<'_>) -> Result<Parsed, String> {
             let (lo, hi) = seconds(secs)?;
             Step::Start(lo, hi)
         }
+        ("press", [k]) => Step::Press(codes(k)?),
+        ("release", [k]) => Step::Release(codes(k)?),
         ("click", args) if args.len() <= 3 => click(args)?,
-        ("move", [dx, dy]) => Step::Move(int(dx)?, int(dy)?),
+        ("move", [dx, dy]) if *dx != "to" => Step::Move(int(dx)?, int(dy)?),
+        ("move", ["to", x, y]) => Step::MoveTo { x: int(x)?, y: int(y)?, lo: 0.0, hi: 0.0 },
+        ("move", ["to", x, y, secs]) => {
+            let (lo, hi) = seconds(secs)?;
+            Step::MoveTo { x: int(x)?, y: int(y)?, lo, hi }
+        }
+        ("scroll", args) => scroll(args)?,
         ("loop", [n]) if n.bytes().all(|b| b.is_ascii_digit()) => {
             return Ok(Parsed::Loops(n.parse().map_err(|_| format!("not a count: '{n}'"))?));
         }
@@ -222,11 +252,36 @@ fn step(line: &Line<'_>) -> Result<Parsed, String> {
 }
 
 fn hold(token: &str, (lo, hi): (f64, f64)) -> Result<Step, String> {
-    let keys = token
+    Ok(Step::Hold { keys: codes(token)?, lo, hi })
+}
+
+/// The keys or buttons of `shift+w`, in the order written.
+fn codes(token: &str) -> Result<Vec<u16>, String> {
+    token
         .split('+')
         .map(|k| keys::key_code(k).ok_or_else(|| format!("unknown key '{token}'")))
-        .collect::<Result<_, _>>()?;
-    Ok(Step::Hold { keys, lo, hi })
+        .collect()
+}
+
+fn scroll(args: &[&str]) -> Result<Step, String> {
+    let usage = || "expected scroll up|down|left|right [NOTCHES]".to_owned();
+    let (direction, notches) = match args {
+        [d] => (d.to_lowercase(), 1),
+        [d, n] => {
+            let n = n.parse().ok().filter(|n| (1..=MOST_NOTCHES).contains(n));
+            let n = n.ok_or_else(|| format!("a scroll turns 1 to {MOST_NOTCHES} notches"))?;
+            (d.to_lowercase(), n)
+        }
+        _ => return Err(usage()),
+    };
+    let (horizontal, sign) = match direction.as_str() {
+        "up" => (false, -1),
+        "down" => (false, 1),
+        "left" => (true, -1),
+        "right" => (true, 1),
+        _ => return Err(usage()),
+    };
+    Ok(Step::Scroll { horizontal, notches: sign * notches })
 }
 
 fn typed(text: &str) -> Result<Vec<(u16, bool)>, String> {
@@ -289,157 +344,21 @@ pub fn click_at(value: &str, x: i32, y: i32) -> String {
     }
 }
 
-/// What a key, text, click or move step does, for the status line.
+/// What a step does, for the status line.
 pub fn describe(step: &Step) -> String {
+    let names =
+        |keys: &[u16]| keys.iter().map(|k| keys::key_name(*k)).collect::<Vec<_>>().join("+");
     match step {
-        Step::Hold { keys, .. } => {
-            let names: Vec<String> = keys.iter().map(|k| keys::key_name(*k)).collect();
-            format!("pressing {}", names.join("+"))
-        }
+        Step::Hold { keys, .. } => format!("pressing {}", names(keys)),
+        Step::Press(keys) => format!("holding down {}", names(keys)),
+        Step::Release(keys) => format!("letting go of {}", names(keys)),
         Step::Type(_) => "typing".into(),
         Step::Click { .. } => "clicking".into(),
-        Step::Move(..) => "moving the mouse".into(),
+        Step::Move(..) | Step::MoveTo { .. } => "moving the mouse".into(),
+        Step::Scroll { .. } => "scrolling".into(),
         Step::Wait(..) | Step::Start(..) => "waiting".into(),
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn hold(keys: &[u16], lo: f64, hi: f64) -> Step {
-        Step::Hold { keys: keys.to_vec(), lo, hi }
-    }
-
-    #[test]
-    fn a_macro_parses_into_the_codes_a_us_keyboard_sends() {
-        let m = parse(
-            "# farm\nloop 3\ntap E\ntap f 0.2-0.3\nhold shift+w 1-2\n\ntype -Gg\nclick right 10 20\n\
-             move -5 5\nwait 0.5\ntap F5\ntap /\n",
-        )
-        .unwrap();
-        let (lo, hi) = TAP_PRESS;
-        assert_eq!(m.loops, 3);
-        assert_eq!(
-            m.steps,
-            vec![
-                hold(&[18], lo, hi),
-                hold(&[33], 0.2, 0.3),
-                hold(&[42, 17], 1.0, 2.0),
-                Step::Type(vec![(12, false), (34, true), (34, false)]),
-                Step::Click { button: BUTTON_RIGHT, at: Some((10, 20)) },
-                Step::Move(-5, 5),
-                Step::Wait(0.5, 0.5),
-                hold(&[63], lo, hi),
-                hold(&[53], lo, hi),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_tap_is_its_own_keys_code_never_escape() {
-        let (lo, hi) = TAP_PRESS;
-        assert_eq!(parse("tap j").unwrap().steps, [hold(&[36], lo, hi)]);
-        assert_eq!(parse("tap space").unwrap().steps, [hold(&[57], lo, hi)]);
-    }
-
-    #[test]
-    fn values_too_large_to_play_are_refused_by_line() {
-        for (bad, why) in [
-            ("wait 1e13", "line 1"),
-            ("tap e\nwait 1e20", "line 2"),
-            ("hold w 100000", "longer than a day"),
-            ("move 9000000 0", "too far"),
-            ("click 70000 5", "too far"),
-        ] {
-            let err = parse(bad).unwrap_err().to_string();
-            assert!(err.contains(why), "{bad:?}: {err}");
-        }
-        assert!(
-            parse("wait 86400\nmove -65535 65535").is_ok(),
-            "a day and a screen's width are fine"
-        );
-    }
-
-    #[test]
-    fn a_bad_macro_is_refused_and_says_where() {
-        for (bad, why) in [
-            ("tap -k", "unknown key"),
-            ("tap e\nwait 3-1", "line 2"),
-            ("click 5", "click"),
-            ("jump", "don't understand"),
-            ("type héllo", "cannot type"),
-            ("# nothing", "no steps"),
-        ] {
-            let err = parse(bad).unwrap_err().to_string();
-            assert!(err.contains(why), "{bad:?}: {err}");
-        }
-    }
-
-    #[test]
-    fn the_editors_rows_name_types_keep_notes_and_hold_the_loop_apart() {
-        let src = "# note\nstart 5\ntap j\nhold shift+w 2\nwait 60-70\nfrob 1\nloop 3\n";
-        let row = |k: &str, v: &str| Row { kind: k.into(), value: v.into() };
-        assert_eq!(
-            rows(src),
-            (
-                vec![
-                    row("Note", "note"),
-                    row("Start", "5"),
-                    row("Key", "j"),
-                    row("Hold", "shift+w 2"),
-                    row("Wait", "60-70"),
-                    row("Frob", "1"),
-                ],
-                3
-            )
-        );
-        let (r, loops) = rows(src);
-        assert_eq!(to_text(&r, loops), src, "rows go back to the very text they came from");
-    }
-
-    #[test]
-    fn a_macro_with_no_loop_line_runs_until_stopped() {
-        assert_eq!(rows("tap e").1, 0);
-        assert_eq!(
-            (loop_label(0), loop_label(1), loop_label(3)),
-            ("Until stopped".into(), "Once".into(), "3 rounds".into())
-        );
-    }
-
-    #[test]
-    fn an_editor_made_macro_is_one_the_player_runs() {
-        let row = |k: &str, v: &str| Row { kind: k.into(), value: v.into() };
-        let text = to_text(&[row("Key", "e"), row("Wait", "0.5"), row("Click", "960 540")], 1);
-        assert_eq!(parse(&text).unwrap().loops, 1);
-    }
-
-    #[test]
-    fn the_editors_names_read_as_the_commands_they_stand_for() {
-        let src = "Start 45\nKey j\nNote farm the boss\nWait 60-70\nloop 2\n";
-        let m = parse(src).unwrap();
-        assert_eq!((m.loops, m.steps.len()), (2, 3), "the note is no step");
-        let (r, loops) = rows(src);
-        assert_eq!(
-            r.iter().map(|r| r.kind.as_str()).collect::<Vec<_>>(),
-            ["Start", "Key", "Note", "Wait"]
-        );
-        assert_eq!(to_text(&r, loops), "start 45\ntap j\n# farm the boss\nwait 60-70\nloop 2\n");
-    }
-
-    #[test]
-    fn a_picked_point_replaces_the_clicks_point_and_keeps_its_button() {
-        assert_eq!(click_at("", 960, 540), "960 540");
-        assert_eq!(click_at("10 20", 960, 540), "960 540");
-        assert_eq!(click_at("right", 5, 6), "right 5 6");
-        assert_eq!(click_at(" middle 1 2 ", 5, 6), "middle 5 6");
-        assert!(click(&["right", "5", "6"]).is_ok(), "what it writes parses");
-    }
-
-    #[test]
-    fn steps_describe_themselves() {
-        assert_eq!(describe(&hold(&[42, 17], 1.0, 1.0)), "pressing shift+w");
-        assert_eq!(describe(&Step::Click { button: BUTTON_LEFT, at: None }), "clicking");
-        assert_eq!(describe(&Step::Type(vec![])), "typing");
-    }
-}
+mod tests;

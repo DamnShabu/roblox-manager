@@ -10,6 +10,8 @@ mod macros;
 mod roblox;
 mod updates;
 
+pub use self::macros::ReadyClient;
+
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashSet;
 use std::rc::{Rc, Weak};

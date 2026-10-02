@@ -11,12 +11,16 @@ use crate::ui::widgets::{
 };
 use crate::ui::window::Window;
 
+/// How many steps an unfolded card lists; a recording can have hundreds,
+/// which its editor shows.
+const SHOWN_STEPS: usize = 12;
+
 /// The icon for an editor step type.
 pub fn step_icon(kind: &str) -> &'static str {
     match kind {
-        "Key" | "Hold" => "input-keyboard-symbolic",
+        "Key" | "Hold" | "Press" | "Release" => "input-keyboard-symbolic",
         "Type" => "insert-text-symbolic",
-        "Click" => "input-mouse-symbolic",
+        "Click" | "Scroll" => "input-mouse-symbolic",
         "Move" => "go-jump-symbolic",
         "Wait" => "appointment-soon-symbolic",
         "Start" => "alarm-symbolic",
@@ -78,7 +82,7 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
 
     // Unfolded: the steps, what is wrong with them, Edit and Run.
     let body = vbox!(4, "macro-steps");
-    for r in rows.iter().filter(|r| r.kind != "Note") {
+    for r in rows.iter().filter(|r| r.kind != "Note").take(SHOWN_STEPS) {
         let shown = if matches!(r.kind.as_str(), "Wait" | "Start") && !r.value.is_empty() {
             format!("{} s", r.value)
         } else if r.value.is_empty() {
@@ -93,6 +97,10 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
             lbl(&r.kind, "kind").width(44),
             lbl(&shown, "monospace dimmed").ellipsize().hexpand()
         ));
+    }
+    if steps > SHOWN_STEPS {
+        let more = plural(steps - SHOWN_STEPS, "more step", "more steps");
+        body.append(&lbl(&format!("…and {more}"), "dimmed caption"));
     }
     if rows.iter().all(|r| r.kind == "Note") {
         body.append(&lbl("No steps yet.", "dimmed"));

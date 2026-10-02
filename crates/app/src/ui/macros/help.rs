@@ -30,7 +30,8 @@ const PAGE: &[Block] = &[
          macro-ready account's client runs on a small display of its own, inside a normal \
          window on your desktop, where it always has focus. The macro types into that \
          display with emulated input — a virtual keyboard and mouse. Your real keyboard and \
-         mouse are never used or read, and nothing touches the game itself.",
+         mouse are never used, they are read only while you record in that one window, and \
+         nothing touches the game itself.",
     ),
     Heading("Using it"),
     Text(
@@ -42,6 +43,17 @@ const PAGE: &[Block] = &[
          Or press <b>Run</b> on a macro in the side pane to play it on every selected account \
          at once; that turns on their macro-ready windows too. A macro switched off cannot run.",
     ),
+    Heading("Recording"),
+    Text(
+        "Press <b>Record</b> in a macro's editor, then <b>F8</b> in a running macro-ready \
+         client's window, and play. Everything that window receives — keys pressed and held, \
+         clicks, mouse movement and camera turns, scrolling, and the pauses between — is \
+         recorded until you press <b>F8</b> there again. The steps are added to the editor, \
+         to look over before you <b>Save</b>.\n\n\
+         F8 never reaches the game while a recording is armed. Only that window is heard, \
+         and only until the second F8. A client launched before recording existed has to be \
+         launched again first.",
+    ),
     Heading("Hotkeys"),
     Text(
         "A macro's hotkey runs it on the selected accounts, or stops it, while this window has \
@@ -52,12 +64,16 @@ const PAGE: &[Block] = &[
     Steps(&[
         ("Key KEY [SECONDS]", "press and release a key"),
         ("Hold KEY SECONDS", "keep a key down"),
+        ("Press KEY", "put a key down and leave it down, while other steps play"),
+        ("Release KEY", "let go of a key a Press put down"),
         ("Type TEXT", "type text, e.g. into chat"),
         (
             "Click [left|right|middle] [X Y]",
             "click, optionally at a point you pick in a running client",
         ),
         ("Move DX DY", "move the mouse by an amount"),
+        ("Move to X Y [SECONDS]", "put the mouse at a point, or glide it there"),
+        ("Scroll up|down|left|right [N]", "turn the wheel N notches"),
         ("Wait SECONDS", "pause"),
         ("Start SECONDS", "pause once, before the first round only"),
         ("Note TEXT", "a reminder; does nothing"),
@@ -67,8 +83,11 @@ const PAGE: &[Block] = &[
          Keys are letters, digits and punctuation, or names such as <tt>space</tt>, \
          <tt>enter</tt>, <tt>esc</tt>, <tt>tab</tt>, <tt>shift</tt>, <tt>ctrl</tt>, \
          <tt>alt</tt>, <tt>up</tt>, <tt>down</tt>, <tt>left</tt>, <tt>right</tt>, \
-         <tt>F1</tt>. Combine them with +: <tt>Hold shift+w 2</tt>. Keys and typed text \
-         follow a US keyboard layout.",
+         <tt>F1</tt>. Combine them with +: <tt>Hold shift+w 2</tt>. The mouse buttons are \
+         keys too: <tt>mouse1</tt> (left), <tt>mouse2</tt> (right), <tt>mouse3</tt> \
+         (middle) — <tt>Hold mouse1 2</tt>. Keys and typed text follow a US keyboard \
+         layout.\n\n\
+         Whatever a macro presses is let go of when each round ends, and when it stops.",
     ),
     Heading("Randomness"),
     Text(
@@ -81,8 +100,9 @@ const PAGE: &[Block] = &[
     Heading("Good to know"),
     Text(
         "Keep the window on a workspace you can see; on a hidden one the game can stall. Stop \
-         lets go of any held key at once. Roblox games have their own rules on macros — AFK \
-         use can be against them.",
+         lets go of any held key at once. Points are the client window's own, from its corner: \
+         keep the window the size it was when a macro was recorded or its points were picked. \
+         Roblox games have their own rules on macros — AFK use can be against them.",
     ),
 ];
 

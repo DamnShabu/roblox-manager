@@ -73,4 +73,6 @@ changes with it. Each item names the code that depends on it.
    the fork moved its submodules.
 5. `cargo test` (the pin check), `nix build .#cordial-mujo`, and
    `packaging/flatpak/build.sh`. Then launch one account and play a macro
-   in a macro-ready window: the checks above cannot see the engine.
+   in a macro-ready window, and record a few seconds there (Record in a
+   macro's editor, F8 twice in the window): the checks above cannot see the
+   engine, which runs behind the manager's relay.

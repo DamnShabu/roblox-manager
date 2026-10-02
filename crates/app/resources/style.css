@@ -172,3 +172,17 @@ progressbar.expiry.low progress { background: var(--error-bg-color); }
 row.step-row { padding: 6px 8px; }
 row.step-row .number { font-feature-settings: "tnum"; min-width: 22px; }
 button.hotkey.capturing { color: var(--accent-color); box-shadow: inset 0 0 0 2px var(--accent-bg-color); }
+/* A recording above the steps: armed (a still dot) or running (pulsing). */
+.recording-banner {
+  padding: 8px 8px 8px 16px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--error-bg-color) 12%, transparent);
+}
+.recording-banner .dot {
+  min-width: 10px;
+  min-height: 10px;
+  border-radius: 999px;
+  background: var(--error-color);
+  opacity: .45;
+}
+.recording-banner.live .dot { opacity: 1; animation: pulse 1.4s ease-in-out infinite; }

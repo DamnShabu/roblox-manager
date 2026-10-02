@@ -10,7 +10,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use rbxmgr_core::accounts::AccountStore;
-use rbxmgr_core::macros::MacroLibrary;
+use rbxmgr_core::macros::{MacroLibrary, relay};
 use rbxmgr_core::update;
 
 use crate::services::Services;
@@ -20,6 +20,11 @@ use crate::ui::window::Window;
 pub const APP_ID: &str = "io.github.mujo.RobloxManager";
 
 fn main() -> glib::ExitCode {
+    let mut args: Vec<String> = std::env::args().collect();
+    // Started by a macro-ready launch, as its client's relay: no window.
+    if args.get(1).map(String::as_str) == Some(relay::FLAG) {
+        std::process::exit(relay::run(&args[2..]));
+    }
     let app = adw::Application::builder()
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::HANDLES_OPEN)
@@ -73,7 +78,6 @@ fn main() -> glib::ExitCode {
     });
     // Started by Restart: the old copy may still hold the app's name, and
     // would take this launch over and then exit.
-    let mut args: Vec<String> = std::env::args().collect();
     if let Some(at) = args.iter().position(|a| a == update::RESTARTED) {
         args.remove(at);
         if !update::wait_for_predecessor(Duration::from_secs(20)) {

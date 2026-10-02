@@ -86,6 +86,8 @@ pub struct AppState {
     pub joining: HashSet<UserId>,
     /// Each account's playing macro: what stops it, and its name.
     pub macro_runs: HashMap<UserId, (StopFlag, String)>,
+    /// The account a recording hears, while one is armed or under way.
+    pub recording: Option<UserId>,
     /// Launches under way: what stops each, and the accounts it starts.
     pub launches: Vec<(StopFlag, Vec<UserId>)>,
     /// The macros shown unfolded.
@@ -123,6 +125,7 @@ impl AppState {
             launching: HashSet::new(),
             joining: HashSet::new(),
             macro_runs: HashMap::new(),
+            recording: None,
             launches: Vec::new(),
             open_macros: HashSet::new(),
             filter: String::new(),

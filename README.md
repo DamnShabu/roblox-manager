@@ -208,7 +208,29 @@ off can't run.
 isn't focused. A macro-ready client runs on a small display of its own,
 inside a normal window on your desktop, where it always has focus. The macro
 types into that display with a virtual keyboard and mouse. Your real
-keyboard and mouse aren't used, and nothing touches the game itself.
+keyboard and mouse aren't used. They're read only while you record in that
+one window, and nothing touches the game itself.
+
+### Recording a macro
+
+Instead of writing the steps, you can play them:
+
+1. Open a macro's editor (or **New Macro**) and press **Record**. If more
+   than one macro-ready client is running, pick the one to record.
+2. In that client's window, press <kbd>F8</kbd> and play.
+3. Press <kbd>F8</kbd> there again. The steps are added to the editor. Look
+   them over, then **Save**.
+
+Everything the window receives is recorded: keys pressed and held, clicks,
+mouse movement (camera turns too), scrolling, and the pauses in between.
+Inputs that overlap, such as holding <kbd>W</kbd> while you turn or jump,
+become **Press** and **Release** steps. Mouse movement becomes **Move to**
+glides. <kbd>F8</kbd> itself never reaches the game while a recording is
+armed, and only that window is heard, only until the second <kbd>F8</kbd>.
+
+A client that was already running before you updated must be launched
+again before it can be recorded. Points are in the window's own
+coordinates, so keep it the same size when you play the macro back.
 
 ### Steps
 
@@ -216,9 +238,13 @@ keyboard and mouse aren't used, and nothing touches the game itself.
 | --- | --- | --- |
 | Key | `Key e` | Press and release a key |
 | Hold | `Hold shift+w 2` | Hold keys down for a time |
+| Press | `Press w` | Put a key down and leave it down while other steps play |
+| Release | `Release w` | Let go of a key a Press put down |
 | Type | `Type gg` | Type text, for example into chat |
 | Click | `Click 640 410` | Click, optionally at a point. The ⌖ button lets you pick the point by clicking in a running client |
 | Move | `Move 0 -40` | Move the mouse by an amount |
+| Move to | `Move to 640 410 0.3` | Put the mouse at a point, or glide it there over a time |
+| Scroll | `Scroll up 3` | Turn the mouse wheel some notches |
 | Wait | `Wait 60-240` | Pause |
 | Start | `Start 45` | Pause once, before the first round only |
 | Note | `# stay online` | A reminder that does nothing |
@@ -234,8 +260,10 @@ characters are spaced randomly.
 
 Keys are letters, digits and punctuation, or names: `space`, `enter`,
 `esc`, `tab`, `shift`, `ctrl`, `alt`, `up`, `down`, `left`, `right`, `F1`
-and so on. Join keys with `+` to press them together. Keys follow the US
-layout.
+and so on. Join keys with `+` to press them together. The mouse buttons are
+keys too: `mouse1` (left), `mouse2` (right) and `mouse3` (middle), as in
+`Hold mouse1 2`. Keys follow the US layout. Anything a macro presses is
+released when each round ends and when it stops.
 
 Switch the editor to **Text** to write or paste a macro as plain text, one
 step per line. A last line of `loop 25` means 25 rounds. Without a `loop`

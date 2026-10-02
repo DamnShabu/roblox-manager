@@ -17,6 +17,7 @@ use std::time::Instant;
 
 use super::keys;
 use super::player::Input;
+use super::wire::{DISPLAY, Framer, header, message, read_str, wire_str, word, words};
 
 /// Sent with the virtual keyboard. The compositor compiles it, so the
 /// includes resolve against its own xkeyboard-config.
@@ -28,14 +29,21 @@ const KEYMAP: &str = "xkb_keymap {
 };
 ";
 
-const DISPLAY: u32 = 1;
+/// A wheel notch, in the units a wheel's axis events carry (what libinput
+/// reports for one click).
+const WHEEL_STEP: i32 = 15;
 
 pub struct VirtualInput {
     sock: UnixStream,
-    buf: Vec<u8>,
+    framer: Framer,
     last_id: u32,
     keyboard: u32,
     pointer: u32,
+    /// The output's xdg-output, which says its size; 0 when the display
+    /// offers none.
+    xdg_output: u32,
+    /// The display's size in the pointer's units, as last told.
+    size: Option<(u32, u32)>,
     mods: BTreeSet<u16>,
     epoch: Instant,
 }
@@ -47,10 +55,12 @@ impl VirtualInput {
         let sock = UnixStream::connect(path)?;
         let mut vi = VirtualInput {
             sock,
-            buf: Vec::new(),
+            framer: Framer::default(),
             last_id: DISPLAY,
             keyboard: 0,
             pointer: 0,
+            xdg_output: 0,
+            size: None,
             mods: BTreeSet::new(),
             epoch: Instant::now(),
         };
@@ -80,6 +90,14 @@ impl VirtualInput {
         vi.pointer = vi.new_id();
         vi.send(keyboards, 0, &words(&[seat, vi.keyboard]))?; // create_virtual_keyboard
         vi.send(pointers, 0, &words(&[seat, vi.pointer]))?; // create_virtual_pointer
+        // Its size, so a point can be aimed at directly. Optional: without
+        // it, points are reached from the far corner.
+        if offered.contains_key("wl_output") && offered.contains_key("zxdg_output_manager_v1") {
+            let output = bind(&mut vi, "wl_output")?;
+            let outputs = bind(&mut vi, "zxdg_output_manager_v1")?;
+            vi.xdg_output = vi.new_id();
+            vi.send(outputs, 1, &words(&[vi.xdg_output, output]))?; // get_xdg_output
+        }
         vi.upload_keymap()?;
         vi.roundtrip()?; // a refusal shows up here, not mid-macro
         Ok(vi)
@@ -120,24 +138,21 @@ impl VirtualInput {
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => 0,
             Err(e) => return Err(e),
         };
-        self.buf.extend_from_slice(&data[..got]);
+        self.framer.push(&data[..got]);
         let mut events = Vec::new();
-        while self.buf.len() >= 8 {
-            let (obj, size_op) = (word(&self.buf, 0), word(&self.buf, 4));
-            let size = (size_op >> 16) as usize;
-            if size < 8 {
-                return Err(refused("its display sent a malformed message"));
-            }
-            if self.buf.len() < size {
-                break;
-            }
-            let body = self.buf[8..size].to_vec();
-            self.buf.drain(..size);
-            let op = (size_op & 0xffff) as u16;
+        let malformed = |_| refused("its display sent a malformed message");
+        while let Some(msg) = self.framer.next().map_err(malformed)? {
+            let (obj, op) = header(&msg);
+            let body = msg[8..].to_vec();
             if obj == DISPLAY && op == 0 {
                 // wl_display.error
                 let why = read_str(&body, 8).unwrap_or_default();
                 return Err(refused(&format!("its display refused input: {why}")));
+            }
+            if obj == self.xdg_output && obj != 0 && op == 1 {
+                // zxdg_output_v1.logical_size, also whenever it changes.
+                let (w, h) = (word(&body, 0), word(&body, 4));
+                self.size = (w > 0 && h > 0).then_some((w, h));
             }
             events.push((obj, op, body));
         }
@@ -198,6 +213,31 @@ impl Input for VirtualInput {
         self.send(self.pointer, 2, &words(&[time, u32::from(code), u32::from(down)]))?;
         self.send(self.pointer, 4, &[]) // frame
     }
+
+    /// Absolute, scaled by the display's size: one motion straight there,
+    /// which a game reads as the pointer moving that far, never a leap to a
+    /// corner and back.
+    fn move_to(&mut self, x: i32, y: i32) -> io::Result<()> {
+        let time = self.stamp()?;
+        let Some((w, h)) = self.size else {
+            // Relative motion only; the far corner is the origin, since the
+            // compositor clamps the pointer to its output.
+            self.motion(-100_000, -100_000)?;
+            return self.motion(x, y);
+        };
+        let held = |v: i32, most: u32| v.clamp(0, i32::try_from(most).unwrap_or(i32::MAX)) as u32;
+        self.send(self.pointer, 1, &words(&[time, held(x, w), held(y, h), w, h]))?; // motion_absolute
+        self.send(self.pointer, 4, &[]) // frame
+    }
+
+    fn scroll(&mut self, horizontal: bool, notches: i32) -> io::Result<()> {
+        let time = self.stamp()?;
+        let value = notches.saturating_mul(WHEEL_STEP * 256); // wl_fixed
+        self.send(self.pointer, 5, &words(&[0]))?; // axis_source: a wheel
+        let discrete = words(&[time, u32::from(horizontal), value as u32, notches as u32]);
+        self.send(self.pointer, 7, &discrete)?; // axis_discrete
+        self.send(self.pointer, 4, &[]) // frame
+    }
 }
 
 impl Drop for VirtualInput {
@@ -210,44 +250,10 @@ impl Drop for VirtualInput {
     }
 }
 
-/// One request: object, size and opcode, body.
-fn message(obj: u32, op: u16, body: &[u8]) -> Vec<u8> {
-    let mut msg = words(&[obj, ((8 + body.len() as u32) << 16) | u32::from(op)]);
-    msg.extend_from_slice(body);
-    msg
-}
-
 /// The display answered, but not as needed: an error of its own kind, never
 /// mistaken for a socket nobody listens on.
 fn refused(why: &str) -> io::Error {
     io::Error::other(why.to_owned())
-}
-
-/// Wire words: native-endian u32s.
-fn words(vals: &[u32]) -> Vec<u8> {
-    vals.iter().flat_map(|v| v.to_ne_bytes()).collect()
-}
-
-/// A wire string: length with its NUL, the bytes, NUL, padded to 4.
-fn wire_str(s: &str) -> Vec<u8> {
-    let mut out = words(&[s.len() as u32 + 1]);
-    out.extend_from_slice(s.as_bytes());
-    out.push(0);
-    while out.len() % 4 != 0 {
-        out.push(0);
-    }
-    out
-}
-
-/// The string at `off` in a message body.
-fn read_str(body: &[u8], off: usize) -> Option<String> {
-    let n = u32::from_ne_bytes(body.get(off..off + 4)?.try_into().ok()?) as usize;
-    let bytes = body.get(off + 4..off + 3 + n)?;
-    Some(String::from_utf8_lossy(bytes).into_owned())
-}
-
-fn word(body: &[u8], off: usize) -> u32 {
-    body.get(off..off + 4).and_then(|b| b.try_into().ok()).map_or(0, u32::from_ne_bytes)
 }
 
 #[cfg(test)]

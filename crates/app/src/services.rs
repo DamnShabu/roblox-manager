@@ -43,14 +43,19 @@ impl Services {
         let keyring = Arc::new(Keyring::new(secrets));
         let roblox = Arc::new(HttpRoblox::new(Arc::new(UreqTransport::default())));
         let runner: Arc<dyn Runner> = Arc::new(SystemRunner);
-        let profiles = Arc::new(CordialProfiles::new(
-            Arc::clone(&keyring),
-            &paths,
-            Arc::clone(&runner),
-            // Inside a Flatpak, clients an earlier launch started are the host's.
-            ProcessView::detect(),
-            Arc::new(std::thread::sleep),
-        ));
+        let profiles = Arc::new(
+            CordialProfiles::new(
+                Arc::clone(&keyring),
+                &paths,
+                Arc::clone(&runner),
+                // Inside a Flatpak, clients an earlier launch started are the host's.
+                ProcessView::detect(),
+                Arc::new(std::thread::sleep),
+            )
+            // Macro-ready clients run behind this very program, so they can be
+            // recorded; without a path to it they run straight in their cage.
+            .with_relay(std::env::current_exe().ok()),
+        );
         let build_runner = Arc::clone(&runner);
         let build: BuildFn = Arc::new(move |log| roblox_build(&*build_runner, log, false));
         let launcher = Arc::new(Launcher::new(

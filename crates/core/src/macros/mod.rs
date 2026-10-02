@@ -6,13 +6,19 @@
 //! A macro types into that display through the Wayland virtual-keyboard and
 //! virtual-pointer protocols: input the compositor emulates, delivered like
 //! any keyboard's.
+//!
+//! The client runs behind a [`relay`] there, which hears what its window
+//! receives -- told to nobody unless a [`recording`] is armed on it.
 
 pub mod grammar;
 pub mod keys;
 mod library;
 pub mod nested;
 pub mod player;
+pub mod recording;
+pub mod relay;
 pub mod wayland;
+pub(crate) mod wire;
 
 pub use grammar::{Macro, ParseError, Row, Step};
 pub use library::MacroLibrary;
@@ -37,4 +43,8 @@ pub enum MacroError {
     NotNested,
     #[error("its window went away ({0})")]
     WentAway(String),
+    /// Its client has no relay to record through: it was launched by an
+    /// earlier version, or without one.
+    #[error("its client was launched before it could record -- launch it again")]
+    NoRelay,
 }

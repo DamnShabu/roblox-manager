@@ -18,6 +18,16 @@ A macro-ready account's client runs inside its own nested `cage` display.
 Macros play into that display through Wayland's virtual keyboard and pointer,
 so the user's real input devices are never involved.
 
+The client itself runs behind a relay: the manager's own binary, started as
+`roblox-manager --relay DISPLAY_FILE -- cordial-run ...` inside the cage. It
+passes the client's Wayland connection through to cage unchanged and, only
+while the editor has a recording armed on its report socket
+(`<profile>.record`, beside the display link), reports the key, button,
+pointer and wheel events the window receives. F8 starts and stops that report
+and is kept from the game while a recording is armed
+(`crates/core/src/macros/relay/`, turned into steps by
+`crates/core/src/macros/recording.rs`).
+
 ## Layout
 
 A Rust workspace:

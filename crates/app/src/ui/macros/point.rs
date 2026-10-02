@@ -5,7 +5,7 @@
 //! keeps its size.
 
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
 
 use adw::prelude::*;
@@ -13,6 +13,7 @@ use gtk::{Align, gdk, glib};
 
 use rbxmgr_core::macros::grammar;
 
+use super::clients;
 use crate::ui::window::{WeakWindow, Window};
 
 /// A point picked, None when the pick was called off, or what went wrong.
@@ -62,44 +63,12 @@ pub fn button(window: &WeakWindow, value: &gtk::Entry, err: &gtk::Label) -> gtk:
 /// Pick a point in one of the running macro-ready clients: the only one, or
 /// the one chosen from a menu under `anchor`.
 fn choose(w: &Window, anchor: &gtk::Button, done: impl FnOnce(Picked) + 'static) {
-    let clients = w.macro_ready_clients();
-    match clients.as_slice() {
-        [] => done(Err("Launch an account with Macro-ready window on, then pick the point \
-                        in its window"
-            .into())),
-        [(_, display)] => pick(display, done),
-        _ => menu(anchor, clients, done),
-    }
-}
-
-fn menu(
-    anchor: &gtk::Button,
-    clients: Vec<(String, PathBuf)>,
-    done: impl FnOnce(Picked) + 'static,
-) {
-    let done = once(done);
-    let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let popover = gtk::Popover::builder().child(&list).build();
-    popover.set_parent(anchor);
-    for (label, display) in clients {
-        let b = gtk::Button::builder().label(&label).css_classes(["flat"]).build();
-        let (done, pop) = (done.clone(), popover.downgrade());
-        b.connect_clicked(move |_| {
-            if let Some(p) = pop.upgrade() {
-                p.popdown();
-            }
-            if let Some(f) = done.borrow_mut().take() {
-                pick(&display, f);
-            }
-        });
-        list.append(&b);
-    }
-    popover.connect_closed(|p| {
-        // Unparented once its click has been handled.
-        let p = p.clone();
-        glib::idle_add_local_once(move || p.unparent());
+    const NONE_UP: &str =
+        "Launch an account with Macro-ready window on, then pick the point in its window";
+    clients::choose(w, anchor, NONE_UP, move |chosen| match chosen {
+        Ok(client) => pick(&client.display, done),
+        Err(e) => done(Err(e)),
     });
-    popover.popup();
 }
 
 /// The overlay, over the client in the display linked at `display`. A

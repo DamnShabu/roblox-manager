@@ -8,6 +8,14 @@ use rbxmgr_core::types::{Profile, UserId};
 
 use super::Window;
 use crate::ui::accounts::leader::placeholder;
+
+/// A client up in a macro-ready window: whose it is, and where its display
+/// is linked.
+pub struct ReadyClient {
+    pub id: UserId,
+    pub label: String,
+    pub display: PathBuf,
+}
 use crate::ui::macros::card::macro_card;
 use crate::ui::widgets::{boxed_list, clear, hotkey_label};
 use crate::worker;
@@ -187,18 +195,28 @@ impl Window {
         self.log(&format!("Deleted {name}"));
     }
 
-    /// The clients up in a macro-ready window, as (label, display link): the
-    /// ones a macro's point can be picked in.
-    pub fn macro_ready_clients(&self) -> Vec<(String, PathBuf)> {
+    /// The clients up in a macro-ready window: the ones a macro's point can
+    /// be picked in, or steps recorded from.
+    pub fn macro_ready_clients(&self) -> Vec<ReadyClient> {
         let s = self.state();
         let runtime = self.services().paths.runtime_dir();
         s.accounts
             .accounts()
             .iter()
             .filter(|a| s.running.contains(&a.user_id))
-            .map(|a| (a.name.to_string(), nested::display_file(runtime, &Profile::of(a.user_id))))
-            .filter(|(_, display)| display.exists())
+            .map(|a| ReadyClient {
+                id: a.user_id,
+                label: a.name.to_string(),
+                display: nested::display_file(runtime, &Profile::of(a.user_id)),
+            })
+            .filter(|c| c.display.exists())
             .collect()
+    }
+
+    /// The account a recording hears, while one is armed or under way: no
+    /// macro plays into it meanwhile, or the recording would hear that too.
+    pub fn set_recording(&self, id: Option<UserId>) {
+        self.state_mut().recording = id;
     }
 
     /// Play `name` into the account's macro-ready client, on a thread.
@@ -209,6 +227,10 @@ impl Window {
             if !s.macros.enabled(name) {
                 drop(s);
                 return self.toast(&format!("{name} is switched off"));
+            }
+            if s.recording == Some(id) {
+                drop(s);
+                return self.toast(&format!("{label} is being recorded: stop that first"));
             }
             match s.macros.text(name) {
                 Some(t) => (label, t.to_owned()),

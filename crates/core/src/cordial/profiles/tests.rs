@@ -145,6 +145,28 @@ fn a_macro_ready_client_runs_in_a_cage_linked_where_macros_look() {
 }
 
 #[test]
+fn a_macro_ready_client_with_a_relay_runs_behind_it_inside_its_cage() {
+    let w = world();
+    let profiles = w.profiles.with_relay(Some(PathBuf::from("/app/libexec/roblox-manager")));
+    let p = Profile::named("rbxmgr-7");
+    profiles.launch(&p, None, &build(), ClientOpts { nested: true, low_power: false }).unwrap();
+    let (argv, _) = &w.runner.spawned()[0];
+    let link = nested::display_file(&w.dir.path().join("run"), &p).display().to_string();
+    assert_eq!(&argv[..2], ["cage", "--"]);
+    assert_eq!(argv[5], link, "the display link, as the script's $0");
+    assert_eq!(argv[6..11], ["/app/libexec/roblox-manager", "--relay", &link, "--", "cordial-run"]);
+}
+
+#[test]
+fn a_client_in_a_normal_window_never_runs_behind_a_relay() {
+    let w = world();
+    let profiles = w.profiles.with_relay(Some(PathBuf::from("/app/libexec/roblox-manager")));
+    let p = Profile::named("rbxmgr-7");
+    profiles.launch(&p, None, &build(), ClientOpts::default()).unwrap();
+    assert_eq!(w.runner.spawned()[0].0[0], "cordial-run");
+}
+
+#[test]
 fn a_client_that_dies_at_once_is_a_failure_that_says_why() {
     let runner = Recording::default();
     *runner.child_exit.lock().unwrap() = Some(1);

@@ -15,7 +15,7 @@ use super::build::Build;
 use super::process::{ProcessView, Runner, last_line};
 use super::{CordialError, clients, engine, session};
 use crate::keyring::{Attrs, Keyring};
-use crate::macros::nested;
+use crate::macros::{nested, relay};
 use crate::paths::Paths;
 use crate::types::{Cookie, Profile, User, UserId};
 
@@ -44,6 +44,8 @@ pub struct CordialProfiles {
     /// Where pgrep and kill see the clients.
     view: ProcessView,
     sleep: Arc<dyn Fn(Duration) + Send + Sync>,
+    /// The program a macro-ready client runs behind, so it can be recorded.
+    relay: Option<PathBuf>,
 }
 
 impl CordialProfiles {
@@ -54,7 +56,14 @@ impl CordialProfiles {
         view: ProcessView,
         sleep: Arc<dyn Fn(Duration) + Send + Sync>,
     ) -> Self {
-        CordialProfiles { keyring, paths: paths.clone(), runner, view, sleep }
+        CordialProfiles { keyring, paths: paths.clone(), runner, view, sleep, relay: None }
+    }
+
+    /// Run macro-ready clients behind `relay` (the app itself), where a
+    /// recording can hear their windows. None runs them straight in cage.
+    pub fn with_relay(mut self, relay: Option<PathBuf>) -> Self {
+        self.relay = relay;
+        self
     }
 
     pub fn path(&self, profile: &Profile) -> PathBuf {
@@ -141,8 +150,11 @@ impl CordialProfiles {
             argv.splice(0..0, ["nice", "-n", "10"].map(String::from));
         }
         if opts.nested {
-            argv =
-                nested::cage_argv(&nested::display_file(self.paths.runtime_dir(), profile), &argv);
+            let display = nested::display_file(self.paths.runtime_dir(), profile);
+            if let Some(relay) = &self.relay {
+                argv = relay::argv(relay, &display, &argv);
+            }
+            argv = nested::cage_argv(&display, &argv);
         }
         let mut child = self.runner.spawn(&argv, log, &env)?;
         (self.sleep)(STARTUP_CHECK);
