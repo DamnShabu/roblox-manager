@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Map, Value};
@@ -46,6 +46,9 @@ pub struct CordialProfiles {
     sleep: Arc<dyn Fn(Duration) + Send + Sync>,
     /// The program a macro-ready client runs behind, so it can be recorded.
     relay: Option<PathBuf>,
+    /// The lock that keeps cages off the display they open on, held from the
+    /// first macro-ready launch on. See [`nested::hold_parent_display`].
+    parent_display: Mutex<Option<File>>,
 }
 
 impl CordialProfiles {
@@ -56,7 +59,15 @@ impl CordialProfiles {
         view: ProcessView,
         sleep: Arc<dyn Fn(Duration) + Send + Sync>,
     ) -> Self {
-        CordialProfiles { keyring, paths: paths.clone(), runner, view, sleep, relay: None }
+        CordialProfiles {
+            keyring,
+            paths: paths.clone(),
+            runner,
+            view,
+            sleep,
+            relay: None,
+            parent_display: Mutex::default(),
+        }
     }
 
     /// Run macro-ready clients behind `relay` (the app itself), where a
@@ -150,6 +161,7 @@ impl CordialProfiles {
             argv.splice(0..0, ["nice", "-n", "10"].map(String::from));
         }
         if opts.nested {
+            self.hold_parent_display()?;
             let display = nested::display_file(self.paths.runtime_dir(), profile);
             if let Some(relay) = &self.relay {
                 argv = relay::argv(relay, &display, &argv);
@@ -168,6 +180,21 @@ impl CordialProfiles {
                 })
             }
         }
+    }
+
+    /// Lock the display cages open on before one starts, unless it already
+    /// is.
+    fn hold_parent_display(&self) -> Result<(), CordialError> {
+        let mut held = self
+            .parent_display
+            .lock()
+            .map_err(|_| CordialError::Process("the display lock was poisoned".into()))?;
+        if held.is_none() {
+            let (dir, display) = (self.paths.runtime_dir(), self.paths.wayland_display());
+            *held = nested::hold_parent_display(dir, display)
+                .map_err(|e| io("could not lock the Wayland display", e))?;
+        }
+        Ok(())
     }
 
     /// The profile's log path, the previous launch's moved to `.log.1`.

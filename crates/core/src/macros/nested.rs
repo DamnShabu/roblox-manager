@@ -1,9 +1,45 @@
 //! The nested display a macro-ready client runs in: where it is linked, and
 //! the command that runs a client inside it. One rule for both.
 
+use std::fs::{File, OpenOptions};
+use std::io;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+use rustix::fs::{FlockOperation, flock};
+use rustix::io::Errno;
+
 use crate::types::Profile;
+
+/// Keep cages off the display they open their windows on. Each cage names
+/// its own display after the first `wayland-N` whose `.lock` it can take,
+/// and treats an unlocked socket there as stale: it deletes it and binds its
+/// own. Inside a Flatpak the compositor's socket comes without its lock, so
+/// the second cage would take the compositor's name, and every cage after it
+/// would open inside that one. A shared lock on that name, held for as long
+/// as the returned file lives, keeps every cage off it.
+///
+/// None when there is nothing to hold: no Wayland display, or one given by
+/// path, or one whose compositor holds its lock itself (a native install).
+pub fn hold_parent_display(
+    runtime_dir: &Path,
+    wayland_display: Option<&str>,
+) -> io::Result<Option<File>> {
+    let Some(name) = wayland_display.filter(|d| !d.is_empty() && !d.contains('/')) else {
+        return Ok(None);
+    };
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o640)
+        .open(runtime_dir.join(format!("{name}.lock")))?;
+    match flock(&lock, FlockOperation::NonBlockingLockShared) {
+        Ok(()) => Ok(Some(lock)),
+        Err(Errno::WOULDBLOCK) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
 
 /// Where a macro-ready client's display is linked while it runs, under the
 /// user's runtime directory -- for the link (`cage_argv`) and for macros alike.
@@ -36,6 +72,35 @@ mod tests {
             display_file(Path::new("/run/user/1000"), &Profile::named("rbxmgr-7")),
             PathBuf::from("/run/user/1000/rbxmgr/rbxmgr-7.wayland")
         );
+    }
+
+    #[test]
+    fn a_held_parent_display_cannot_be_taken_by_a_cage() {
+        let dir = tempfile::tempdir().unwrap();
+        let held = hold_parent_display(dir.path(), Some("wayland-1")).unwrap().unwrap();
+        // What a cage tries: the name's lock, exclusively, without waiting.
+        let cage = File::open(dir.path().join("wayland-1.lock")).unwrap();
+        assert_eq!(flock(&cage, FlockOperation::NonBlockingLockExclusive), Err(Errno::WOULDBLOCK));
+        // Another manager can hold it alongside.
+        assert!(hold_parent_display(dir.path(), Some("wayland-1")).unwrap().is_some());
+        drop(held);
+    }
+
+    #[test]
+    fn a_parent_display_its_compositor_locks_is_left_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let compositor = File::create(dir.path().join("wayland-1.lock")).unwrap();
+        flock(&compositor, FlockOperation::NonBlockingLockExclusive).unwrap();
+        assert!(hold_parent_display(dir.path(), Some("wayland-1")).unwrap().is_none());
+    }
+
+    #[test]
+    fn no_display_or_one_given_by_path_has_nothing_to_hold() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(hold_parent_display(dir.path(), None).unwrap().is_none());
+        assert!(hold_parent_display(dir.path(), Some("")).unwrap().is_none());
+        assert!(hold_parent_display(dir.path(), Some("/run/w/wayland-0")).unwrap().is_none());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
     #[test]

@@ -12,6 +12,8 @@ pub struct Paths {
     cache_home: PathBuf,
     state_home: PathBuf,
     runtime_dir: PathBuf,
+    /// WAYLAND_DISPLAY: the display the manager, and every cage, opens on.
+    wayland_display: Option<String>,
     /// XDG_DATA_DIRS: where installed applications' desktop entries are.
     data_dirs: Vec<PathBuf>,
 }
@@ -34,6 +36,7 @@ impl Paths {
             state_home: var("XDG_STATE_HOME").unwrap_or_else(|| home.join(".local/state")),
             runtime_dir: var("XDG_RUNTIME_DIR")
                 .unwrap_or_else(|| PathBuf::from(format!("/run/user/{uid}"))),
+            wayland_display: get("WAYLAND_DISPLAY").filter(|v| !v.is_empty()),
             data_dirs: get("XDG_DATA_DIRS")
                 .filter(|v| !v.is_empty())
                 .unwrap_or_else(|| "/usr/local/share:/usr/share".to_owned())
@@ -54,6 +57,7 @@ impl Paths {
             cache_home: root.join("cache"),
             state_home: root.join("state"),
             runtime_dir: root.join("run"),
+            wayland_display: None,
             data_dirs: vec![root.join("system")],
         }
     }
@@ -141,6 +145,11 @@ impl Paths {
 
     pub fn runtime_dir(&self) -> &Path {
         &self.runtime_dir
+    }
+
+    /// A name in the runtime directory, or a path; None when unset.
+    pub fn wayland_display(&self) -> Option<&str> {
+        self.wayland_display.as_deref()
     }
 }
 

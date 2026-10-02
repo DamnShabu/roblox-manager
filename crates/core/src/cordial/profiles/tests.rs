@@ -145,6 +145,33 @@ fn a_macro_ready_client_runs_in_a_cage_linked_where_macros_look() {
 }
 
 #[test]
+fn a_macro_ready_launch_keeps_cages_off_the_display_they_open_on() {
+    use rustix::fs::{FlockOperation, flock};
+    let dir = tempfile::tempdir().unwrap();
+    let run = dir.path().to_str().unwrap().to_owned();
+    let paths = Paths::from_vars(
+        |k| match k {
+            "HOME" | "XDG_RUNTIME_DIR" => Some(run.clone()),
+            "WAYLAND_DISPLAY" => Some("wayland-1".into()),
+            _ => None,
+        },
+        1000,
+    );
+    let profiles = CordialProfiles::new(
+        Arc::new(Keyring::new(Box::new(MemorySecrets::default()))),
+        &paths,
+        Arc::new(Recording::default()),
+        ProcessView::Own,
+        Arc::new(|_| {}),
+    );
+    let p = Profile::named("rbxmgr-7");
+    profiles.launch(&p, None, &build(), ClientOpts { nested: true, low_power: false }).unwrap();
+    // What a cage does to pick its own display name.
+    let lock = File::open(dir.path().join("wayland-1.lock")).unwrap();
+    assert!(flock(&lock, FlockOperation::NonBlockingLockExclusive).is_err());
+}
+
+#[test]
 fn a_macro_ready_client_with_a_relay_runs_behind_it_inside_its_cage() {
     let w = world();
     let profiles = w.profiles.with_relay(Some(PathBuf::from("/app/libexec/roblox-manager")));
