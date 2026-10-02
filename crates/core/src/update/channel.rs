@@ -68,27 +68,32 @@ impl FlatpakInstallation {
 
 /// The program that installs a downloaded Flatpak bundle on the host, in
 /// `installation`.
+///
+/// A system installation goes through pkexec, which has the desktop's polkit
+/// agent ask for the password. Flatpak cannot be let to ask itself: with no
+/// terminal it answers its own "Proceed?" with no, and `--assumeyes` (like
+/// `--noninteractive`) tells its system helper that polkit must not ask --
+/// so the install is refused without a prompt. Run as root, flatpak writes
+/// the system installation itself and asks nobody.
 pub fn flatpak_install(installation: FlatpakInstallation, bundle: &Path) -> Vec<String> {
-    [
-        "flatpak-spawn",
-        "--host",
-        "flatpak",
-        "install",
-        match installation {
-            FlatpakInstallation::User => "--user",
-            FlatpakInstallation::System => "--system",
-        },
-        // Not `--noninteractive`: that also stops polkit from asking for the
-        // password a system installation needs, and the install is refused.
-        "--assumeyes",
-        "--reinstall",
-        "--bundle",
-    ]
-    .into_iter()
-    .map(String::from)
-    .chain([bundle.display().to_string()])
-    .collect()
+    let (elevate, which): (&[&str], _) = match installation {
+        FlatpakInstallation::User => (&[], "--user"),
+        FlatpakInstallation::System => (&[PKEXEC], "--system"),
+    };
+    ["flatpak-spawn", "--host"]
+        .iter()
+        .chain(elevate)
+        .chain(&["flatpak", "install", which, "--assumeyes", "--reinstall", "--bundle"])
+        .map(|s| (*s).to_owned())
+        .chain([bundle.display().to_string()])
+        .collect()
 }
+
+pub const PKEXEC: &str = "pkexec";
+
+/// pkexec's exit status when the password prompt was dismissed, or the
+/// password refused.
+pub const PKEXEC_NOT_AUTHORIZED: i32 = 126;
 
 /// One way to start the app again: a program and the variables it adds.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -148,10 +153,25 @@ mod tests {
         assert_eq!(FlatpakInstallation::of(user), FlatpakInstallation::User);
         assert_eq!(FlatpakInstallation::of(system), FlatpakInstallation::System);
         let bundle = Path::new("/c/b.flatpak");
-        assert_eq!(flatpak_install(FlatpakInstallation::User, bundle)[4], "--user");
+        assert_eq!(
+            flatpak_install(FlatpakInstallation::User, bundle),
+            [
+                "flatpak-spawn",
+                "--host",
+                "flatpak",
+                "install",
+                "--user",
+                "--assumeyes",
+                "--reinstall",
+                "--bundle",
+                "/c/b.flatpak"
+            ]
+        );
         let argv = flatpak_install(FlatpakInstallation::System, bundle);
-        assert_eq!(argv[4], "--system");
-        assert!(!argv.iter().any(|a| a == "--noninteractive"), "polkit must be able to ask");
+        assert_eq!(
+            argv[..6],
+            ["flatpak-spawn", "--host", "pkexec", "flatpak", "install", "--system"]
+        );
         assert_eq!(argv.last().unwrap(), "/c/b.flatpak");
     }
 

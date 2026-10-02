@@ -77,8 +77,18 @@ fn sandbox(sha256sum_says: &str) -> Sandbox {
 
 impl Sandbox {
     fn install(&self, install: &Install, releases: &FakeReleases) -> Result<(), UpdateError> {
+        self.install_from(install, releases, "/home/u/.local/share/flatpak/app/x")
+    }
+
+    /// [`Sandbox::install`] as a Flatpak whose app is at `app_path`.
+    fn install_from(
+        &self,
+        install: &Install,
+        releases: &FakeReleases,
+        app_path: &str,
+    ) -> Result<(), UpdateError> {
         let info = self.dir.path().join("flatpak-info");
-        fs::write(&info, "[Instance]\napp-path=/home/u/.local/share/flatpak/app/x\n").unwrap();
+        fs::write(&info, format!("[Instance]\napp-path={app_path}\n")).unwrap();
         let update = SelfUpdate {
             releases,
             runner: &self.runner,
@@ -188,6 +198,29 @@ fn a_flatpak_installs_its_bundle_on_the_host() {
     s.install(&Install::Flatpak, &FakeReleases::listing(&[&name])).unwrap();
     let flatpak = &s.runner.ran()[1];
     assert_eq!(flatpak[..5], ["flatpak-spawn", "--host", "flatpak", "install", "--user"]);
+}
+
+#[test]
+fn a_system_flatpak_asks_for_the_password_through_pkexec() {
+    if !x86_64() {
+        return;
+    }
+    let name = format!("roblox-manager-{NEW}-x86_64.flatpak");
+    let system = "/var/lib/flatpak/app/x";
+    let s = sandbox(SUM);
+    s.install_from(&Install::Flatpak, &FakeReleases::listing(&[&name]), system).unwrap();
+    assert_eq!(s.runner.ran()[1][..4], ["flatpak-spawn", "--host", "pkexec", "flatpak"]);
+
+    let mut dismissed = sandbox(SUM);
+    dismissed.runner = Recording::default().answer(0, &format!("{SUM}  file\n"), "").answer(
+        126,
+        "",
+        "Error executing command as another user: Request dismissed",
+    );
+    let err = dismissed
+        .install_from(&Install::Flatpak, &FakeReleases::listing(&[&name]), system)
+        .unwrap_err();
+    assert!(err.to_string().contains("password prompt was closed"), "{err}");
 }
 
 #[test]

@@ -157,12 +157,20 @@ impl SelfUpdate<'_> {
                 if out.success() {
                     return Ok(());
                 }
+                let system = installation == FlatpakInstallation::System;
+                if system && out.status == channel::PKEXEC_NOT_AUTHORIZED {
+                    return Err(UpdateError::Install(
+                        "the password prompt was closed or the password refused -- Update again \
+                         to retry"
+                            .into(),
+                    ));
+                }
                 let why = crate::cordial::process::last_line(&out.stderr);
-                let hint = match installation {
-                    FlatpakInstallation::System => {
-                        " (a system-wide install needs an administrator's password)"
-                    }
-                    FlatpakInstallation::User => "",
+                let hint = if system {
+                    " (a system-wide install needs an administrator's password, asked for by \
+                     pkexec through your desktop's polkit agent)"
+                } else {
+                    ""
                 };
                 Err(UpdateError::Install(format!("flatpak could not install it: {why}{hint}")))
             }
