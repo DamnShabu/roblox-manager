@@ -98,8 +98,10 @@ modules:
       - /lib/pkgconfig
     sources:
       - type: git
-        url: https://git.sr.ht/~kennylevinsen/seatd
+        # The author's GitHub mirror: git.sr.ht is often unreachable from CI.
+        url: https://github.com/kennylevinsen/seatd
         tag: 0.9.1
+        commit: 566ffeb032af42865dc1210e48cec08368059bb9
 
   - name: wlroots
     buildsystem: meson
