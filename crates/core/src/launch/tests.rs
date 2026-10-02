@@ -1,5 +1,5 @@
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
 
 use super::*;
 use crate::cordial::process::recording::Recording;
@@ -68,8 +68,39 @@ struct World {
     slept: Arc<Mutex<Vec<Duration>>>,
     /// Set during the nth wait (from 1), as a Stop pressed then would be.
     stop_at_wait: Arc<Mutex<Option<(usize, StopFlag)>>>,
+    /// Clients in their first seconds at once, as each client's startup
+    /// check sees it.
+    starting: Arc<Starting>,
     logs: Mutex<Vec<String>>,
     launcher: Launcher,
+}
+
+/// How many clients are in their startup check, and the most there were at
+/// once. Each check waits (briefly) for `expect` to be there with it, so
+/// clients started one after another never overlap and ones started together
+/// always do.
+#[derive(Default)]
+struct Starting {
+    now: Mutex<(usize, usize)>,
+    changed: Condvar,
+    expect: Mutex<usize>,
+}
+
+impl Starting {
+    fn check(&self) {
+        let expect = *self.expect.lock().unwrap();
+        let mut now = self.now.lock().unwrap();
+        now.0 += 1;
+        now.1 = now.1.max(now.0);
+        self.changed.notify_all();
+        let (mut now, _) =
+            self.changed.wait_timeout_while(now, Duration::from_secs(2), |n| n.1 < expect).unwrap();
+        now.0 -= 1;
+    }
+
+    fn most_at_once(&self) -> usize {
+        self.now.lock().unwrap().1
+    }
 }
 
 /// Accounts 1..=n, labelled a1..an, whose cookies are `u<id>` -- except the
@@ -89,19 +120,20 @@ fn world(n: u64, sessions: &[(&str, &str)], running: &[u64]) -> World {
     let pgrep: String =
         running.iter().map(|id| format!("{id}0 cordial-run --profile rbxmgr-{id}\n")).collect();
     *runner.pgrep.lock().unwrap() = Some(pgrep);
+    let starting = Arc::new(Starting::default());
+    let checks = Arc::clone(&starting);
     let profiles = Arc::new(CordialProfiles::new(
         Arc::clone(&keyring),
         &Paths::under(dir.path()),
         runner.clone(),
         crate::cordial::ProcessView::Own,
-        Arc::new(|_| {}),
+        Arc::new(move |_| checks.check()),
     ));
     let roblox = Arc::new(FakeRoblox::default());
     let slept = Arc::new(Mutex::new(Vec::new()));
     let stop_at_wait: Arc<Mutex<Option<(usize, StopFlag)>>> = Arc::default();
     let (slept2, stop2) = (Arc::clone(&slept), Arc::clone(&stop_at_wait));
     let pacing = Pacing {
-        stagger: Duration::from_secs(8),
         leader_timeout: Duration::from_secs(9),
         poll: Duration::from_secs(3),
         sleep: Arc::new(move |d| {
@@ -116,7 +148,16 @@ fn world(n: u64, sessions: &[(&str, &str)], running: &[u64]) -> World {
     };
     let build: BuildFn = Arc::new(|_log| Ok(Build { engine: "/l".into(), apk: "/a".into() }));
     let launcher = Launcher::new(keyring, roblox.clone(), profiles, build, pacing);
-    World { _dir: dir, roblox, runner, slept, stop_at_wait, logs: Mutex::new(Vec::new()), launcher }
+    World {
+        _dir: dir,
+        roblox,
+        runner,
+        slept,
+        stop_at_wait,
+        starting,
+        logs: Mutex::new(Vec::new()),
+        launcher,
+    }
 }
 
 fn account(id: u64) -> LaunchAccount {
@@ -160,10 +201,6 @@ impl World {
         *self.stop_at_wait.lock().unwrap() = Some((n, req.stop.clone()));
     }
 
-    fn staggers(&self) -> usize {
-        self.slept.lock().unwrap().iter().filter(|d| **d == Duration::from_secs(8)).count()
-    }
-
     fn logged(&self, needle: &str) -> bool {
         self.logs.lock().unwrap().iter().any(|l| l.contains(needle))
     }
@@ -185,8 +222,8 @@ fn each_mode_launches_every_account_into_the_place() {
     let w = world(3, &[], &[]);
     let r = w.launch(request(&[1, 2, 3], Mode::Each, Some("77"), None));
     assert_eq!(launched(&r), [1, 2, 3]);
-    assert_eq!(w.started()[2], ("rbxmgr-3".into(), link("77", None)));
-    assert_eq!(w.staggers(), 2, "no wait before the first sign-in");
+    assert!(w.started().contains(&("rbxmgr-3".into(), link("77", None))));
+    assert!(w.slept.lock().unwrap().is_empty(), "nobody waits for anybody");
 }
 
 #[test]
@@ -208,7 +245,6 @@ fn an_account_already_running_is_skipped_and_costs_no_wait() {
     let w = world(3, &[], &[2]);
     let r = w.launch(request(&[1, 2, 3], Mode::Each, Some("77"), None));
     assert_eq!(launched(&r), [1, 3]);
-    assert_eq!(w.staggers(), 1);
     assert!(w.logged("a2: already running -- skipping launch"));
 }
 
@@ -322,18 +358,6 @@ fn a_session_that_is_another_user_starts_nobodys_client() {
 }
 
 #[test]
-fn a_stopped_launch_starts_nobody_after_the_stop() {
-    let w = world(3, &[], &[]);
-    let req = request(&[1, 2, 3], Mode::Each, Some("77"), None);
-    w.stop_at_wait(1, &req);
-    let r = w.launch(req);
-    assert_eq!(launched(&r), [1], "stopped during the wait before the second");
-    assert_eq!(r.cancelled, [UserId(2), UserId(3)]);
-    assert_eq!(w.started().len(), 1);
-    assert!(w.logged("Launch stopped -- a2, a3 not started"));
-}
-
-#[test]
 fn a_launch_stopped_before_it_began_starts_nobody() {
     for mode in [Mode::Each, Mode::Group] {
         let w = world(2, &[], &[]);
@@ -356,4 +380,28 @@ fn a_group_stopped_while_it_waits_for_the_leaders_server_sends_nobody_after_it()
     assert_eq!(r.cancelled, [UserId(2), UserId(3)]);
     assert_eq!(*w.roblox.presence_asks.lock().unwrap(), 0, "no poll after the stop");
     assert!(!w.logged("followers get their own"));
+}
+
+#[test]
+fn every_account_starts_at_the_same_time() {
+    let w = world(3, &[], &[]);
+    *w.starting.expect.lock().unwrap() = 3;
+    let r = w.launch(request(&[1, 2, 3], Mode::Each, Some("77"), None));
+    assert_eq!(launched(&r), [1, 2, 3], "reported in the order asked");
+    assert_eq!(w.starting.most_at_once(), 3);
+}
+
+#[test]
+fn a_groups_followers_join_the_leader_together() {
+    let w = world(3, &[], &[]);
+    w.roblox
+        .presences
+        .lock()
+        .unwrap()
+        .push_back(Ok(Presence { server: Some(ServerId::parse("s-1").unwrap()), place: None }));
+    *w.starting.expect.lock().unwrap() = 2;
+    let r = w.launch(request(&[1, 2, 3], Mode::Group, Some("77"), None));
+    assert_eq!(launched(&r), [1, 2, 3]);
+    assert_eq!(w.starting.most_at_once(), 2, "the leader alone, then both followers");
+    assert!(w.logged("a3: launched into s-1"));
 }

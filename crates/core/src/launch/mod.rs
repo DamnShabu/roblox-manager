@@ -1,9 +1,9 @@
 //! Launching accounts: each into the target, or as a group behind a leader.
 //! Per account the stored session is checked with Roblox, the account's
 //! Cordial profile is given that session, and its client is started --
-//! skipping one already running, and spacing sign-ins, since several
-//! accounts signing in from one IP in the same second is what gets Roblox to
-//! start refusing.
+//! skipping one already running. Every account a launch can start at once
+//! starts at once: all of them, or a group's followers once the leader's
+//! server is known.
 
 mod each;
 mod group;
@@ -17,13 +17,11 @@ use crate::cordial::{Build, ClientOpts, CordialError, CordialProfiles};
 use crate::keyring::Keyring;
 use crate::roblox::{Presence, Roblox, RobloxError, join_url};
 use crate::stop::StopFlag;
-use crate::types::{Label, PlaceId, Profile, ServerId, User, UserId};
+use crate::types::{Cookie, Label, PlaceId, Profile, ServerId, User, UserId};
 
-/// How launches are spaced and how long a leader's server is waited for.
+/// How long a leader's server is waited for.
 #[derive(Clone)]
 pub struct Pacing {
-    /// Between two sign-ins.
-    pub stagger: Duration,
     /// How long to wait for the leader's server to show in presence.
     pub leader_timeout: Duration,
     /// How often to ask.
@@ -34,7 +32,6 @@ pub struct Pacing {
 impl Default for Pacing {
     fn default() -> Self {
         Pacing {
-            stagger: Duration::from_secs(8),
             leader_timeout: Duration::from_secs(90),
             poll: Duration::from_secs(3),
             sleep: Arc::new(thread::sleep),
@@ -141,6 +138,34 @@ impl Launcher {
         }
         Ok(run.report.into_inner())
     }
+
+    /// Check `cookie` with Roblox, give the account's profile that session
+    /// and start its client. Safe to run for several accounts at once.
+    fn sign_in_and_start(
+        &self,
+        a: &LaunchAccount,
+        cookie: &Cookie,
+        url: Option<&str>,
+        build: &Build,
+    ) -> Result<User, SignIn> {
+        let failed = |e: &dyn std::fmt::Display| SignIn::Failed(e.to_string());
+        let user = self.roblox.whoami(cookie).map_err(|e| match e {
+            RobloxError::Expired => SignIn::Expired(e.to_string()),
+            other => failed(&other),
+        })?;
+        // The profile is named by the user the session really is. A cookie
+        // filed under this account that belongs to someone else would start
+        // that someone's profile, under this account's row.
+        if user.id != a.id {
+            return Err(SignIn::Failed(format!(
+                "its stored session belongs to {} (user {}), not this account -- sign in again",
+                user.name, user.id
+            )));
+        }
+        let profile = self.profiles.seed(&user, cookie).map_err(|e| failed(&e))?;
+        self.profiles.launch(&profile, url, build, a.opts).map_err(|e| failed(&e))?;
+        Ok(user)
+    }
 }
 
 /// One launch in progress: what `each` and `group` drive, and where the
@@ -205,7 +230,54 @@ impl Run<'_> {
     /// Sign the account in and start its client, recording the outcome. The
     /// caller logs a failure, whose reason is returned.
     fn start(&self, a: &LaunchAccount, url: Option<String>) -> Result<(), String> {
-        match self.sign_in_and_start(a, url.as_deref()) {
+        let started = match self.launcher.keyring.cookie(&a.label) {
+            Ok(cookie) => self.launcher.sign_in_and_start(a, &cookie, url.as_deref(), &self.build),
+            Err(e) => Err(SignIn::Failed(e.to_string())),
+        };
+        self.record(a, started)
+    }
+
+    /// [`Run::start`] for every account in `accounts` at the same time, each
+    /// logged as `launched` once up. Their sessions are read from the keyring
+    /// first, one after another, so a locked keyring asks for its password
+    /// once rather than once per account.
+    fn start_all(&self, accounts: &[LaunchAccount], url: Option<&str>, launched: &str) {
+        let mut ready = Vec::new();
+        for a in accounts {
+            match self.launcher.keyring.cookie(&a.label) {
+                Ok(cookie) => ready.push((a, cookie)),
+                Err(e) => {
+                    self.fail(a, e.to_string());
+                    self.log(format!("{}: FAILED -- {e}", a.label));
+                }
+            }
+        }
+        let (launcher, build) = (self.launcher, &self.build);
+        let outcomes: Vec<Result<User, SignIn>> = thread::scope(|s| {
+            let starting: Vec<_> = ready
+                .iter()
+                .map(|(a, cookie)| {
+                    s.spawn(move || launcher.sign_in_and_start(a, cookie, url, build))
+                })
+                .collect();
+            starting
+                .into_iter()
+                .map(|t| {
+                    t.join().unwrap_or_else(|_| Err(SignIn::Failed("its launch crashed".into())))
+                })
+                .collect()
+        });
+        for ((a, _), outcome) in ready.iter().zip(outcomes) {
+            match self.record(a, outcome) {
+                Ok(()) => self.log(format!("{}: {launched}", a.label)),
+                Err(why) => self.log(format!("{}: FAILED -- {why}", a.label)),
+            }
+        }
+    }
+
+    /// Note how starting the account went. A failure's reason is returned.
+    fn record(&self, a: &LaunchAccount, started: Result<User, SignIn>) -> Result<(), String> {
+        match started {
             Ok(user) => {
                 self.report.borrow_mut().launched.push((a.id, user));
                 Ok(())
@@ -219,28 +291,6 @@ impl Run<'_> {
                 Err(why)
             }
         }
-    }
-
-    fn sign_in_and_start(&self, a: &LaunchAccount, url: Option<&str>) -> Result<User, SignIn> {
-        let l = self.launcher;
-        let failed = |e: &dyn std::fmt::Display| SignIn::Failed(e.to_string());
-        let cookie = l.keyring.cookie(&a.label).map_err(|e| failed(&e))?;
-        let user = l.roblox.whoami(&cookie).map_err(|e| match e {
-            RobloxError::Expired => SignIn::Expired(e.to_string()),
-            other => failed(&other),
-        })?;
-        // The profile is named by the user the session really is. A cookie
-        // filed under this account that belongs to someone else would start
-        // that someone's profile, under this account's row.
-        if user.id != a.id {
-            return Err(SignIn::Failed(format!(
-                "its stored session belongs to {} (user {}), not this account -- sign in again",
-                user.name, user.id
-            )));
-        }
-        let profile = l.profiles.seed(&user, &cookie).map_err(|e| failed(&e))?;
-        l.profiles.launch(&profile, url, &self.build, a.opts).map_err(|e| failed(&e))?;
-        Ok(user)
     }
 
     /// Where the account is now, asked as itself.

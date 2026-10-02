@@ -54,35 +54,22 @@ pub(super) fn launch(
         run.log(format!("{}: launched, waiting for its server", leader.label));
     }
     let (server, leader_place) = wait_for_server(run, leader, already_running);
-    let target = leader_place.as_ref().or(place);
-    for (i, a) in followers.iter().enumerate() {
-        if run.stopped() {
-            run.give_up(&followers[i..]);
-            break;
-        }
+    if run.stopped() {
+        run.give_up(followers);
+        return server;
+    }
+    let mut joining = Vec::new();
+    for a in followers {
         match run.running(a) {
-            Ok(true) => {
-                run.log(format!("{}: already running -- skipping launch", a.label));
-                continue;
-            }
-            Ok(false) => {}
-            Err(why) => {
-                run.log(format!("{}: FAILED -- {why}", a.label));
-                continue;
-            }
-        }
-        if !run.pause(run.pacing().stagger) {
-            run.give_up(&followers[i..]);
-            break;
-        }
-        match run.start(a, url(target, server.as_ref())) {
-            Ok(()) => match &server {
-                Some(s) => run.log(format!("{}: launched into {s}", a.label)),
-                None => run.log(format!("{}: launched", a.label)),
-            },
+            Ok(true) => run.log(format!("{}: already running -- skipping launch", a.label)),
+            Ok(false) => joining.push(a.clone()),
             Err(why) => run.log(format!("{}: FAILED -- {why}", a.label)),
         }
     }
+    let launched =
+        server.as_ref().map_or_else(|| "launched".into(), |s| format!("launched into {s}"));
+    let target = leader_place.as_ref().or(place);
+    run.start_all(&joining, url(target, server.as_ref()).as_deref(), &launched);
     server
 }
 

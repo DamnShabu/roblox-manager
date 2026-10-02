@@ -1,40 +1,27 @@
-//! Every account into the target, one after another.
+//! Every account into the target, all at once.
 
 use super::{LaunchAccount, Run, url};
 use crate::types::{PlaceId, ServerId};
 
-/// Each account into `place` (into `server` when given). An account already
-/// running is skipped, and costs no wait; so does the first sign-in. A stop
-/// ends it before the next sign-in.
+/// Each account into `place` (into `server` when given), every one at the
+/// same time. An account already running is skipped. A stop before it
+/// begins starts nobody.
 pub(super) fn launch(
     run: &Run<'_>,
     accounts: &[LaunchAccount],
     place: Option<&PlaceId>,
     server: Option<&ServerId>,
 ) {
-    let mut signed_in = false;
-    for (i, a) in accounts.iter().enumerate() {
-        if run.stopped() {
-            return run.give_up(&accounts[i..]);
-        }
+    if run.stopped() {
+        return run.give_up(accounts);
+    }
+    let mut starting = Vec::new();
+    for a in accounts {
         match run.running(a) {
-            Ok(true) => {
-                run.log(format!("{}: already running -- skipping launch", a.label));
-                continue;
-            }
-            Ok(false) => {}
-            Err(why) => {
-                run.log(format!("{}: FAILED -- {why}", a.label));
-                continue;
-            }
-        }
-        if signed_in && !run.pause(run.pacing().stagger) {
-            return run.give_up(&accounts[i..]);
-        }
-        signed_in = true;
-        match run.start(a, url(place, server)) {
-            Ok(()) => run.log(format!("{}: launched", a.label)),
+            Ok(true) => run.log(format!("{}: already running -- skipping launch", a.label)),
+            Ok(false) => starting.push(a.clone()),
             Err(why) => run.log(format!("{}: FAILED -- {why}", a.label)),
         }
     }
+    run.start_all(&starting, url(place, server).as_deref(), "launched");
 }

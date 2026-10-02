@@ -99,8 +99,7 @@ Click a game to select it. Then use one of the buttons at the bottom right:
 | **Stop All** | Closes every client the manager started. |
 
 Each row also has its own ▶ and ■ buttons for starting or stopping just that
-account. Accounts start about eight seconds apart so Roblox doesn't refuse
-the sign-ins.
+account. Every account you launch together starts at the same time.
 
 ## Leader and auto-join
 
@@ -294,7 +293,8 @@ of the manager or of Stacked (the Cordial build it uses) is out, an
 also gets the newest Roblox build.
 
 The manager updates itself the same way it was installed. An AppImage
-replaces its own file. The Flatpak reinstalls its bundle. A `.deb`, `.rpm`
+replaces its own file. The Flatpak reinstalls its bundle, and a system-wide
+Flatpak asks for your password through your desktop's prompt. A `.deb`, `.rpm`
 or Arch package installs through PackageKit, so you get your desktop's
 password prompt. On Arch without PackageKit, you're told where the
 downloaded file is. Every download is checked against the release's
