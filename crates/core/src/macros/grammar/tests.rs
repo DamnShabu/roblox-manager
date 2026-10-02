@@ -211,3 +211,21 @@ fn the_new_steps_describe_themselves() {
     assert_eq!(describe(&Step::MoveTo { x: 1, y: 2, lo: 0.0, hi: 0.0 }), "moving the mouse");
     assert_eq!(describe(&Step::Scroll { horizontal: false, notches: 2 }), "scrolling");
 }
+
+#[test]
+fn a_repeat_taps_every_so_often_for_a_time() {
+    assert_eq!(
+        parse("repeat e 10").unwrap().steps,
+        [Step::Repeat { keys: vec![18], lo: 10.0, hi: 10.0, every: REPEAT_EVERY }]
+    );
+    assert_eq!(
+        parse("Repeat shift+e 5-6 0.3-0.5").unwrap().steps,
+        [Step::Repeat { keys: vec![42, 18], lo: 5.0, hi: 6.0, every: (0.3, 0.5) }]
+    );
+    let (rows, _) = rows("repeat e 10 0.5\n");
+    assert_eq!(rows, [Row { kind: "Repeat".into(), value: "e 10 0.5".into() }]);
+    for (bad, why) in [("repeat e", "don't understand"), ("repeat e 5 0", "at most every")] {
+        let err = parse(bad).unwrap_err().to_string();
+        assert!(err.contains(why), "{bad:?}: {err}");
+    }
+}

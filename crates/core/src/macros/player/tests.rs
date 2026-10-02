@@ -441,3 +441,60 @@ fn a_stop_flag_knows_its_own_clones_from_another_flag() {
     assert!(a.same_as(&a.clone()));
     assert!(!a.same_as(&StopFlag::default()));
 }
+
+/// Every range at its top, and taps held as long as a Repeat lets them: half
+/// of `every`.
+fn quick(lo: f64, hi: f64) -> f64 {
+    if (lo, hi) == TAP_PRESS { 1.0 } else { hi }
+}
+
+#[test]
+fn a_repeat_taps_behind_the_steps_after_it() {
+    let mut r = Recorder::default();
+    let held = steps(&mut r, &["repeat e 0.3 0.05", "hold f 0.2"]);
+    let mut held = held.unwrap();
+    let f_down = Sent::Key(33, true);
+    let sent = r.sent.borrow().clone();
+    let (start, end) = (
+        sent.iter().position(|s| *s == f_down).unwrap(),
+        sent.iter().position(|s| *s == Sent::Key(33, false)).unwrap(),
+    );
+    assert_eq!(sent[0], Sent::Key(18, true), "the first tap is at once");
+    assert!(
+        sent[start..end].iter().filter(|s| **s == Sent::Key(18, true)).count() >= 2,
+        "e is tapped while f is held: {sent:?}"
+    );
+    held.release_all(&mut r).unwrap();
+    let sent = r.sent.borrow();
+    let e: Vec<_> = sent.iter().filter(|s| matches!(s, Sent::Key(18, _))).collect();
+    assert!(e.chunks(2).all(|t| *t == [&Sent::Key(18, true), &Sent::Key(18, false)]), "{e:?}");
+}
+
+#[test]
+fn a_round_ends_once_its_repeats_have() {
+    let started = Instant::now();
+    let mut held = Held::default();
+    let mut r = Recorder::default();
+    let sent = Rc::clone(&r.sent);
+    let stop = StopFlag::default();
+    play_step(&mut r, &step("repeat e 0.2 0.05"), &stop, &quick, &mut held).unwrap();
+    assert!(!held.finish_repeats(&mut r, &stop, &quick).unwrap());
+    assert!(started.elapsed() >= Duration::from_millis(150));
+    let taps = sent.borrow().iter().filter(|s| **s == Sent::Key(18, true)).count();
+    assert!((3..=5).contains(&taps), "{taps} taps in 0.2 s, one every 0.05 s");
+    assert_eq!(sent.borrow().last(), Some(&Sent::Key(18, false)));
+}
+
+#[test]
+fn a_macro_stopped_mid_repeat_lets_go_of_the_key() {
+    let sent = Rc::default();
+    let stop = StopFlag::default();
+    let (got, _) = run(
+        "repeat e 600 10\nwait 600\n",
+        &stop,
+        &|| true,
+        &stopping_at(&sent, Sent::Key(18, true), &stop),
+    );
+    got.unwrap();
+    assert_eq!(*sent.borrow(), [Sent::Key(18, true), Sent::Key(18, false)]);
+}

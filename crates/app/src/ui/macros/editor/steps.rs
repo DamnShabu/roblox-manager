@@ -12,8 +12,10 @@ use crate::ui::macros::card::step_icon;
 use crate::ui::macros::point;
 use crate::ui::widgets::{Btn, Fluent, LabelFluent, icon, lbl, plural, wrap};
 
-const STEP_TYPES: [&str; 11] =
-    ["Key", "Hold", "Press", "Release", "Type", "Click", "Move", "Scroll", "Wait", "Start", "Note"];
+const STEP_TYPES: [&str; 12] = [
+    "Key", "Hold", "Press", "Release", "Repeat", "Type", "Click", "Move", "Scroll", "Wait",
+    "Start", "Note",
+];
 
 /// What a step's value looks like, as the entry's placeholder.
 fn hint(kind: &str) -> &'static str {
@@ -21,6 +23,7 @@ fn hint(kind: &str) -> &'static str {
         "Key" => "e  ·  shift+w  ·  space",
         "Hold" => "w 2  ·  shift+w 0.5-1  ·  mouse1 1",
         "Press" | "Release" => "w  ·  shift  ·  mouse2",
+        "Repeat" => "e 10  ·  e 10 0.5  ·  mouse1 30 0.2-0.4",
         "Type" => "text to type",
         "Click" => "960 540  ·  right  ·  left 10 20",
         "Move" => "40 0  ·  to 960 540  ·  to 960 540 0.3",

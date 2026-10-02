@@ -11,6 +11,8 @@ use super::grammar::{Macro, Step, TAP_PRESS, TYPE_GAP, describe};
 use super::keys::{self, SHIFT};
 pub use crate::stop::StopFlag;
 
+mod repeat;
+
 /// How often a gliding pointer moves on: a hundred times a second.
 const GLIDE_TICK: f64 = 0.01;
 /// A wait this long or longer is reported; shorter ones are the rhythm of
@@ -31,19 +33,61 @@ pub trait Input {
 }
 
 /// What a playing macro holds between its steps: the keys and buttons a
-/// Press left down, in the order pressed, and the point it last put the
-/// pointer at.
+/// Press left down, in the order pressed, the point it last put the
+/// pointer at, and the Repeats still tapping.
 #[derive(Debug, Default)]
 pub struct Held {
     down: Vec<u16>,
     at: Option<(i32, i32)>,
+    repeats: repeat::Repeats,
 }
 
 impl Held {
-    /// Let go of everything still down, the last pressed first. Every one is
-    /// let go of, whatever fails; the first failure is the one returned.
+    /// Wait `secs`, or until stopped (then true), tapping whatever Repeats
+    /// are due meanwhile.
+    pub fn idle(
+        &mut self,
+        input: &mut dyn Input,
+        secs: f64,
+        stop: &StopFlag,
+        pick: &dyn Fn(f64, f64) -> f64,
+    ) -> io::Result<bool> {
+        let until = Instant::now() + Duration::try_from_secs_f64(secs).unwrap_or_default();
+        loop {
+            self.repeats.fire(input, pick)?;
+            let now = Instant::now();
+            if now >= until {
+                return Ok(stop.is_set());
+            }
+            let wake = self.repeats.next_due().map_or(until, |due| due.min(until));
+            if stop.wait(wake.saturating_duration_since(now).as_secs_f64()) {
+                return Ok(true);
+            }
+        }
+    }
+
+    /// Wait until every Repeat has tapped its last, or until stopped (then
+    /// true).
+    pub fn finish_repeats(
+        &mut self,
+        input: &mut dyn Input,
+        stop: &StopFlag,
+        pick: &dyn Fn(f64, f64) -> f64,
+    ) -> io::Result<bool> {
+        while let Some(due) = self.repeats.next_due() {
+            let secs = due.saturating_duration_since(Instant::now()).as_secs_f64();
+            if self.idle(input, secs, stop, pick)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// Let go of everything still down, the last pressed first, and stop
+    /// every Repeat. Every one is let go of, whatever fails; the first
+    /// failure is the one returned.
     pub fn release_all(&mut self, input: &mut dyn Input) -> io::Result<()> {
-        let mut result = Ok(());
+        let mut result = self.repeats.release_all(input);
         while let Some(code) = self.down.pop() {
             let released = send(input, code, false);
             if result.is_ok() {
@@ -148,13 +192,16 @@ impl Player<'_> {
                                 until.format("%H:%M:%S")
                             ));
                         }
-                        stop.wait(secs);
+                        held.idle(input, secs, stop, self.pick).map_err(went_away)?;
                     }
                     _ => {
                         say(format!("round {round}: {}", describe(step)));
                         play_step(input, step, stop, self.pick, held).map_err(went_away)?;
                     }
                 }
+            }
+            if held.finish_repeats(input, stop, self.pick).map_err(went_away)? {
+                return Ok(());
             }
             held.release_all(input).map_err(went_away)?;
             done += 1;
@@ -169,7 +216,7 @@ fn went_away(e: io::Error) -> MacroError {
 
 /// One step that does something. A hold, a tap or a click lets go of what
 /// it pressed even when stop cuts it short or the display fails; a Press
-/// leaves its keys in `held`.
+/// leaves its keys in `held`, and a Repeat its taps.
 pub fn play_step(
     input: &mut dyn Input,
     step: &Step,
@@ -179,12 +226,12 @@ pub fn play_step(
 ) -> io::Result<()> {
     let tap = || pick(TAP_PRESS.0, TAP_PRESS.1);
     match step {
-        Step::Hold { keys, lo, hi } => press(input, keys, pick(*lo, *hi), stop),
+        Step::Hold { keys, lo, hi } => press(input, keys, pick(*lo, *hi), stop, pick, held),
         Step::Type(chars) => {
             for &(code, shifted) in chars {
                 let keys: &[u16] = if shifted { &[SHIFT, code] } else { &[code] };
-                press(input, keys, tap(), stop)?;
-                if stop.wait(pick(TYPE_GAP.0, TYPE_GAP.1)) {
+                press(input, keys, tap(), stop, pick, held)?;
+                if held.idle(input, pick(TYPE_GAP.0, TYPE_GAP.1), stop, pick)? {
                     break;
                 }
             }
@@ -195,16 +242,19 @@ pub fn play_step(
                 input.move_to(*x, *y)?;
                 held.at = Some((*x, *y));
             }
-            press(input, &[*button], tap(), stop)
+            press(input, &[*button], tap(), stop, pick, held)
         }
         Step::Move(dx, dy) => {
             input.motion(*dx, *dy)?;
             held.at = held.at.map(|(x, y)| (x.saturating_add(*dx), y.saturating_add(*dy)));
             Ok(())
         }
-        Step::MoveTo { x, y, lo, hi } => glide(input, (*x, *y), pick(*lo, *hi), stop, held),
+        Step::MoveTo { x, y, lo, hi } => glide(input, (*x, *y), pick(*lo, *hi), stop, pick, held),
         Step::Press(codes) => held.press(input, codes),
         Step::Release(codes) => held.release(input, codes),
+        Step::Repeat { keys, lo, hi, every } => {
+            held.repeats.start(input, keys, pick(*lo, *hi), *every, pick)
+        }
         Step::Scroll { horizontal, notches } => input.scroll(*horizontal, *notches),
         Step::Wait(..) | Step::Start(..) => Ok(()),
     }
@@ -219,6 +269,7 @@ fn glide(
     to: (i32, i32),
     secs: f64,
     stop: &StopFlag,
+    pick: &dyn Fn(f64, f64) -> f64,
     held: &mut Held,
 ) -> io::Result<()> {
     let from = match held.at {
@@ -226,7 +277,7 @@ fn glide(
         _ => {
             input.move_to(to.0, to.1)?;
             held.at = Some(to);
-            stop.wait(secs);
+            held.idle(input, secs, stop, pick)?;
             return Ok(());
         }
     };
@@ -236,7 +287,8 @@ fn glide(
     for tick in 1..=ticks {
         let t = f64::from(tick) / f64::from(ticks);
         let due = start + Duration::from_secs_f64(secs * t);
-        if stop.wait(due.saturating_duration_since(Instant::now()).as_secs_f64()) {
+        let secs = due.saturating_duration_since(Instant::now()).as_secs_f64();
+        if held.idle(input, secs, stop, pick)? {
             break;
         }
         let at = (along(from.0, to.0, t), along(from.1, to.1, t));
@@ -255,7 +307,14 @@ fn send(input: &mut dyn Input, code: u16, down: bool) -> io::Result<()> {
 
 /// Press `codes` in order, hold for `secs` (or until stopped), and release
 /// in reverse -- every one that went down, whatever failed.
-fn press(input: &mut dyn Input, codes: &[u16], secs: f64, stop: &StopFlag) -> io::Result<()> {
+fn press(
+    input: &mut dyn Input,
+    codes: &[u16],
+    secs: f64,
+    stop: &StopFlag,
+    pick: &dyn Fn(f64, f64) -> f64,
+    held: &mut Held,
+) -> io::Result<()> {
     let mut down = Vec::new();
     let mut result = Ok(());
     for &code in codes {
@@ -268,7 +327,7 @@ fn press(input: &mut dyn Input, codes: &[u16], secs: f64, stop: &StopFlag) -> io
         }
     }
     if result.is_ok() {
-        stop.wait(secs);
+        result = held.idle(input, secs, stop, pick).map(|_| ());
     }
     for &code in down.iter().rev() {
         let released = send(input, code, false);

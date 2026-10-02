@@ -66,6 +66,11 @@ const PAGE: &[Block] = &[
         ("Hold KEY SECONDS", "keep a key down"),
         ("Press KEY", "put a key down and leave it down, while other steps play"),
         ("Release KEY", "let go of a key a Press put down"),
+        (
+            "Repeat KEY SECONDS [EVERY]",
+            "tap a key every EVERY seconds (0.1–0.2 unless you give one) for SECONDS, while \
+             other steps play; the round ends once it has",
+        ),
         ("Type TEXT", "type text, e.g. into chat"),
         (
             "Click [left|right|middle] [X Y]",
@@ -79,7 +84,7 @@ const PAGE: &[Block] = &[
         ("Note TEXT", "a reminder; does nothing"),
     ]),
     Text(
-        "<b>Repeat</b> plays the steps once, a set number of rounds, or until stopped.\n\n\
+        "<b>Playback</b> plays the steps once, a set number of rounds, or until stopped.\n\n\
          Keys are letters, digits and punctuation, or names such as <tt>space</tt>, \
          <tt>enter</tt>, <tt>esc</tt>, <tt>tab</tt>, <tt>shift</tt>, <tt>ctrl</tt>, \
          <tt>alt</tt>, <tt>up</tt>, <tt>down</tt>, <tt>left</tt>, <tt>right</tt>, \
@@ -96,7 +101,7 @@ const PAGE: &[Block] = &[
          one), and typed characters are 0.05–0.16 s apart.",
     ),
     Heading("Example"),
-    Code("Start  45\nWait   60-70\nKey    j\nWait   340-341\n\nRepeat: until stopped"),
+    Code("Start  45\nWait   60-70\nKey    j\nWait   340-341\n\nPlayback: until stopped"),
     Heading("Good to know"),
     Text(
         "Keep the window on a workspace you can see; on a hidden one the game can stall. Stop \

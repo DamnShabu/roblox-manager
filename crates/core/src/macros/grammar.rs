@@ -9,6 +9,10 @@ use super::keys::{self, BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT};
 pub const TAP_PRESS: (f64, f64) = (0.04, 0.12);
 /// Typed characters are this far apart.
 pub const TYPE_GAP: (f64, f64) = (0.05, 0.16);
+/// A Repeat with no EVERY taps this far apart, press to press.
+pub const REPEAT_EVERY: (f64, f64) = (0.1, 0.2);
+/// The closest together a Repeat's taps may be.
+const SHORTEST_EVERY: f64 = 0.02;
 /// The longest any one duration may be: a day.
 const LONGEST_SECS: f64 = 86_400.0;
 /// The furthest a move or click may reach from where it starts.
@@ -17,11 +21,12 @@ const FURTHEST: i32 = 65_535;
 const MOST_NOTCHES: i32 = 1000;
 
 /// The editor's step types and the command each is in a macro's text.
-const STEP_TYPES: [(&str, &str); 11] = [
+const STEP_TYPES: [(&str, &str); 12] = [
     ("Key", "tap"),
     ("Hold", "hold"),
     ("Press", "press"),
     ("Release", "release"),
+    ("Repeat", "repeat"),
     ("Type", "type"),
     ("Click", "click"),
     ("Move", "move"),
@@ -63,6 +68,15 @@ pub enum Step {
     Press(Vec<u16>),
     /// Keys or buttons let go of, in the order written.
     Release(Vec<u16>),
+    /// Keys tapped over and over for a time in [lo, hi], a tap every
+    /// `every` seconds (a range, press to press), while the steps after it
+    /// play. The round ends once it has.
+    Repeat {
+        keys: Vec<u16>,
+        lo: f64,
+        hi: f64,
+        every: (f64, f64),
+    },
     /// The pointer to a point (from the display's corner): at once, or
     /// gliding there over a time in [lo, hi].
     MoveTo {
@@ -235,6 +249,14 @@ fn step(line: &Line<'_>) -> Result<Parsed, String> {
         }
         ("press", [k]) => Step::Press(codes(k)?),
         ("release", [k]) => Step::Release(codes(k)?),
+        ("repeat", [k, secs]) => repeat(k, secs, REPEAT_EVERY)?,
+        ("repeat", [k, secs, every]) => {
+            let every = seconds(every)?;
+            if every.0 < SHORTEST_EVERY {
+                return Err(format!("a repeat taps at most every {SHORTEST_EVERY} seconds"));
+            }
+            repeat(k, secs, every)?
+        }
         ("click", args) if args.len() <= 3 => click(args)?,
         ("move", [dx, dy]) if *dx != "to" => Step::Move(int(dx)?, int(dy)?),
         ("move", ["to", x, y]) => Step::MoveTo { x: int(x)?, y: int(y)?, lo: 0.0, hi: 0.0 },
@@ -253,6 +275,11 @@ fn step(line: &Line<'_>) -> Result<Parsed, String> {
 
 fn hold(token: &str, (lo, hi): (f64, f64)) -> Result<Step, String> {
     Ok(Step::Hold { keys: codes(token)?, lo, hi })
+}
+
+fn repeat(token: &str, secs: &str, every: (f64, f64)) -> Result<Step, String> {
+    let (lo, hi) = seconds(secs)?;
+    Ok(Step::Repeat { keys: codes(token)?, lo, hi, every })
 }
 
 /// The keys or buttons of `shift+w`, in the order written.
@@ -352,6 +379,7 @@ pub fn describe(step: &Step) -> String {
         Step::Hold { keys, .. } => format!("pressing {}", names(keys)),
         Step::Press(keys) => format!("holding down {}", names(keys)),
         Step::Release(keys) => format!("letting go of {}", names(keys)),
+        Step::Repeat { keys, .. } => format!("repeating {}", names(keys)),
         Step::Type(_) => "typing".into(),
         Step::Click { .. } => "clicking".into(),
         Step::Move(..) | Step::MoveTo { .. } => "moving the mouse".into(),

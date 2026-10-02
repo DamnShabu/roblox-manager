@@ -41,7 +41,7 @@ launched, expired or failed (a **launch report**).
 **Low-power client** -- a client throttled, FIFO-paced, niced and capped, for
 an account along for the ride.
 
-**Macro** -- a named sequence of steps (tap, hold, press, release, type,
+**Macro** -- a named sequence of steps (tap, hold, press, release, repeat, type,
 click, move, scroll, wait, start) played into one client, a set number of
 **rounds** or until stopped.
 **Macro-ready window** -- a client run inside its own nested compositor

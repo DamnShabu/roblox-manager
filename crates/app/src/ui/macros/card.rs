@@ -18,7 +18,7 @@ const SHOWN_STEPS: usize = 12;
 /// The icon for an editor step type.
 pub fn step_icon(kind: &str) -> &'static str {
     match kind {
-        "Key" | "Hold" | "Press" | "Release" => "input-keyboard-symbolic",
+        "Key" | "Hold" | "Press" | "Release" | "Repeat" => "input-keyboard-symbolic",
         "Type" => "insert-text-symbolic",
         "Click" | "Scroll" => "input-mouse-symbolic",
         "Move" => "go-jump-symbolic",

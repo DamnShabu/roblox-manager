@@ -97,7 +97,7 @@ impl MacroDialog {
                 .left_margin(12)
                 .right_margin(12)
                 .build(),
-            repeat_group: adw::PreferencesGroup::builder().title("Repeat").build(),
+            repeat_group: adw::PreferencesGroup::builder().title("Playback").build(),
             err: lbl("", "error").wrapped().visible(false),
             record: Record::new(w.weak()),
         });
