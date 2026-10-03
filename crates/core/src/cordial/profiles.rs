@@ -160,6 +160,9 @@ impl CordialProfiles {
         if opts.low_power {
             env = engine::with_low_power(env);
         }
+        if opts.nested {
+            env = engine::with_nested(env);
+        }
         let log_path = self.rotate_log(profile)?;
         let log = File::create(&log_path)
             .map_err(|e| io(&format!("could not open {}", log_path.display()), e))?;
