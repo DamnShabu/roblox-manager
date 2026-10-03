@@ -300,8 +300,10 @@ from anywhere, bind a key in your desktop's keyboard settings to:
 gapplication action io.github.mujo.RobloxManager run-macro "'Anti-AFK'"
 ```
 
-Keep macro-ready windows on a workspace you can see, because the game can
-stall on a hidden one. Stopping a macro releases any held keys immediately.
+A macro keeps playing while its window is on another workspace, scrolled out
+of view or behind other windows. A client launched by a version before 0.9.3
+needs launching again for that. Stopping a macro releases any held keys
+immediately.
 Individual Roblox games have their own rules about macros, so check those
 before running one AFK.
 

@@ -119,9 +119,29 @@ pub fn without_legacy_low_power_flags(flags: &Map<String, Value>) -> Map<String,
 }
 
 /// `env` with the low-power values in place of any the settings gave.
-pub fn with_low_power(mut env: Vec<(String, String)>) -> Vec<(String, String)> {
-    env.retain(|(k, _)| LOW_POWER_ENV.iter().all(|(low, _)| low != k));
-    env.extend(LOW_POWER_ENV.map(|(k, v)| (k.to_owned(), v.to_owned())));
+pub fn with_low_power(env: Vec<(String, String)>) -> Vec<(String, String)> {
+    replaced(env, &LOW_POWER_ENV)
+}
+
+/// A macro-ready client's presents never wait on its display. Its cage is a
+/// window like any other, and draws only when the desktop asks it to: niri
+/// asks about once a second for a window on another workspace or scrolled
+/// out of view. A FIFO-paced engine waits for each of those frames before it
+/// runs on, so the game -- and the macro playing into it -- all but stopped
+/// whenever its window was out of sight. MAILBOX hands each frame over and
+/// carries on. A low-power client stays as light: its frame cap, which the
+/// engine keeps itself, is what holds it to 20 a second.
+pub const NESTED_ENV: [(&str, &str); 1] = [("CORDIAL_PRESENT_MODE", "mailbox")];
+
+/// `env` for a client in a macro-ready window, after any low-power values.
+pub fn with_nested(env: Vec<(String, String)>) -> Vec<(String, String)> {
+    replaced(env, &NESTED_ENV)
+}
+
+/// `env` with `values` in place of any it already had for their keys.
+fn replaced(mut env: Vec<(String, String)>, values: &[(&str, &str)]) -> Vec<(String, String)> {
+    env.retain(|(k, _)| values.iter().all(|(v, _)| v != k));
+    env.extend(values.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())));
     env
 }
 
@@ -234,6 +254,23 @@ mod tests {
                 ("CORDIAL_POLL_COALESCE_US", "2000"),
             ])
         );
+    }
+
+    #[test]
+    fn a_macro_ready_client_never_waits_on_its_display_even_low_power() {
+        let fifo = env(&map(json!({"present_mode": "fifo"})));
+        assert_eq!(
+            with_nested(fifo),
+            pairs(&[("CORDIAL_SECRET_STORE", "keyring"), ("CORDIAL_PRESENT_MODE", "mailbox")])
+        );
+        let low = with_nested(with_low_power(env(&map(json!({})))));
+        let present: Vec<&str> = low
+            .iter()
+            .filter(|(k, _)| k == "CORDIAL_PRESENT_MODE")
+            .map(|(_, v)| v.as_str())
+            .collect();
+        assert_eq!(present, ["mailbox"]);
+        assert!(low.contains(&("CORDIAL_FPS_CAP".to_owned(), "20".to_owned())), "still capped");
     }
 
     #[test]

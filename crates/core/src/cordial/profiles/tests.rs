@@ -148,6 +148,18 @@ fn a_macro_ready_client_runs_in_a_cage_linked_where_macros_look() {
 }
 
 #[test]
+fn a_macro_ready_client_keeps_playing_out_of_sight_low_power_or_not() {
+    let w = world();
+    let p = Profile::named("rbxmgr-7");
+    w.profiles.launch(&p, None, &build(), ClientOpts { nested: true, low_power: true }).unwrap();
+    let (_, env) = &w.runner.spawned()[0];
+    let present: Vec<&str> =
+        env.iter().filter(|(k, _)| k == "CORDIAL_PRESENT_MODE").map(|(_, v)| v.as_str()).collect();
+    assert_eq!(present, ["mailbox"], "never FIFO, which waits on a cage nobody is looking at");
+    assert!(env.contains(&("CORDIAL_FPS_CAP".into(), "20".into())), "and still capped");
+}
+
+#[test]
 fn a_macro_ready_launch_keeps_cages_off_the_display_they_open_on() {
     use rustix::fs::{FlockOperation, flock};
     let dir = tempfile::tempdir().unwrap();
