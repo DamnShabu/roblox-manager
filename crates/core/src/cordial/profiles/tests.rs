@@ -280,3 +280,44 @@ fn no_clients_running_is_an_empty_set_not_an_error() {
     let w = world_with(Recording::default().answer(1, "", ""));
     assert!(w.profiles.running().unwrap().is_empty());
 }
+
+fn say_window(w: &World, profile: &str, state: &str) {
+    let dir = w.profiles.path(&Profile::named(profile));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("window-state"), state).unwrap();
+}
+
+#[test]
+fn a_window_is_as_its_engine_last_said() {
+    let w = world();
+    let main = Profile::named("main");
+    assert_eq!(w.profiles.window(&main).unwrap(), None, "no file: an engine that says nothing");
+    say_window(&w, "main", "hidden\n");
+    assert_eq!(w.profiles.window(&main).unwrap(), Some(Window::Hidden));
+    say_window(&w, "main", "shown\n");
+    assert_eq!(w.profiles.window(&main).unwrap(), Some(Window::Shown));
+}
+
+#[test]
+fn hiding_signals_only_clients_whose_engine_can_hide() {
+    // `old` has no window state: SIGUSR1 would kill it, so it is left alone.
+    let pgrep = "1 cordial-run --profile main\n2 cordial-run --profile old\n3 cordial-run --profile other\n";
+    let runner = Recording::default();
+    *runner.pgrep.lock().unwrap() = Some(pgrep.into());
+    let w = world_with(runner);
+    say_window(&w, "main", "shown\n");
+    say_window(&w, "other", "shown\n");
+    let which = HashSet::from([Profile::named("main"), Profile::named("old")]);
+    assert_eq!(w.profiles.set_hidden(&which, true).unwrap(), 1);
+    assert_eq!(w.profiles.set_hidden(&which, false).unwrap(), 1);
+    let ran = w.runner.ran();
+    assert_eq!(ran[1], ["kill", "-USR1", "1"]);
+    assert_eq!(ran[3], ["kill", "-USR2", "1"]);
+}
+
+#[test]
+fn hiding_a_client_that_cannot_hide_runs_no_kill() {
+    let w = world_with(Recording::default().answer(0, "2 cordial-run --profile old\n", ""));
+    assert_eq!(w.profiles.set_hidden(&HashSet::from([Profile::named("old")]), true).unwrap(), 0);
+    assert_eq!(w.runner.ran().len(), 1);
+}

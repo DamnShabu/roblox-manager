@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use rbxmgr_core::accounts::{AccountStore, SessionState};
+use rbxmgr_core::cordial::Window as ClientWindow;
 use rbxmgr_core::macros::{MacroLibrary, StopFlag};
 use rbxmgr_core::roblox::{Friend, Game};
 use rbxmgr_core::types::{PlaceId, ServerId, UserId};
@@ -80,6 +81,9 @@ pub struct AppState {
     pub macros: MacroLibrary,
     /// Accounts with a live client, from the poll.
     pub running: HashSet<UserId>,
+    /// The windows of running clients whose engine says how they are, from
+    /// the poll; a client from before Stacked could hide one is not here.
+    pub windows: HashMap<UserId, ClientWindow>,
     /// Accounts a launch is starting now...
     pub launching: HashSet<UserId>,
     /// ...and of those, the ones following a leader.
@@ -122,6 +126,7 @@ impl AppState {
             accounts,
             macros,
             running: HashSet::new(),
+            windows: HashMap::new(),
             launching: HashSet::new(),
             joining: HashSet::new(),
             macro_runs: HashMap::new(),

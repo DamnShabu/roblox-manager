@@ -14,7 +14,7 @@ pub mod stacked;
 
 pub use build::{Build, roblox_build};
 pub use process::{Child, Output, ProcessView, Runner, SystemRunner};
-pub use profiles::{ClientOpts, CordialProfiles, STARTUP_CHECK};
+pub use profiles::{ClientOpts, CordialProfiles, STARTUP_CHECK, Window};
 
 use crate::keyring::KeyringError;
 

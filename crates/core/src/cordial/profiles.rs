@@ -1,6 +1,6 @@
 //! Every account's Cordial profile, and the client that plays in it: where
 //! the profile lives, the session it is given, its low-power flags, starting
-//! its client, and which clients are up.
+//! its client, which clients are up, and hiding their windows.
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
@@ -33,6 +33,14 @@ pub struct ClientOpts {
     pub nested: bool,
     /// Throttled, FIFO-paced, niced, with frame and thread caps.
     pub low_power: bool,
+}
+
+/// A running client's window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Window {
+    Shown,
+    /// Unmapped at the manager's request; the game goes on behind it.
+    Hidden,
 }
 
 /// Worker threads only: seeding and clearing go through the keyring, and
@@ -235,19 +243,57 @@ impl CordialProfiles {
     /// session cleanly on it. Returns how many were signalled. Clients of
     /// profiles no account owns are left alone.
     pub fn stop(&self, which: &HashSet<Profile>) -> Result<usize, CordialError> {
-        let pids: Vec<String> = self
+        let pids: Vec<u32> = self
             .clients()?
             .into_iter()
             .filter(|(_, profile)| which.contains(profile))
-            .map(|(pid, _)| pid.to_string())
+            .map(|(pid, _)| pid)
             .collect();
-        if !pids.is_empty() {
-            let kill: Vec<&str> =
-                std::iter::once("kill").chain(pids.iter().map(String::as_str)).collect();
-            let argv = self.view.argv(&kill);
-            self.runner.run(&argv, Duration::from_secs(10))?;
-        }
+        self.signal(None, &pids)?;
         Ok(pids.len())
+    }
+
+    /// The window of a profile's running client, as its engine last said:
+    /// `<profile>/window-state`. None when the engine says nothing -- one
+    /// from before Stacked could hide its window, or no client at all.
+    pub fn window(&self, profile: &Profile) -> Result<Option<Window>, CordialError> {
+        let path = self.path(profile).join("window-state");
+        match fs::read_to_string(&path) {
+            Ok(text) => Ok(match text.trim() {
+                "hidden" => Some(Window::Hidden),
+                "shown" => Some(Window::Shown),
+                _ => None,
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(io(&format!("could not read {}", path.display()), e)),
+        }
+    }
+
+    /// Hide or show the window of every client running one of `which`; the
+    /// game keeps running. Only clients whose engine publishes a window state
+    /// are signalled: to one from before that, SIGUSR1 is a kill. Returns how
+    /// many were signalled.
+    pub fn set_hidden(&self, which: &HashSet<Profile>, hide: bool) -> Result<usize, CordialError> {
+        let mut pids = Vec::new();
+        for (pid, profile) in self.clients()? {
+            if which.contains(&profile) && self.window(&profile)?.is_some() {
+                pids.push(pid);
+            }
+        }
+        self.signal(Some(if hide { "-USR1" } else { "-USR2" }), &pids)?;
+        Ok(pids.len())
+    }
+
+    /// `kill` the pids, with `sig` or the default SIGTERM. None, no kill.
+    fn signal(&self, sig: Option<&str>, pids: &[u32]) -> Result<(), CordialError> {
+        if pids.is_empty() {
+            return Ok(());
+        }
+        let pids: Vec<String> = pids.iter().map(u32::to_string).collect();
+        let kill: Vec<&str> =
+            std::iter::once("kill").chain(sig).chain(pids.iter().map(String::as_str)).collect();
+        self.runner.run(&self.view.argv(&kill), Duration::from_secs(10))?;
+        Ok(())
     }
 
     pub(super) fn keyring(&self) -> &Keyring {

@@ -101,6 +101,18 @@ Click a game to select it. Then use one of the buttons at the bottom right:
 Each row also has its own ▶ and ■ buttons for starting or stopping just that
 account. Every account you launch together starts at the same time.
 
+### Hide a client's window
+
+While an account runs, the 👁 button on its row hides its window: off the
+screen and off the taskbar, with the game still running at a low frame rate.
+Click it again to bring the window back. **Hide All Windows** and **Show All
+Windows** in the main menu do every account at once, and hidden windows stay
+hidden if you close and reopen the manager.
+
+Hiding needs Stacked 0.21.7 or newer. If the button is missing, press
+**Update**, then launch the account again. A macro-ready window can't be
+hidden, because its macros need it.
+
 ## Leader and auto-join
 
 The **Leader** card at the top of the list shows who goes first and, under

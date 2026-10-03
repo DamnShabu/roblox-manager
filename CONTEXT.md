@@ -41,6 +41,10 @@ launched, expired or failed (a **launch report**).
 **Low-power client** -- a client throttled, FIFO-paced, niced and capped, for
 an account along for the ride.
 
+**Hidden window** -- a client's window unmapped at the manager's request
+(SIGUSR1; SIGUSR2 shows it), the game still running behind it at a capped
+frame rate. Not minimised: that is the compositor's, and niri has none.
+
 **Macro** -- a named sequence of steps (tap, hold, press, release, repeat, type,
 click, move, scroll, wait, start) played into one client, a set number of
 **rounds** or until stopped.

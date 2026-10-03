@@ -39,7 +39,7 @@ type GroupAction = (&'static str, fn(&Window, &str));
 
 impl Window {
     pub(super) fn install_actions(&self) {
-        let actions: [Action; 18] = [
+        let actions: [Action; 20] = [
             ("add-account", Window::on_add),
             ("refresh", Window::refresh_all),
             ("update", Window::on_update),
@@ -49,6 +49,8 @@ impl Window {
             ("launch-selected", Window::launch_selected),
             ("launch-group", Window::launch_chain),
             ("stop-all", Window::on_stop_all),
+            ("hide-all", Window::on_hide_all),
+            ("show-all", Window::on_show_all),
             ("select-all", Window::on_select_all),
             ("search", Window::start_search),
             ("reload-games", Window::reload_games),

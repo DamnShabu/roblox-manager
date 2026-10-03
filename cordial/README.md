@@ -42,6 +42,11 @@ changes with it. Each item names the code that depends on it.
   `cordial-run` and carries `--profile NAME` (found with `pgrep -a -f`,
   `clients.rs`); it survives its first 5 s when the launch is good
   (`STARTUP_CHECK`) and ends its session cleanly on SIGTERM.
+- **Hiding a window** (`profiles.rs`, `set_hidden` and `window`): while it
+  runs, a client keeps `<profile>/window-state` saying `shown` or `hidden`;
+  SIGUSR1 hides its window and SIGUSR2 shows it again, with the game still
+  running. The manager signals only a client with that file: an engine
+  without it dies on SIGUSR1. Stacked's ADR-046.
 - **`cordial-fetch [--newest | --status]`** (`build.rs`): the last stdout
   line is `{"version", "apk", "engine"}`, the `--apk` and `--lib-dir` above;
   a failure exits non-zero with its reason as the last stderr line.

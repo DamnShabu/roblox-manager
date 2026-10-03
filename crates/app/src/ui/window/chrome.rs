@@ -350,6 +350,10 @@ fn main_menu() -> gio::Menu {
     roblox.append(Some("_Update All"), Some("win.update"));
     roblox.append(Some("Open Roblox _Links Here"), Some("win.open-links-here"));
     menu.append_section(None, &roblox);
+    let windows = gio::Menu::new();
+    windows.append(Some("_Hide All Windows"), Some("win.hide-all"));
+    windows.append(Some("_Show All Windows"), Some("win.show-all"));
+    menu.append_section(None, &windows);
     let style = gio::Menu::new();
     for (label, name) in [("Follow System", "system"), ("Light", "light"), ("Dark", "dark")] {
         let item = gio::MenuItem::new(Some(label), None);

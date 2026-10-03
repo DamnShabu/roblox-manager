@@ -4,20 +4,23 @@
 mod accounts;
 mod actions;
 mod chrome;
+mod hiding;
 mod launching;
 mod links;
 mod macros;
 mod roblox;
 mod updates;
 
+pub use self::hiding::can_hide;
 pub use self::macros::ReadyClient;
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::{gio, glib};
+use rbxmgr_core::cordial::Window as ClientWindow;
 use rbxmgr_core::types::{Profile, UserId};
 use rbxmgr_core::window_state::WindowState;
 
@@ -293,6 +296,7 @@ impl Window {
         self.0.dialogs.borrow_mut().append(&mut added);
         self.0.ui.title.set_subtitle(&s.status_line());
         let live = !s.running.is_empty() || !s.launching.is_empty() || !s.macro_runs.is_empty();
+        self.refresh_window_actions(&s);
         drop(s);
         self.set_action_enabled("stop-all", live);
     }
@@ -317,8 +321,8 @@ impl Window {
         }
     }
 
-    /// Keeps every row's status and play/stop honest. pgrep runs off the
-    /// main loop, at most one at a time.
+    /// Keeps every row's status, play/stop and hide/show honest. pgrep runs
+    /// off the main loop, at most one at a time.
     fn poll_running(&self) {
         if self.0.polling.replace(true) {
             return;
@@ -329,18 +333,29 @@ impl Window {
         worker::run(
             move || {
                 let live = profiles.running().ok()?;
-                Some(
-                    ids.into_iter()
-                        .filter(|id| live.contains(&Profile::of(*id)))
-                        .collect::<HashSet<_>>(),
-                )
+                let running: HashSet<UserId> =
+                    ids.into_iter().filter(|id| live.contains(&Profile::of(*id))).collect();
+                // A state file that does not read is a window the manager
+                // cannot hide or show, the same as an engine that writes none.
+                let windows: HashMap<UserId, ClientWindow> = running
+                    .iter()
+                    .filter_map(|id| Some((*id, profiles.window(&Profile::of(*id)).ok()??)))
+                    .collect();
+                Some((running, windows))
             },
             move |found| {
                 let Some(w) = weak.upgrade() else { return };
                 w.0.polling.set(false);
-                let Some(found) = found else { return };
-                if found != w.state().running {
-                    w.state_mut().running = found;
+                let Some((running, windows)) = found else { return };
+                let changed = {
+                    let s = w.state();
+                    running != s.running || windows != s.windows
+                };
+                if changed {
+                    let mut s = w.state_mut();
+                    s.running = running;
+                    s.windows = windows;
+                    drop(s);
                     w.refresh_states();
                 }
             },

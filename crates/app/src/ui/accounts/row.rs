@@ -9,11 +9,12 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{Align, gdk, gio, glib};
 use rbxmgr_core::accounts::{Account, relative_time};
+use rbxmgr_core::cordial::Window as ClientWindow;
 use rbxmgr_core::types::UserId;
 
 use crate::state::Chip;
 use crate::ui::widgets::{Btn, Fluent, avatar, clear, icon, lbl, name, status, toggle_class};
-use crate::ui::window::Window;
+use crate::ui::window::{Window, can_hide};
 
 pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
     let id = acct.user_id;
@@ -86,6 +87,11 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
         .icon("media-playback-start-symbolic")
         .build(w.act(move |w| w.play_or_stop(id)));
     play.button.set_valign(Align::Center);
+    let hide = Btn::new("flat circular").icon("view-conceal-symbolic").build(w.act(move |w| {
+        let hide = can_hide(&w.state(), id);
+        w.set_window_hidden(id, hide);
+    }));
+    hide.button.set_valign(Align::Center);
     let model = menu(w, acct);
     let more = gtk::MenuButton::builder()
         .icon_name("view-more-symbolic")
@@ -97,6 +103,7 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
     name(&more, &format!("More for {}", acct.name));
     row.add_suffix(&failure.button);
     row.add_suffix(&status_box);
+    row.add_suffix(&hide.button);
     row.add_suffix(&play.button);
     row.add_suffix(&more);
     context_menu(&row, &model);
@@ -131,6 +138,16 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
         };
         play.button.set_tooltip_text(Some(tip));
         name(&play.button, tip);
+        let hidden = s.windows.get(&id) == Some(&ClientWindow::Hidden);
+        hide.button.set_visible(hidden || can_hide(s, id));
+        hide.set_icon(if hidden { "view-reveal-symbolic" } else { "view-conceal-symbolic" });
+        let tip = if hidden {
+            "Show this account's window"
+        } else {
+            "Hide this account's window; the game keeps running"
+        };
+        hide.button.set_tooltip_text(Some(tip));
+        name(&hide.button, tip);
         if let Some(a) = s.accounts.get(id).filter(|a| a.selected != check.is_active()) {
             quiet.set(true);
             check.set_active(a.selected);
