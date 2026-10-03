@@ -1,6 +1,19 @@
-/* The warm dark surfaces, loaded over style.css while libadwaita is dark. */
+/* The warm dark surfaces and the text on them, loaded over style.css while
+   libadwaita is dark. */
 
 :root {
+  --accent-color: #f0c070;
+  --dim-opacity: 55%;
+  --window-fg-color: #f3ece4;
+  --view-fg-color: #f3ece4;
+  --headerbar-fg-color: #f3ece4;
+  --headerbar-border-color: #f3ece4;
+  --sidebar-fg-color: #f3ece4;
+  --secondary-sidebar-fg-color: #f3ece4;
+  --dialog-fg-color: #f3ece4;
+  --popover-fg-color: #f3ece4;
+  --card-fg-color: #f3ece4;
+  --thumbnail-fg-color: #f3ece4;
   --window-bg-color: #1e1b18;
   --view-bg-color: #191714;
   --headerbar-bg-color: #26221e;
