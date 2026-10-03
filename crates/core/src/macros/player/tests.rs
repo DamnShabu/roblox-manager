@@ -253,6 +253,7 @@ fn run(
         report: &|line| reports.borrow_mut().push(line),
         pick: &top,
         now: &now,
+        start: Instant::now(),
     };
     let got = player.play(&parse(m).unwrap(), stop);
     (got, reports.into_inner())
@@ -305,6 +306,7 @@ fn a_playing_macro_says_each_thing_once_and_the_waits_worth_watching() {
         },
         pick: &top,
         now: &now,
+        start: Instant::now(),
     };
     let m = parse("start 0.1\ntap e\ntap e\nwait 0\nmove to 1 1\nmove to 2 2\nwait 5\ntap e\n");
     player.play(&m.unwrap(), &stop).unwrap();
@@ -524,4 +526,73 @@ fn a_macro_stalled_longer_than_it_can_make_up_carries_on_from_where_it_is() {
     let resumed = Instant::now();
     held.idle(&mut r, 0.1, &stop, &top).unwrap();
     assert!(resumed.elapsed() >= Duration::from_millis(100), "the wait is not skipped");
+}
+
+/// A display that notes when its first input arrived, after taking `slow`
+/// to connect to.
+fn first_input_into(
+    first: &Rc<RefCell<Option<Instant>>>,
+    slow: Duration,
+) -> impl Fn(&Path) -> io::Result<Box<dyn Input>> {
+    let first = Rc::clone(first);
+    move |_: &Path| -> io::Result<Box<dyn Input>> {
+        std::thread::sleep(slow);
+        Ok(Box::new(FirstInput(Rc::clone(&first))))
+    }
+}
+
+struct FirstInput(Rc<RefCell<Option<Instant>>>);
+
+impl FirstInput {
+    fn note(&self) -> io::Result<()> {
+        self.0.borrow_mut().get_or_insert_with(Instant::now);
+        Ok(())
+    }
+}
+
+impl Input for FirstInput {
+    fn key(&mut self, _: u16, _: bool) -> io::Result<()> {
+        self.note()
+    }
+    fn motion(&mut self, _: f64, _: f64) -> io::Result<()> {
+        self.note()
+    }
+    fn button(&mut self, _: u16, _: bool) -> io::Result<()> {
+        self.note()
+    }
+    fn move_to(&mut self, _: i32, _: i32) -> io::Result<()> {
+        self.note()
+    }
+    fn scroll(&mut self, _: bool, _: i32) -> io::Result<()> {
+        self.note()
+    }
+}
+
+#[test]
+fn clients_started_together_play_from_one_moment_however_slow_each_is_to_reach() {
+    let start = Instant::now() + Duration::from_millis(150);
+    // One thread a client, as the window plays them.
+    let first_input = |slow: Duration| {
+        let first = Rc::default();
+        let player = Player {
+            display: Path::new("/run/user/1000/rbxmgr/rbxmgr-7.wayland"),
+            running: &|| true,
+            connect: &first_input_into(&first, slow),
+            report: &|_| {},
+            pick: &top,
+            now: &Local::now,
+            start,
+        };
+        player.play(&parse("tap e\nloop 1\n").unwrap(), &StopFlag::default()).unwrap();
+        first.borrow().unwrap()
+    };
+    let firsts: Vec<Instant> = std::thread::scope(|s| {
+        let clients = [Duration::ZERO, Duration::from_millis(80)]
+            .map(|slow| s.spawn(move || first_input(slow)));
+        clients.into_iter().map(|c| c.join().unwrap()).collect()
+    });
+    for first in firsts {
+        assert!(first >= start, "pressed {:?} early", start - first);
+        assert!(first - start < Duration::from_millis(20), "pressed {:?} late", first - start);
+    }
 }

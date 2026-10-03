@@ -171,6 +171,10 @@ pub struct Player<'a> {
     pub report: &'a dyn Fn(String),
     pub pick: &'a dyn Fn(f64, f64) -> f64,
     pub now: &'a dyn Fn() -> DateTime<Local>,
+    /// When its first step is due. Clients a macro is started on together
+    /// share one, a little ahead: each gets ready to play in its own time,
+    /// so counting from when each was ready would start them apart.
+    pub start: Instant,
 }
 
 impl Player<'_> {
@@ -186,7 +190,14 @@ impl Player<'_> {
             _ => went_away(e),
         })?;
         let mut held = Held::default();
-        let played = self.rounds(m, stop, input.as_mut(), &mut held);
+        let late = Instant::now().saturating_duration_since(self.start).as_secs_f64();
+        if late > MOST_BEHIND {
+            (self.report)(format!("starting {late:.1}s late: its client was slow to reach"));
+        }
+        let played = held
+            .idle_until(input.as_mut(), self.start, stop, self.pick)
+            .map_err(went_away)
+            .and_then(|_| self.rounds(m, stop, input.as_mut(), &mut held));
         let let_go = held.release_all(input.as_mut()).map_err(went_away);
         played.and(let_go)
     }

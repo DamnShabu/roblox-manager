@@ -1,6 +1,7 @@
 //! The macros pane, and running macros on accounts.
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use rbxmgr_core::macros::{self, Player, StopFlag, VirtualInput, nested, random_pick};
@@ -8,6 +9,10 @@ use rbxmgr_core::types::{Profile, UserId};
 
 use super::Window;
 use crate::ui::accounts::leader::placeholder;
+
+/// How far ahead a macro run on several accounts at once is due to start:
+/// time for the slowest of their clients to be reached first.
+const TOGETHER: Duration = Duration::from_secs(1);
 
 /// A client up in a macro-ready window: whose it is, and where its display
 /// is linked.
@@ -113,10 +118,12 @@ impl Window {
         if chosen.is_empty() {
             return self.toast("Select the accounts to run it on");
         }
+        // One moment for all of them, so they play in step.
+        let together = Instant::now() + TOGETHER;
         for id in chosen {
             // A macro cannot reach a normal window once you look away.
             self.state_mut().accounts.set_nested(id, true);
-            self.start_macro(id, name);
+            self.start_macro(id, name, together);
         }
         self.save_accounts();
     }
@@ -136,7 +143,7 @@ impl Window {
         self.save_accounts();
         let name = self.state().accounts.get(id).and_then(|a| a.macro_name.clone());
         match name {
-            Some(name) => self.start_macro(id, &name),
+            Some(name) => self.start_macro(id, &name, Instant::now()),
             None => self.toast("Pick a macro first"),
         }
     }
@@ -220,7 +227,8 @@ impl Window {
     }
 
     /// Play `name` into the account's macro-ready client, on a thread.
-    pub fn start_macro(&self, id: UserId, name: &str) {
+    /// Its first step is due at `start`.
+    pub fn start_macro(&self, id: UserId, name: &str, start: Instant) {
         let (label, text) = {
             let s = self.state();
             let Some(label) = s.accounts.get(id).map(|a| a.name.clone()) else { return };
@@ -273,6 +281,7 @@ impl Window {
                     report: &report,
                     pick: &random_pick,
                     now: &now,
+                    start,
                 };
                 match player.play(&m, &stop) {
                     Ok(()) => log.line(format!(
