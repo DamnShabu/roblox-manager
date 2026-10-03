@@ -79,7 +79,7 @@
 
 /* -- the game strip -------------------------------------------------------- */
 .game-strip { padding: 2px 2px 8px; }
-button.game-tile { padding: 6px; border-radius: 14px; }
+button.game-tile { padding: 6px; border-radius: 14px; outline: none; }
 button.game-tile .tile-art {
   border-radius: 12px;
   background: var(--thumbnail-bg-color, var(--card-bg-color));
