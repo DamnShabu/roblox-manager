@@ -247,7 +247,10 @@ impl Player<'_> {
                 return Err(MacroError::NotRunning);
             }
             let round = done + 1;
-            for step in &m.steps {
+            let total = m.steps.len();
+            for (i, step) in m.steps.iter().enumerate() {
+                // Where this client's run is: each its own, from step 1.
+                let at = format!("round {round}, step {}/{total}", i + 1);
                 if stop.is_set() {
                     return Ok(());
                 }
@@ -258,14 +261,14 @@ impl Player<'_> {
                         if secs >= REPORTED_WAIT {
                             let until = (self.now)() + Duration::from_secs_f64(secs);
                             say(format!(
-                                "round {round}: waiting {secs:.0}s, until {}",
+                                "{at}: waiting {secs:.0}s, until {}",
                                 until.format("%H:%M:%S")
                             ));
                         }
                         held.idle(input, secs, stop, self.pick).map_err(went_away)?;
                     }
                     _ => {
-                        say(format!("round {round}: {}", describe(step)));
+                        say(format!("{at}: {}", describe(step)));
                         play_step(input, step, stop, self.pick, held).map_err(went_away)?;
                     }
                 }

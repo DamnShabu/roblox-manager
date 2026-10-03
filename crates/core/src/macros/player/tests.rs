@@ -287,7 +287,7 @@ fn stopping_at(
 }
 
 #[test]
-fn a_playing_macro_says_each_thing_once_and_the_waits_worth_watching() {
+fn a_playing_macro_says_each_step_it_is_at_and_the_waits_worth_watching() {
     let (sent, closed) = (Rc::default(), Rc::default());
     let stop = StopFlag::default();
     let reports = RefCell::new(Vec::new());
@@ -312,7 +312,13 @@ fn a_playing_macro_says_each_thing_once_and_the_waits_worth_watching() {
     player.play(&m.unwrap(), &stop).unwrap();
     assert_eq!(
         reports.into_inner(),
-        ["round 1: pressing e", "round 1: moving the mouse", "round 1: waiting 5s, until 12:00:04"]
+        [
+            "round 1, step 2/8: pressing e",
+            "round 1, step 3/8: pressing e",
+            "round 1, step 5/8: moving the mouse",
+            "round 1, step 6/8: moving the mouse",
+            "round 1, step 7/8: waiting 5s, until 12:00:04",
+        ]
     );
 }
 
@@ -349,10 +355,10 @@ fn every_round_lets_go_of_what_it_pressed_and_reports_itself() {
     assert_eq!(
         reports,
         [
-            "round 1: holding down w",
-            "round 1: holding down mouse1",
-            "round 2: holding down w",
-            "round 2: holding down mouse1",
+            "round 1, step 1/2: holding down w",
+            "round 1, step 2/2: holding down mouse1",
+            "round 2, step 1/2: holding down w",
+            "round 2, step 2/2: holding down mouse1",
         ]
     );
 }

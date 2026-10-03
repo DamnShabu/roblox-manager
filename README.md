@@ -215,6 +215,12 @@ Or press ▶ on a macro in the side pane to run it on every ticked account at
 once. That also turns on their macro-ready windows. A macro whose switch is
 off can't run.
 
+Each account plays its own run of the macro. Tick another account while it
+plays and press ▶ again: that account starts from step 1, and the ones
+already playing carry on where they are. Once every ticked account plays it,
+▶ becomes ■ and stops it everywhere. Each account's row shows where its run
+is, such as `round 2, step 3/7: pressing e`.
+
 **Why a macro-ready window?** Roblox ignores the keyboard when its window
 isn't focused. A macro-ready client runs on a small display of its own,
 inside a normal window on your desktop, where it always has focus. The macro
