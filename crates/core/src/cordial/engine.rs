@@ -84,16 +84,18 @@ fn valid_fps_cap(cap: &u64) -> bool {
 }
 
 /// A low-power client, for an account along for the ride: throttled when
-/// unfocused, FIFO-paced, no GameMode boost, 10 frames a second, a longer
+/// unfocused, FIFO-paced, no GameMode boost, 20 frames a second, a longer
 /// back-off in an idle poll loop (and niced by the launcher). These replace
-/// whatever the settings chose. Against 20 frames and the default 250 us
-/// back-off, on Stacked 0.21.6's landing page with input flowing, this took a
-/// client from 4.3% to 2.8% of a core and its GPU time by two thirds.
+/// whatever the settings chose. 20 rather than 10: a macro's presses only
+/// reach the game a frame at a time, and at 10 a press lands up to a tenth
+/// of a second off -- enough for clients playing the same macro to drift
+/// apart. (At 10 frames against 20 with the default 250 us back-off, on
+/// Stacked 0.21.6's landing page, a client went from 4.3% to 2.8% of a core.)
 pub const LOW_POWER_ENV: [(&str, &str); 5] = [
     ("CORDIAL_THROTTLE", "unfocused"),
     ("CORDIAL_PRESENT_MODE", "fifo"),
     ("CORDIAL_GAMEMODE", "0"),
-    (FPS_CAP, "10"),
+    (FPS_CAP, "20"),
     ("CORDIAL_POLL_COALESCE_US", "2000"),
 ];
 
@@ -228,7 +230,7 @@ mod tests {
                 ("CORDIAL_THROTTLE", "unfocused"),
                 ("CORDIAL_PRESENT_MODE", "fifo"),
                 ("CORDIAL_GAMEMODE", "0"),
-                ("CORDIAL_FPS_CAP", "10"),
+                ("CORDIAL_FPS_CAP", "20"),
                 ("CORDIAL_POLL_COALESCE_US", "2000"),
             ])
         );

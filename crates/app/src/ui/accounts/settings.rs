@@ -222,7 +222,7 @@ fn launching(
     let low = adw::SwitchRow::builder()
         .title("Low-Power Client")
         .subtitle(
-            "For an account along for the ride: 10 FPS, a lighter idle loop, lower priority, and \
+            "For an account along for the ride: 20 FPS, a lighter idle loop, lower priority, and \
              slower still out of focus. From the next launch.",
         )
         .active(acct.low_power)
