@@ -84,38 +84,32 @@ fn valid_fps_cap(cap: &u64) -> bool {
 }
 
 /// A low-power client, for an account along for the ride: throttled when
-/// unfocused, FIFO-paced, no GameMode boost, 20 frames a second (and niced
-/// by the launcher). These replace whatever the settings chose.
-pub const LOW_POWER_ENV: [(&str, &str); 4] = [
+/// unfocused, FIFO-paced, no GameMode boost, 10 frames a second, a longer
+/// back-off in an idle poll loop (and niced by the launcher). These replace
+/// whatever the settings chose. Against 20 frames and the default 250 us
+/// back-off, on Stacked 0.21.6's landing page with input flowing, this took a
+/// client from 4.3% to 2.8% of a core and its GPU time by two thirds.
+pub const LOW_POWER_ENV: [(&str, &str); 5] = [
     ("CORDIAL_THROTTLE", "unfocused"),
     ("CORDIAL_PRESENT_MODE", "fifo"),
     ("CORDIAL_GAMEMODE", "0"),
-    (FPS_CAP, "20"),
+    (FPS_CAP, "10"),
+    ("CORDIAL_POLL_COALESCE_US", "2000"),
 ];
 
-/// Its FastFlag in the profile's own flags.json: a cap on the engine's worker
-/// threads, which otherwise size themselves to every core in every client at
-/// once.
-pub const LOW_POWER_FLAGS: [(&str, i64); 1] = [("FIntTaskSchedulerAutoThreadLimit", 2)];
+/// What earlier versions wrote into the profile's flags.json, taken back out.
+/// The frame-rate target there would outrank one set anywhere else; the
+/// worker-thread cap was measured doing nothing (same 66 threads, same CPU),
+/// as Stacked's own docs/NEXT.md had already found.
+const LEGACY_LOW_POWER_FLAGS: [(&str, i64); 2] =
+    [("DFIntTaskSchedulerTargetFps", 20), ("FIntTaskSchedulerAutoThreadLimit", 2)];
 
-/// What earlier versions wrote there too, before the frame-rate target was
-/// an environment variable: taken back out, since in flags.json it would
-/// outrank a frame-rate target set anywhere else.
-const LEGACY_LOW_POWER_FLAGS: [(&str, i64); 1] = [("DFIntTaskSchedulerTargetFps", 20)];
-
-/// `flags` with the low-power values added, or taken back out. A value you
-/// set to something else yourself is never overwritten, nor removed.
-pub fn low_power_flags(flags: &Map<String, Value>, on: bool) -> Map<String, Value> {
+/// `flags` without what earlier versions of the low-power switch wrote. A
+/// value you set to something else yourself is never removed.
+pub fn without_legacy_low_power_flags(flags: &Map<String, Value>) -> Map<String, Value> {
     let mut flags = flags.clone();
     for (k, v) in LEGACY_LOW_POWER_FLAGS {
         if flags.get(k) == Some(&Value::from(v)) {
-            flags.remove(k);
-        }
-    }
-    for (k, v) in LOW_POWER_FLAGS {
-        if on {
-            flags.entry(k).or_insert(Value::from(v));
-        } else if flags.get(k) == Some(&Value::from(v)) {
             flags.remove(k);
         }
     }
@@ -234,7 +228,8 @@ mod tests {
                 ("CORDIAL_THROTTLE", "unfocused"),
                 ("CORDIAL_PRESENT_MODE", "fifo"),
                 ("CORDIAL_GAMEMODE", "0"),
-                ("CORDIAL_FPS_CAP", "20"),
+                ("CORDIAL_FPS_CAP", "10"),
+                ("CORDIAL_POLL_COALESCE_US", "2000"),
             ])
         );
     }
@@ -249,37 +244,14 @@ mod tests {
     }
 
     #[test]
-    fn low_power_adds_its_flags_and_never_overrides_yours() {
-        let mine = map(json!({"FIntTaskSchedulerAutoThreadLimit": 4, "FFlagX": true}));
-        assert_eq!(low_power_flags(&mine, true), mine);
-        assert_eq!(
-            Value::Object(low_power_flags(&map(json!({"FFlagX": true})), true)),
-            json!({"FFlagX": true, "FIntTaskSchedulerAutoThreadLimit": 2})
-        );
-    }
-
-    #[test]
-    fn the_frame_target_earlier_versions_wrote_is_taken_out_and_yours_kept() {
-        let ours =
-            map(json!({"DFIntTaskSchedulerTargetFps": 20, "FIntTaskSchedulerAutoThreadLimit": 2}));
-        assert_eq!(
-            Value::Object(low_power_flags(&ours, true)),
-            json!({"FIntTaskSchedulerAutoThreadLimit": 2})
-        );
-        assert!(low_power_flags(&ours, false).is_empty());
-        let yours = map(json!({"DFIntTaskSchedulerTargetFps": 144}));
-        assert_eq!(low_power_flags(&yours, false), yours);
-    }
-
-    #[test]
-    fn turning_low_power_off_takes_back_only_its_own_values() {
-        let mine = map(json!({"DFIntTaskSchedulerTargetFps": 144, "FFlagX": true}));
-        let with = map(
-            json!({"DFIntTaskSchedulerTargetFps": 144, "FFlagX": true, "FIntTaskSchedulerAutoThreadLimit": 2}),
-        );
-        assert_eq!(low_power_flags(&with, false), mine);
-        let only_ours = low_power_flags(&Map::new(), true);
-        assert!(low_power_flags(&only_ours, false).is_empty());
+    fn the_flags_earlier_versions_wrote_are_taken_out_and_yours_kept() {
+        let ours = map(json!({
+            "DFIntTaskSchedulerTargetFps": 20, "FIntTaskSchedulerAutoThreadLimit": 2, "FFlagX": true
+        }));
+        assert_eq!(Value::Object(without_legacy_low_power_flags(&ours)), json!({"FFlagX": true}));
+        let yours =
+            map(json!({"DFIntTaskSchedulerTargetFps": 144, "FIntTaskSchedulerAutoThreadLimit": 4}));
+        assert_eq!(without_legacy_low_power_flags(&yours), yours);
     }
 
     #[test]

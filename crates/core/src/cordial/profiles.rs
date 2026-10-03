@@ -116,10 +116,10 @@ impl CordialProfiles {
         Ok(())
     }
 
-    /// Bring the profile's flags.json in line with its low-power switch,
-    /// leaving the file untouched when nothing changes, and alone when it
-    /// does not parse (Cordial reports that itself).
-    pub fn set_low_power(&self, profile: &Profile, on: bool) -> Result<(), CordialError> {
+    /// Take what earlier low-power switches wrote back out of the profile's
+    /// flags.json, leaving the file untouched when nothing changes, and alone
+    /// when it does not parse (Cordial reports that itself).
+    pub fn clear_legacy_low_power_flags(&self, profile: &Profile) -> Result<(), CordialError> {
         let path = self.path(profile).join("flags.json");
         let flags: Map<String, Value> = match fs::read(&path) {
             Ok(bytes) => match serde_json::from_slice(&bytes) {
@@ -129,7 +129,7 @@ impl CordialProfiles {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Map::new(),
             Err(e) => return Err(io(&format!("could not read {}", path.display()), e)),
         };
-        let wanted = engine::low_power_flags(&flags, on);
+        let wanted = engine::without_legacy_low_power_flags(&flags);
         if wanted != flags {
             crate::json_file::write(&path, &wanted)
                 .map_err(|e| io(&format!("could not write {}", path.display()), e))?;
@@ -147,7 +147,7 @@ impl CordialProfiles {
         build: &Build,
         opts: ClientOpts,
     ) -> Result<(), CordialError> {
-        self.set_low_power(profile, opts.low_power)?;
+        self.clear_legacy_low_power_flags(profile)?;
         let mut env = engine::env(&engine::load_settings(&self.paths.cordial_shell_json()));
         if opts.low_power {
             env = engine::with_low_power(env);

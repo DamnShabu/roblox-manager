@@ -73,12 +73,15 @@ fn flags(w: &World, p: &Profile) -> PathBuf {
 }
 
 #[test]
-fn low_power_writes_its_flags_into_the_profile() {
+fn the_flags_earlier_low_power_switches_wrote_are_taken_out() {
     let w = world();
     let p = Profile::named("p");
-    w.profiles.set_low_power(&p, true).unwrap();
+    fs::create_dir_all(w.profiles.path(&p)).unwrap();
+    let old = r#"{"FIntTaskSchedulerAutoThreadLimit":2,"FFlagX":true}"#;
+    fs::write(flags(&w, &p), old).unwrap();
+    w.profiles.clear_legacy_low_power_flags(&p).unwrap();
     let written: Value = serde_json::from_slice(&fs::read(flags(&w, &p)).unwrap()).unwrap();
-    assert_eq!(written, json!({"FIntTaskSchedulerAutoThreadLimit": 2}));
+    assert_eq!(written, json!({"FFlagX": true}));
 }
 
 #[test]
@@ -86,11 +89,11 @@ fn flags_are_left_alone_when_nothing_changes() {
     let w = world();
     let p = Profile::named("p");
     fs::create_dir_all(w.profiles.path(&p)).unwrap();
-    let mine = r#"{"FIntTaskSchedulerAutoThreadLimit":2,"DFIntTaskSchedulerTargetFps":144}"#;
+    let mine = r#"{"FIntTaskSchedulerAutoThreadLimit":4,"DFIntTaskSchedulerTargetFps":144}"#;
     fs::write(flags(&w, &p), mine).unwrap();
-    w.profiles.set_low_power(&p, true).unwrap();
+    w.profiles.clear_legacy_low_power_flags(&p).unwrap();
     assert_eq!(fs::read_to_string(flags(&w, &p)).unwrap(), mine);
-    w.profiles.set_low_power(&Profile::named("q"), false).unwrap();
+    w.profiles.clear_legacy_low_power_flags(&Profile::named("q")).unwrap();
     assert!(!flags(&w, &Profile::named("q")).exists());
 }
 
@@ -100,7 +103,7 @@ fn flags_that_do_not_parse_are_not_overwritten() {
     let p = Profile::named("p");
     fs::create_dir_all(w.profiles.path(&p)).unwrap();
     fs::write(flags(&w, &p), "{broken").unwrap();
-    w.profiles.set_low_power(&p, true).unwrap();
+    w.profiles.clear_legacy_low_power_flags(&p).unwrap();
     assert_eq!(fs::read_to_string(flags(&w, &p)).unwrap(), "{broken");
 }
 
@@ -129,7 +132,7 @@ fn a_low_power_client_is_niced_throttled_and_capped() {
     for (k, v) in engine::LOW_POWER_ENV {
         assert!(env.contains(&(k.into(), v.into())), "{k}");
     }
-    assert!(flags(&w, &p).exists());
+    assert!(!flags(&w, &p).exists(), "low power writes no flags any more");
 }
 
 #[test]
