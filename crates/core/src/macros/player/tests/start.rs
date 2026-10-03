@@ -95,3 +95,38 @@ fn a_client_waiting_its_turn_says_until_when() {
     player.play(&parse("tap e\n").unwrap(), &stop).unwrap();
     assert_eq!(reports.into_inner(), ["waiting 10s for its turn, until 12:00:09"]);
 }
+
+#[test]
+fn a_client_started_after_another_plays_from_step_1_while_the_first_plays_on() {
+    let m = parse("hold w 0.1\nhold a 0.1\nhold s 0.1\nhold d 0.1\nhold e 0.1\nloop 1\n").unwrap();
+    // One thread a client; the second is started once the first is at step 3.
+    let play = |start: Instant| {
+        let reports = RefCell::new(Vec::new());
+        let player = Player {
+            display: Path::new("/run/user/1000/rbxmgr/rbxmgr-7.wayland"),
+            running: &|| true,
+            connect: &|_: &Path| -> io::Result<Box<dyn Input>> {
+                Ok(Box::new(Recorder::default()))
+            },
+            report: &|line| reports.borrow_mut().push((Instant::now(), line)),
+            pick: &top,
+            now: &Local::now,
+            start,
+        };
+        player.play(&m, &StopFlag::default()).unwrap();
+        reports.into_inner()
+    };
+    let first_start = Instant::now();
+    let second_start = first_start + Duration::from_millis(250);
+    let [first, second] = std::thread::scope(|s| {
+        [first_start, second_start].map(|at| s.spawn(move || play(at))).map(|c| c.join().unwrap())
+    });
+    let steps = |reports: &[(Instant, String)]| -> Vec<String> {
+        reports.iter().map(|(_, line)| line.split(':').next().unwrap_or("").to_owned()).collect()
+    };
+    let all: Vec<String> = (1..=5).map(|n| format!("round 1, step {n}/5")).collect();
+    assert_eq!(steps(&first), all, "the first plays every step, uninterrupted");
+    assert_eq!(steps(&second), all, "the second starts from step 1");
+    assert!(first[2].0 < second[0].0, "the first was at step 3 when the second began");
+    assert!(first[3].0 > second[0].0, "and went on to step 4 after");
+}

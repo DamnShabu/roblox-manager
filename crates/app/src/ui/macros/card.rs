@@ -6,6 +6,7 @@ use rbxmgr_core::macros::grammar::{self, loop_label};
 use rbxmgr_core::macros::lanes;
 
 use super::editor::MacroDialog;
+use crate::state::MacroRun;
 use crate::ui::widgets::{
     self, Btn, Fluent, LabelFluent, boxed_list, hotkey_label, icon, lbl, plural, switch,
     toggle_class,
@@ -150,23 +151,30 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
         } else {
             about.clone()
         });
-        let n = s.accounts.selected().len();
+        // Run starts it on the selected accounts not yet playing it; once
+        // every selected one plays it, the same button stops it.
+        let action = s.macro_run(&name);
+        let (stop, n) = match &action {
+            MacroRun::Start(fresh) => (false, fresh.len()),
+            MacroRun::Stop => (true, 0),
+            MacroRun::Nothing => (false, 0),
+        };
         for b in [&run, &run_on] {
-            b.set_icon(if playing > 0 {
+            b.set_icon(if stop {
                 "media-playback-stop-symbolic"
             } else {
                 "media-playback-start-symbolic"
             });
-            b.button.set_sensitive(playing > 0 || (can && n > 0));
+            b.button.set_sensitive(stop || (can && n > 0));
         }
-        run_on.set_text(&if playing > 0 {
-            "Stop".to_owned()
-        } else {
-            format!("Run on {n} Selected")
+        run_on.set_text(&match (stop, playing) {
+            (true, _) => "Stop".to_owned(),
+            (false, 0) => format!("Run on {n} Selected"),
+            (false, _) => format!("Run on {n} More"),
         });
-        toggle_class(&run_on.button, "suggested-action", playing == 0);
-        toggle_class(&run_on.button, "destructive-action", playing > 0);
-        let tip = if playing > 0 {
+        toggle_class(&run_on.button, "suggested-action", !stop);
+        toggle_class(&run_on.button, "destructive-action", stop);
+        let tip = if stop {
             "Stop it everywhere it plays".to_owned()
         } else if !s.macros.enabled(&name) {
             "Switched off: switch it on to run it".to_owned()
@@ -174,6 +182,11 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
             "Fix its steps to run it".to_owned()
         } else if n == 0 {
             "Select the accounts to run it on".to_owned()
+        } else if playing > 0 {
+            format!(
+                "Start it from the top on {}; where it already plays, it plays on",
+                plural(n, "more selected account", "more selected accounts")
+            )
         } else {
             format!(
                 "Play it into {}",
@@ -181,7 +194,7 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
             )
         };
         run.button.set_tooltip_text(Some(&tip));
-        widgets::name(&run.button, if playing > 0 { "Stop" } else { "Run" });
+        widgets::name(&run.button, if stop { "Stop" } else { "Run" });
         run_on.button.set_tooltip_text(Some(&tip));
     }));
     list

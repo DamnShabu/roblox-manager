@@ -90,6 +90,9 @@ pub struct AppState {
     pub joining: HashSet<UserId>,
     /// Each account's playing macro: what stops it, and its name.
     pub macro_runs: HashMap<UserId, (StopFlag, String)>,
+    /// Where each account's playing macro is: the last thing it reported
+    /// ("round 3, step 4/9: pressing e"), shown on its row. None said yet is absent.
+    pub macro_progress: HashMap<UserId, String>,
     /// The account a recording hears, while one is armed or under way.
     pub recording: Option<UserId>,
     /// Launches under way: what stops each, and the accounts it starts.
@@ -120,6 +123,17 @@ pub struct AppState {
     pub busy: u32,
 }
 
+/// What a macro's Run does, given what plays where.
+#[derive(Debug, PartialEq, Eq)]
+pub enum MacroRun {
+    /// Start it on these accounts, in the order listed.
+    Start(Vec<UserId>),
+    /// Stop it everywhere it plays.
+    Stop,
+    /// No account is selected, and it plays nowhere.
+    Nothing,
+}
+
 impl AppState {
     pub fn new(accounts: AccountStore, macros: MacroLibrary) -> Self {
         AppState {
@@ -130,6 +144,7 @@ impl AppState {
             launching: HashSet::new(),
             joining: HashSet::new(),
             macro_runs: HashMap::new(),
+            macro_progress: HashMap::new(),
             recording: None,
             launches: Vec::new(),
             open_macros: HashSet::new(),
@@ -245,9 +260,25 @@ impl AppState {
         if parts.is_empty() { "All idle".to_owned() } else { parts.join(" · ") }
     }
 
-    /// The macros playing anywhere.
-    pub fn macros_running(&self) -> HashSet<&str> {
-        self.macro_runs.values().map(|(_, m)| m.as_str()).collect()
+    /// What a macro's Run does now: start it on the selected accounts not
+    /// already playing it -- each from its first step, the others playing
+    /// on as they are -- or, once every selected one plays it, stop it
+    /// everywhere.
+    pub fn macro_run(&self, name: &str) -> MacroRun {
+        let fresh: Vec<UserId> = self
+            .accounts
+            .selected()
+            .iter()
+            .map(|a| a.user_id)
+            .filter(|id| !self.macro_runs.get(id).is_some_and(|(_, m)| m == name))
+            .collect();
+        if !fresh.is_empty() {
+            MacroRun::Start(fresh)
+        } else if self.macro_runs.values().any(|(_, m)| m == name) {
+            MacroRun::Stop
+        } else {
+            MacroRun::Nothing
+        }
     }
 
     /// Add an activity line; the log keeps the latest [`ACTIVITY_KEPT`].
@@ -364,6 +395,27 @@ mod tests {
         s.launching.clear();
         s.macro_runs.insert(UserId(1), (StopFlag::default(), "m".into()));
         assert_eq!(s.status_line(), "2 running · 1 macro playing");
+    }
+
+    #[test]
+    fn run_starts_a_macro_on_the_selected_accounts_not_yet_playing_it() {
+        let (_d, mut s) = state();
+        s.accounts.set_selected(&[UserId(1), UserId(2)], false);
+        assert_eq!(s.macro_run("m"), MacroRun::Nothing);
+        s.accounts.set_selected(&[UserId(1)], true);
+        assert_eq!(s.macro_run("m"), MacroRun::Start(vec![UserId(1)]));
+        s.macro_runs.insert(UserId(1), (StopFlag::default(), "m".into()));
+        assert_eq!(s.macro_run("m"), MacroRun::Stop, "every selected one plays it");
+        s.accounts.set_selected(&[UserId(2)], true);
+        assert_eq!(
+            s.macro_run("m"),
+            MacroRun::Start(vec![UserId(2)]),
+            "the one playing it plays on; only the other starts"
+        );
+        s.macro_runs.insert(UserId(2), (StopFlag::default(), "other".into()));
+        assert_eq!(s.macro_run("m"), MacroRun::Start(vec![UserId(2)]), "playing another macro");
+        s.accounts.set_selected(&[UserId(1), UserId(2)], false);
+        assert_eq!(s.macro_run("m"), MacroRun::Stop, "none selected: it can still be stopped");
     }
 
     #[test]

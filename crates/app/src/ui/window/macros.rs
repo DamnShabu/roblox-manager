@@ -4,10 +4,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use adw::prelude::*;
+use gtk::glib;
 use rbxmgr_core::macros::{self, Player, Seed, StopFlag, VirtualInput, nested};
 use rbxmgr_core::types::{Profile, UserId};
 
 use super::Window;
+use crate::state::MacroRun;
 use crate::ui::accounts::leader::placeholder;
 
 /// How far ahead a macro run on several accounts at once is due to start:
@@ -105,18 +107,17 @@ impl Window {
         }
     }
 
-    /// Run: the macro on every selected account. Stop: wherever it plays.
+    /// Run: the macro on every selected account not already playing it,
+    /// each from its first step; those already playing it play on. Stop,
+    /// once every selected one plays it: wherever it plays.
     pub fn run_macro_card(&self, name: &str) {
-        if self.state().macros_running().contains(name) {
-            return self.stop_macro(name);
-        }
+        let chosen = match self.state().macro_run(name) {
+            MacroRun::Start(chosen) => chosen,
+            MacroRun::Stop => return self.stop_macro(name),
+            MacroRun::Nothing => return self.toast("Select the accounts to run it on"),
+        };
         if !self.state().macros.enabled(name) {
             return self.toast(&format!("{name} is switched off"));
-        }
-        let chosen: Vec<UserId> =
-            self.state().accounts.selected().iter().map(|a| a.user_id).collect();
-        if chosen.is_empty() {
-            return self.toast("Select the accounts to run it on");
         }
         // One moment for all of them, so they play in step -- or, staggered,
         // a turn each from it, in the order listed -- and one seed, so they
@@ -261,7 +262,11 @@ impl Window {
         };
         // One macro per client: two typing into one display would interleave.
         let stop = StopFlag::default();
-        let previous = self.state_mut().macro_runs.insert(id, (stop.clone(), name.to_owned()));
+        let previous = {
+            let mut s = self.state_mut();
+            s.macro_progress.remove(&id);
+            s.macro_runs.insert(id, (stop.clone(), name.to_owned()))
+        };
         if let Some((old, _)) = previous {
             old.set();
         }
@@ -272,6 +277,7 @@ impl Window {
         let (profiles, log, name) =
             (self.services().profiles.clone(), self.logger(), name.to_owned());
         let mine = stop.clone();
+        let progress = self.show_progress(id, &stop);
         let weak = self.weak();
         worker::run(
             move || {
@@ -279,7 +285,11 @@ impl Window {
                 let connect = |p: &std::path::Path| -> std::io::Result<Box<dyn macros::Input>> {
                     Ok(Box::new(VirtualInput::connect(p)?))
                 };
-                let report = |text: String| log.line(format!("{label}: {name} -- {text}"));
+                let report = |text: String| {
+                    log.line(format!("{label}: {name} -- {text}"));
+                    // The receiver only goes away with the main loop.
+                    let _ = progress.send_blocking(text);
+                };
                 let now = chrono::Local::now;
                 let pick = seed.picker();
                 let player = Player {
@@ -305,10 +315,35 @@ impl Window {
                 // Only this run's entry: a newer run may have replaced it.
                 if s.macro_runs.get(&id).is_some_and(|(flag, _)| flag.same_as(&mine)) {
                     s.macro_runs.remove(&id);
+                    s.macro_progress.remove(&id);
                 }
                 drop(s);
                 w.refresh_states();
             },
         );
+    }
+
+    /// Where the run `stop` stops on account `id` is, from what it reports:
+    /// sent here from its thread, shown on its row. A burst is shown as its
+    /// last, and nothing from a run another has since replaced is shown.
+    fn show_progress(&self, id: UserId, stop: &StopFlag) -> async_channel::Sender<String> {
+        let (tx, rx) = async_channel::unbounded::<String>();
+        let (weak, run) = (self.weak(), stop.clone());
+        glib::spawn_future_local(async move {
+            while let Ok(mut latest) = rx.recv().await {
+                while let Ok(newer) = rx.try_recv() {
+                    latest = newer;
+                }
+                let Some(w) = weak.upgrade() else { return };
+                let mut s = w.state_mut();
+                if !s.macro_runs.get(&id).is_some_and(|(flag, _)| flag.same_as(&run)) {
+                    return;
+                }
+                s.macro_progress.insert(id, latest);
+                drop(s);
+                w.refresh_states();
+            }
+        });
+        tx
     }
 }

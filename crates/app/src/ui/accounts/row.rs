@@ -23,9 +23,10 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
         let m = acct.macro_name.clone().filter(|m| s.macros.contains(m));
         (m, w.services().avatars.cached(&id.to_string()))
     };
+    let about = subtitle(acct, macro_shown.as_deref());
     let row = adw::ActionRow::builder()
         .title(acct.name.as_str())
-        .subtitle(subtitle(acct, macro_shown.as_deref()))
+        .subtitle(&about)
         .use_markup(false)
         .title_lines(1)
         .subtitle_lines(1)
@@ -112,11 +113,19 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
     }
 
     let leader = acct.leader;
+    let shown = row.clone();
     w.watch_accounts(Box::new(move |s| {
         let chip = s.chip(id);
         clear(&status_box);
-        if let Some((_, playing)) = s.macro_runs.get(&id) {
-            status_box.append(&status("macro", playing, true).tip("The macro playing on it"));
+        // While a macro plays, the subtitle says where this account's run
+        // is: each account its own, however many play the same macro.
+        match s.macro_runs.get(&id) {
+            Some((_, playing)) => {
+                status_box.append(&status("macro", playing, true).tip("The macro playing on it"));
+                let at = s.macro_progress.get(&id).map_or("starting", String::as_str);
+                shown.set_subtitle(&format!("{playing}: {at}"));
+            }
+            None => shown.set_subtitle(&about),
         }
         if chip != Chip::Idle {
             let (css, text, live) = chip.look();
