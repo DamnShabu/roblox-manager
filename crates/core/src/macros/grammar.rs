@@ -5,6 +5,9 @@ use std::fmt;
 
 use super::keys::{self, BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT};
 
+pub mod timeline;
+pub use timeline::Timed;
+
 /// A tap is a short hold: its press length is random as well.
 pub const TAP_PRESS: (f64, f64) = (0.04, 0.12);
 /// Typed characters are this far apart.
@@ -21,7 +24,7 @@ const FURTHEST: i32 = 65_535;
 const MOST_NOTCHES: i32 = 1000;
 
 /// The editor's step types and the command each is in a macro's text.
-const STEP_TYPES: [(&str, &str); 12] = [
+const STEP_TYPES: [(&str, &str); 16] = [
     ("Key", "tap"),
     ("Hold", "hold"),
     ("Press", "press"),
@@ -34,6 +37,10 @@ const STEP_TYPES: [(&str, &str); 12] = [
     ("Wait", "wait"),
     ("Start", "start"),
     ("Note", "#"),
+    ("Timeline", "timeline"),
+    ("At", "at"),
+    ("Path", "path"),
+    ("Turn", "turn"),
 ];
 
 /// One line as the editor shows it: a step type and its value.
@@ -89,6 +96,18 @@ pub enum Step {
     Scroll {
         horizontal: bool,
         notches: i32,
+    },
+    /// The pointer along a path: (seconds from the step's start, x, y),
+    /// gliding from point to point; the first is where it starts.
+    Path(Vec<(f64, i32, i32)>),
+    /// Raw mouse movement -- what a game turns its camera by: (seconds from
+    /// the step's start, how far it has moved all told), from nothing.
+    Turn(Vec<(f64, f64, f64)>),
+    /// Steps that each start at a time of their own and play over one
+    /// another; it lasts `secs`, or until its last step has played.
+    Timeline {
+        secs: (f64, f64),
+        items: Vec<Timed>,
     },
 }
 
@@ -212,13 +231,26 @@ pub fn loop_label(loops: u32) -> String {
 /// The steps a macro's text stands for. The error names the line at fault.
 pub fn parse(text: &str) -> Result<Macro, ParseError> {
     let mut m = Macro { loops: 0, steps: Vec::new() };
+    // Whether the last step is a timeline its `at` lines still go under.
+    let mut open = false;
     for line in lines(text) {
         if line.command == "#" {
             continue;
         }
         let at_line = |message: String| ParseError { line: Some(line.number), message };
+        if line.command == "at" {
+            let item = timed(&line).map_err(at_line)?;
+            match m.steps.last_mut() {
+                Some(Step::Timeline { items, .. }) if open => items.push(item),
+                _ => return Err(at_line("an 'at' step goes under a 'timeline' line".into())),
+            }
+            continue;
+        }
         match step(&line).map_err(at_line)? {
-            Parsed::Step(s) => m.steps.push(s),
+            Parsed::Step(s) => {
+                open = matches!(s, Step::Timeline { .. });
+                m.steps.push(s);
+            }
             Parsed::Loops(n) => m.loops = n,
         }
     }
@@ -265,12 +297,32 @@ fn step(line: &Line<'_>) -> Result<Parsed, String> {
             Step::MoveTo { x: int(x)?, y: int(y)?, lo, hi }
         }
         ("scroll", args) => scroll(args)?,
+        ("path", _) => timeline::path(line.rest)?,
+        ("turn", _) => timeline::turn(line.rest)?,
+        ("timeline", []) => Step::Timeline { secs: (0.0, 0.0), items: Vec::new() },
+        ("timeline", [secs]) => Step::Timeline { secs: seconds(secs)?, items: Vec::new() },
         ("loop", [n]) if n.bytes().all(|b| b.is_ascii_digit()) => {
             return Ok(Parsed::Loops(n.parse().map_err(|_| format!("not a count: '{n}'"))?));
         }
         _ => return Err(format!("don't understand '{}'", line.text)),
     };
     Ok(Parsed::Step(step))
+}
+
+/// An `at` line: one of the steps that may start at a time of its own.
+fn timed(line: &Line<'_>) -> Result<Timed, String> {
+    let (at, rest) = timeline::at(line.rest)?;
+    let (command, rest) = rest.split_once(' ').unwrap_or((rest, ""));
+    let command = alias(&command.to_lowercase()).to_owned();
+    if !timeline::TIMED.contains(&command.as_str()) {
+        let allowed = timeline::TIMED.join(", ");
+        return Err(format!("a timeline cannot '{command}' -- only {allowed}"));
+    }
+    let inner = Line { command, rest: rest.trim(), ..*line };
+    match step(&inner)? {
+        Parsed::Step(step) => Ok(Timed { at, step }),
+        Parsed::Loops(_) => Err(format!("don't understand '{}'", line.text)),
+    }
 }
 
 fn hold(token: &str, (lo, hi): (f64, f64)) -> Result<Step, String> {
@@ -384,6 +436,9 @@ pub fn describe(step: &Step) -> String {
         Step::Click { .. } => "clicking".into(),
         Step::Move(..) | Step::MoveTo { .. } => "moving the mouse".into(),
         Step::Scroll { .. } => "scrolling".into(),
+        Step::Path(_) => "moving the mouse".into(),
+        Step::Turn(_) => "turning the camera".into(),
+        Step::Timeline { .. } => "playing a timeline".into(),
         Step::Wait(..) | Step::Start(..) => "waiting".into(),
     }
 }

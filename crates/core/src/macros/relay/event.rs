@@ -22,6 +22,12 @@ pub enum Heard {
         horizontal: bool,
         value120: i32,
     },
+    /// Raw mouse movement, unaccelerated: what a game turns its camera by,
+    /// heard whether or not the pointer moves.
+    Turn {
+        dx: f64,
+        dy: f64,
+    },
 }
 
 /// An input, and when it came: seconds from the start of the recording.
@@ -44,6 +50,7 @@ impl Event {
             Heard::Scroll { horizontal, value120 } => {
                 format!("scroll {at:.3} {} {value120}", if *horizontal { "h" } else { "v" })
             }
+            Heard::Turn { dx, dy } => format!("turn {at:.3} {dx} {dy}"),
         }
     }
 
@@ -62,6 +69,7 @@ impl Event {
             ("key", [code, s]) => Heard::Key { code: code.parse().ok()?, down: state(s)? },
             ("button", [code, s]) => Heard::Button { code: code.parse().ok()?, down: state(s)? },
             ("motion", [x, y]) => Heard::Motion { x: number(x)?, y: number(y)? },
+            ("turn", [dx, dy]) => Heard::Turn { dx: number(dx)?, dy: number(dy)? },
             ("scroll", [axis, v]) => Heard::Scroll {
                 horizontal: match *axis {
                     "h" => true,
@@ -99,6 +107,7 @@ mod tests {
                 "scroll 3.000 v -240",
             ),
             (event(4.0, Heard::Scroll { horizontal: true, value120: 120 }), "scroll 4.000 h 120"),
+            (event(5.0, Heard::Turn { dx: 2.5, dy: -1.0 }), "turn 5.000 2.5 -1"),
         ];
         for (e, line) in lines {
             assert_eq!(e.line(), line);

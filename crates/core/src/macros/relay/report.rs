@@ -155,7 +155,7 @@ impl State {
                     self.down.push(heard.clone());
                 }
             }
-            Heard::Scroll { .. } => {}
+            Heard::Scroll { .. } | Heard::Turn { .. } => {}
         }
     }
 

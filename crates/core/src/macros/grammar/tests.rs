@@ -229,3 +229,53 @@ fn a_repeat_taps_every_so_often_for_a_time() {
         assert!(err.contains(why), "{bad:?}: {err}");
     }
 }
+
+#[test]
+fn a_timeline_holds_the_at_steps_under_it() {
+    let src = "start 5\ntimeline 3\n# a note inside\nat 0 hold w 1.4\nat 0.95 tap space 0.08\n\
+               at 0.3 path 0 400 300, 0.25 520 310\nat 1 turn 0.5 40.5 -3\nwait 1\n";
+    let m = parse(src).unwrap();
+    assert_eq!(m.steps.len(), 3);
+    let Step::Timeline { secs, items } = &m.steps[1] else { panic!("{:?}", m.steps[1]) };
+    assert_eq!(*secs, (3.0, 3.0));
+    let at: Vec<(f64, &Step)> = items.iter().map(|i| (i.at.0, &i.step)).collect();
+    assert_eq!(
+        at,
+        [
+            (0.0, &Step::Hold { keys: vec![17], lo: 1.4, hi: 1.4 }),
+            (0.95, &Step::Hold { keys: vec![57], lo: 0.08, hi: 0.08 }),
+            (0.3, &Step::Path(vec![(0.0, 400, 300), (0.25, 520, 310)])),
+            (1.0, &Step::Turn(vec![(0.5, 40.5, -3.0)])),
+        ]
+    );
+    let (r, loops) = rows(src);
+    assert_eq!(r[1], Row { kind: "Timeline".into(), value: "3".into() });
+    assert_eq!(r[3], Row { kind: "At".into(), value: "0 hold w 1.4".into() });
+    assert_eq!(to_text(&r, loops), src);
+}
+
+#[test]
+fn an_at_step_outside_a_timeline_or_one_it_cannot_time_is_refused() {
+    for (bad, why) in [
+        ("at 1 tap e", "goes under a 'timeline'"),
+        ("timeline\nwait 1\nat 1 tap e", "goes under a 'timeline'"),
+        ("timeline\nat 1 wait 2", "a timeline cannot 'wait'"),
+        ("timeline\nat 1 type hi", "a timeline cannot 'type'"),
+        ("timeline\nat x tap e", "not a duration"),
+        ("timeline\nat 1", "expected at SECONDS STEP"),
+        ("path 1 2 3, 0.5 4 5", "times go forward"),
+        ("path 0 2", "expected path"),
+        ("turn 0 1 1e9", "a turn reaches at most"),
+    ] {
+        let err = parse(bad).unwrap_err().to_string();
+        assert!(err.contains(why), "{bad:?}: {err}");
+    }
+}
+
+#[test]
+fn a_timeline_lasts_until_its_last_step_ends() {
+    let m = parse("timeline 1\nat 0.5 hold w 2\nat 0 path 0 1 1, 3 2 2").unwrap();
+    assert_eq!(timeline::length(&m.steps[0]), 3.0);
+    assert_eq!(describe(&m.steps[0]), "playing a timeline");
+    assert_eq!(describe(&Step::Turn(vec![])), "turning the camera");
+}

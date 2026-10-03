@@ -3,6 +3,7 @@
 use adw::prelude::*;
 use gtk::Align;
 use rbxmgr_core::macros::grammar::{self, loop_label};
+use rbxmgr_core::macros::lanes;
 
 use super::editor::MacroDialog;
 use crate::ui::widgets::{
@@ -20,11 +21,12 @@ pub fn step_icon(kind: &str) -> &'static str {
     match kind {
         "Key" | "Hold" | "Press" | "Release" | "Repeat" => "input-keyboard-symbolic",
         "Type" => "insert-text-symbolic",
-        "Click" | "Scroll" => "input-mouse-symbolic",
+        "Click" | "Scroll" | "Path" | "Turn" => "input-mouse-symbolic",
         "Move" => "go-jump-symbolic",
         "Wait" => "appointment-soon-symbolic",
         "Start" => "alarm-symbolic",
         "Note" => "text-x-generic-symbolic",
+        "Timeline" | "At" => "document-open-recent-symbolic",
         _ => "system-run-symbolic",
     }
 }
@@ -40,7 +42,7 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
         )
     };
     let (rows, loops) = grammar::rows(&text);
-    let steps = rows.iter().filter(|r| r.kind != "Note").count();
+    let steps = rows.iter().filter(|r| !matches!(r.kind.as_str(), "Note" | "Timeline")).count();
     let mut about = Vec::new();
     if hotkey.is_some() {
         about.push(hotkey_label(hotkey.as_deref()));
@@ -82,8 +84,15 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
 
     // Unfolded: the steps, what is wrong with them, Edit and Run.
     let body = vbox!(4, "macro-steps");
-    for r in rows.iter().filter(|r| r.kind != "Note").take(SHOWN_STEPS) {
-        let shown = if matches!(r.kind.as_str(), "Wait" | "Start") && !r.value.is_empty() {
+    let units = lanes::units(&rows);
+    let listed: Vec<(usize, usize)> =
+        units.iter().copied().filter(|(i, _)| rows[*i].kind != "Note").collect();
+    for &(i, len) in listed.iter().take(SHOWN_STEPS) {
+        let r = &rows[i];
+        let shown = if r.kind == "Timeline" {
+            let (drawn, n) = lanes::of_rows(&rows[i..i + len]);
+            format!("{:.1} s · {}", drawn.secs, plural(n, "step", "steps"))
+        } else if matches!(r.kind.as_str(), "Wait" | "Start") && !r.value.is_empty() {
             format!("{} s", r.value)
         } else if r.value.is_empty() {
             "—".to_owned()
@@ -94,12 +103,12 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
             10,
             "macro-step",
             icon(step_icon(&r.kind)),
-            lbl(&r.kind, "kind").width(44),
+            lbl(&r.kind, "kind").width(64),
             lbl(&shown, "monospace dimmed").ellipsize().hexpand()
         ));
     }
-    if steps > SHOWN_STEPS {
-        let more = plural(steps - SHOWN_STEPS, "more step", "more steps");
+    if listed.len() > SHOWN_STEPS {
+        let more = plural(listed.len() - SHOWN_STEPS, "more step", "more steps");
         body.append(&lbl(&format!("…and {more}"), "dimmed caption"));
     }
     if rows.iter().all(|r| r.kind == "Note") {

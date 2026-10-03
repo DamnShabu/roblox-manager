@@ -12,6 +12,7 @@
 
 pub mod grammar;
 pub mod keys;
+pub mod lanes;
 mod library;
 pub mod nested;
 pub mod player;

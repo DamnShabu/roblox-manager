@@ -12,6 +12,7 @@ use super::keys::{self, SHIFT};
 pub use crate::stop::StopFlag;
 
 mod repeat;
+mod timeline;
 
 /// How often a gliding pointer moves on: a hundred times a second.
 const GLIDE_TICK: f64 = 0.01;
@@ -27,7 +28,9 @@ const MOST_BEHIND: f64 = 0.25;
 /// and a recorder in the self-check. Dropping it lets go of the display.
 pub trait Input {
     fn key(&mut self, code: u16, down: bool) -> io::Result<()>;
-    fn motion(&mut self, dx: i32, dy: i32) -> io::Result<()>;
+    /// The pointer moved by (`dx`, `dy`): raw movement, as a mouse sends it,
+    /// to 256ths of a unit.
+    fn motion(&mut self, dx: f64, dy: f64) -> io::Result<()>;
     fn button(&mut self, code: u16, down: bool) -> io::Result<()>;
     /// The pointer to (`x`, `y`), from the display's top-left corner.
     fn move_to(&mut self, x: i32, y: i32) -> io::Result<()>;
@@ -276,7 +279,7 @@ pub fn play_step(
             press(input, &[*button], tap(), stop, pick, held)
         }
         Step::Move(dx, dy) => {
-            input.motion(*dx, *dy)?;
+            input.motion(f64::from(*dx), f64::from(*dy))?;
             held.at = held.at.map(|(x, y)| (x.saturating_add(*dx), y.saturating_add(*dy)));
             Ok(())
         }
@@ -287,6 +290,10 @@ pub fn play_step(
             held.repeats.start(input, keys, pick(*lo, *hi), *every, pick)
         }
         Step::Scroll { horizontal, notches } => input.scroll(*horizontal, *notches),
+        Step::Path(_) | Step::Turn(_) => timeline::alone(input, step, stop, pick, held),
+        Step::Timeline { secs, items } => {
+            timeline::play(input, items, pick(secs.0, secs.1), stop, pick, held)
+        }
         Step::Wait(..) | Step::Start(..) => Ok(()),
     }
 }

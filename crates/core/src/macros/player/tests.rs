@@ -11,7 +11,7 @@ use crate::macros::keys::{BUTTON_LEFT, BUTTON_RIGHT};
 enum Sent {
     Key(u16, bool),
     Button(u16, bool),
-    Motion(i32, i32),
+    Motion(f64, f64),
     MoveTo(i32, i32),
     Scroll(bool, i32),
 }
@@ -35,7 +35,7 @@ impl Input for Recorder {
         self.note(Sent::Key(code, down));
         Ok(())
     }
-    fn motion(&mut self, dx: i32, dy: i32) -> io::Result<()> {
+    fn motion(&mut self, dx: f64, dy: f64) -> io::Result<()> {
         self.note(Sent::Motion(dx, dy));
         Ok(())
     }

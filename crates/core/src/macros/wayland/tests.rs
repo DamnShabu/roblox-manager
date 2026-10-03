@@ -140,7 +140,7 @@ fn keys_arrive_with_a_real_keymap_and_explicit_modifiers() {
     input.key(35, true).unwrap();
     input.key(35, false).unwrap();
     input.key(keys::SHIFT, false).unwrap();
-    input.motion(3, -4).unwrap();
+    input.motion(3.0, -4.5).unwrap();
     input.button(keys::BUTTON_LEFT, true).unwrap();
     drop(input);
     server.join().unwrap();
@@ -171,7 +171,7 @@ fn keys_arrive_with_a_real_keymap_and_explicit_modifiers() {
     );
     assert!(on_kbd.iter().any(|(op, _)| *op == 3), "the keyboard is destroyed on drop");
     let motion = seen.requests.iter().find(|(o, op, _)| *o == kbd + 1 && *op == 0).unwrap();
-    assert_eq!((word(&motion.2, 4) as i32, word(&motion.2, 8) as i32), (3 * 256, -4 * 256));
+    assert_eq!((word(&motion.2, 4) as i32, word(&motion.2, 8) as i32), (3 * 256, -4 * 256 - 128));
 }
 
 #[test]

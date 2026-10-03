@@ -377,3 +377,4 @@ impl MacroDialog {
 }
 
 mod steps;
+mod timeline;

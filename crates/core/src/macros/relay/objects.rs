@@ -13,6 +13,10 @@ pub struct Objects {
     seats: HashSet<u32>,
     keyboards: HashSet<u32>,
     pointers: HashSet<u32>,
+    /// The client's relative-pointer managers, and the relative pointers
+    /// it gets from them: where raw mouse movement comes.
+    relative_managers: HashSet<u32>,
+    relatives: HashSet<u32>,
     /// What the next axis event on each axis (vertical, horizontal) turns,
     /// in 120ths of a notch, from the wheel event just before it.
     notches: [Option<i32>; 2],
@@ -32,8 +36,8 @@ pub enum Input {
 }
 
 impl Objects {
-    /// A request from the client: note the registries, seats, keyboards and
-    /// pointers it makes. Made before the display can answer, so known by
+    /// A request from the client: note the registries, seats, keyboards,
+    /// pointers and relative pointers it makes. Made before the display can answer, so known by
     /// the time any event on them comes back.
     pub fn request(&mut self, msg: &[u8]) {
         let (obj, op) = header(msg);
@@ -44,16 +48,22 @@ impl Objects {
             }
             0 if self.registries.contains(&obj) => {
                 // bind(name, interface, version, id): the id after the string.
-                if read_str(body, 4).as_deref() == Some("wl_seat") {
-                    let padded = (word(body, 4) as usize + 3) & !3;
-                    self.seats.insert(word(body, 12 + padded));
-                }
+                let padded = (word(body, 4) as usize + 3) & !3;
+                let id = word(body, 12 + padded);
+                match read_str(body, 4).as_deref() {
+                    Some("wl_seat") => self.seats.insert(id),
+                    Some("zwp_relative_pointer_manager_v1") => self.relative_managers.insert(id),
+                    _ => false,
+                };
             }
             0 if self.seats.contains(&obj) => {
                 self.pointers.insert(word(body, 0)); // get_pointer
             }
             1 if self.seats.contains(&obj) => {
                 self.keyboards.insert(word(body, 0)); // get_keyboard
+            }
+            1 if self.relative_managers.contains(&obj) => {
+                self.relatives.insert(word(body, 0)); // get_relative_pointer
             }
             _ => {}
         }
@@ -67,8 +77,10 @@ impl Objects {
         let body = msg.get(8..).unwrap_or_default();
         let (heard, time) = self.decode(obj, op, body)?;
         // Every input event leads with its serial or its time, which the
-        // copies of one input sent to each keyboard or pointer share.
-        let delivery = (word(body, 0), heard);
+        // copies of one input sent to each keyboard or pointer share; raw
+        // movement with its time in microseconds, whose low word moves on.
+        let stamp = if self.relatives.contains(&obj) { word(body, 4) } else { word(body, 0) };
+        let delivery = (stamp, heard);
         if self.last.as_ref() == Some(&delivery) {
             return Some(Input::Again);
         }
@@ -81,12 +93,26 @@ impl Objects {
     fn decode(&mut self, obj: u32, op: u16, body: &[u8]) -> Option<(Heard, Option<u32>)> {
         if obj == DISPLAY && op == 1 {
             let id = word(body, 0); // delete_id
-            for set in
-                [&mut self.registries, &mut self.seats, &mut self.keyboards, &mut self.pointers]
-            {
+            for set in [
+                &mut self.registries,
+                &mut self.seats,
+                &mut self.keyboards,
+                &mut self.pointers,
+                &mut self.relative_managers,
+                &mut self.relatives,
+            ] {
                 set.remove(&id);
             }
             return None;
+        }
+        if self.relatives.contains(&obj) {
+            // relative_motion(utime_hi, utime_lo, dx, dy, dx_unaccel, dy_unaccel):
+            // the unaccelerated pair, which is what a camera reads.
+            let micros = (u64::from(word(body, 0)) << 32) | u64::from(word(body, 4));
+            return (op == 0).then(|| {
+                let turn = Heard::Turn { dx: fixed(word(body, 16)), dy: fixed(word(body, 20)) };
+                (turn, Some((micros / 1000) as u32))
+            });
         }
         if self.keyboards.contains(&obj) {
             // key(serial, time, key, state); a repeat (2) is no new press.
@@ -240,6 +266,26 @@ mod tests {
             new(Heard::Key { code: 30, down: true }),
             "a new press"
         );
+    }
+
+    #[test]
+    fn raw_mouse_movement_is_heard_unaccelerated_each_time_it_comes() {
+        let mut o = client();
+        let bind = message(
+            2,
+            0,
+            &[words(&[9]), wire_str("zwp_relative_pointer_manager_v1"), words(&[1, 10])].concat(),
+        );
+        o.request(&bind);
+        o.request(&message(10, 1, &words(&[11, 4]))); // get_relative_pointer
+        let moved = |micros: u32| {
+            let body = [0, micros, fixed(9.0), fixed(9.0), fixed(1.5), fixed(-2.0)];
+            message(11, 0, &words(&body))
+        };
+        let turn = Heard::Turn { dx: 1.5, dy: -2.0 };
+        assert_eq!(o.event(&moved(5_000)), Some(Input::New(turn.clone(), Some(5))));
+        assert_eq!(o.event(&moved(13_000)), Some(Input::New(turn, Some(13))), "the same again");
+        assert_eq!(o.event(&message(10, 0, &[])), None, "the manager's opcode 0 is no movement");
     }
 
     #[test]

@@ -6,6 +6,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{Align, glib};
 use rbxmgr_core::macros::grammar::{self, Row};
+use rbxmgr_core::macros::lanes;
 
 use super::MacroDialog;
 use crate::ui::macros::card::step_icon;
@@ -31,6 +32,10 @@ fn hint(kind: &str) -> &'static str {
         "Wait" => "0.5  ·  60-240",
         "Start" => "45",
         "Note" => "what this part does",
+        "Timeline" => "3.5  ·  its length in seconds",
+        "At" => "0.5 hold w 1  ·  under a Timeline step",
+        "Path" => "0 400 300, 0.5 520 310",
+        "Turn" => "0.5 120 -10, 1 200 -15",
         _ => "",
     }
 }
@@ -108,7 +113,7 @@ impl MacroDialog {
     pub(super) fn draw_steps(self: &Rc<Self>) {
         self.list.remove_all();
         let rows = self.rows.borrow().clone();
-        let real = rows.iter().filter(|r| r.kind != "Note").count();
+        let real = rows.iter().filter(|r| !matches!(r.kind.as_str(), "Note" | "Timeline")).count();
         self.count.set_label(&plural(real, "step", "steps"));
         if rows.is_empty() {
             self.list.append(&crate::ui::accounts::leader::placeholder(
@@ -116,7 +121,14 @@ impl MacroDialog {
                 "No steps yet. Add one below.",
             ));
         }
-        for (i, r) in rows.iter().enumerate() {
+        let units = lanes::units(&rows);
+        let count = units.len();
+        for (u, &(i, len)) in units.iter().enumerate() {
+            if rows[i].kind == "Timeline" {
+                self.list.append(&self.timeline_row(u + 1, count, i, len));
+                continue;
+            }
+            let r = &rows[i];
             let mut kinds: Vec<&str> = STEP_TYPES.to_vec();
             if !kinds.contains(&r.kind.as_str()) {
                 kinds.push(&r.kind);
@@ -159,16 +171,15 @@ impl MacroDialog {
                 b.button.set_valign(Align::Center);
                 b.button
             };
-            let len = rows.len();
             let line = hbox!(
                 8,
                 "",
-                lbl(&format!("{}", i + 1), "number dimmed").xalign(1.0),
+                lbl(&format!("{}", u + 1), "number dimmed").xalign(1.0),
                 icon(step_icon(&r.kind)).css("dimmed"),
                 kind,
                 value,
-                button("go-up-symbolic", "Move up", i > 0, |d, i| d.swap(i, i - 1)),
-                button("go-down-symbolic", "Move down", i + 1 < len, |d, i| d.swap(i, i + 1)),
+                button("go-up-symbolic", "Move up", u > 0, |d, i| d.shift(i, true)),
+                button("go-down-symbolic", "Move down", u + 1 < count, |d, i| d.shift(i, false)),
                 button("user-trash-symbolic", "Remove step", true, |d, i| {
                     d.rows.borrow_mut().remove(i);
                     d.draw_steps();
@@ -249,8 +260,11 @@ impl MacroDialog {
         }
     }
 
-    fn swap(self: &Rc<Self>, i: usize, j: usize) {
-        self.rows.borrow_mut().swap(i, j);
-        self.draw_steps();
+    /// The step listed at row `start` swapped with the one before or after
+    /// it -- a timeline, whole.
+    pub(super) fn shift(self: &Rc<Self>, start: usize, up: bool) {
+        if lanes::shift(&mut self.rows.borrow_mut(), start, up) {
+            self.draw_steps();
+        }
     }
 }

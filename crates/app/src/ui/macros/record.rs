@@ -188,11 +188,11 @@ impl Record {
             w.set_recording(None);
             match &recorded {
                 Ok(rows) => {
-                    let steps =
-                        plural(rows.iter().filter(|r| r.kind != "Note").count(), "step", "steps");
+                    let n = rows.iter().filter(|r| r.kind == "At").count();
+                    let steps = plural(n, "step", "steps");
                     w.notify(
                         "Recording added",
-                        &format!("{steps} from {label}: review them, then Save."),
+                        &format!("A timeline of {steps} from {label}: review it, then Save."),
                     );
                 }
                 Err(e) => w.notify("Nothing recorded", e),

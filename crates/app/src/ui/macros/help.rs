@@ -48,8 +48,14 @@ const PAGE: &[Block] = &[
         "Press <b>Record</b> in a macro's editor, then <b>F8</b> in a running macro-ready \
          client's window, and play. Everything that window receives — keys pressed and held, \
          clicks, mouse movement and camera turns, scrolling, and the pauses between — is \
-         recorded until you press <b>F8</b> there again. The steps are added to the editor, \
-         to look over before you <b>Save</b>.\n\n\
+         recorded until you press <b>F8</b> there again. It is added to the editor as one \
+         <b>timeline</b>, to look over before you <b>Save</b>: a lane for each key and \
+         button, held exactly as long as you held it, and one each for the pointer, the \
+         camera and the wheel. Hover a bar to see its step; edit them as text.\n\n\
+         Camera turns are replayed as the raw mouse movement the game turned by, so they \
+         turn as far as they did. A game never plays out exactly the same twice, though: \
+         start each run from where the recording started, and expect small drift over \
+         long recordings.\n\n\
          F8 never reaches the game while a recording is armed. Only that window is heard, \
          and only until the second F8. A client launched before recording existed has to be \
          launched again first.",
@@ -82,6 +88,21 @@ const PAGE: &[Block] = &[
         ("Wait SECONDS", "pause"),
         ("Start SECONDS", "pause once, before the first round only"),
         ("Note TEXT", "a reminder; does nothing"),
+        (
+            "Timeline [SECONDS]",
+            "play the At steps under it, each at its own time, over one another; it lasts \
+             SECONDS, or until its last step ends",
+        ),
+        (
+            "At SECONDS STEP",
+            "a Key, Hold, Press, Release, Click, Move, Scroll, Path or Turn, SECONDS after the \
+             timeline starts",
+        ),
+        ("Path T X Y, T X Y, …", "glide the mouse through points, T seconds in"),
+        (
+            "Turn T DX DY, T DX DY, …",
+            "move the mouse raw, as a game turns its camera: DX DY all told by T seconds in",
+        ),
     ]),
     Text(
         "<b>Playback</b> plays the steps once, a set number of rounds, or until stopped.\n\n\

@@ -200,10 +200,13 @@ impl Input for VirtualInput {
         Ok(())
     }
 
-    fn motion(&mut self, dx: i32, dy: i32) -> io::Result<()> {
+    fn motion(&mut self, dx: f64, dy: f64) -> io::Result<()> {
         let time = self.stamp()?;
         // wl_fixed: 24.8 fixed point.
-        let body = words(&[time, dx.saturating_mul(256) as u32, dy.saturating_mul(256) as u32]);
+        let fixed = |v: f64| {
+            (v * 256.0).round().clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32 as u32
+        };
+        let body = words(&[time, fixed(dx), fixed(dy)]);
         self.send(self.pointer, 0, &body)?;
         self.send(self.pointer, 4, &[]) // frame
     }
@@ -222,8 +225,8 @@ impl Input for VirtualInput {
         let Some((w, h)) = self.size else {
             // Relative motion only; the far corner is the origin, since the
             // compositor clamps the pointer to its output.
-            self.motion(-100_000, -100_000)?;
-            return self.motion(x, y);
+            self.motion(-100_000.0, -100_000.0)?;
+            return self.motion(f64::from(x), f64::from(y));
         };
         let held = |v: i32, most: u32| v.clamp(0, i32::try_from(most).unwrap_or(i32::MAX)) as u32;
         self.send(self.pointer, 1, &words(&[time, held(x, w), held(y, h), w, h]))?; // motion_absolute
