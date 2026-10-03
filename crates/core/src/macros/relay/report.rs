@@ -34,6 +34,8 @@ struct State {
     /// Where the pointer is and what is held down: how a recording opens.
     pointer: Option<(f64, f64)>,
     down: Vec<Heard>,
+    /// When the last input with a time of its own happened, and that time.
+    clock: Option<(Instant, u32)>,
 }
 
 #[derive(Debug)]
@@ -61,9 +63,11 @@ impl Hub {
         self.lock().armed = Some(Armed { out, key, since: None });
     }
 
-    /// What the window just received, at `now`: whether it goes on to it.
-    pub fn heard(&self, heard: &Heard, now: Instant) -> Verdict {
+    /// What the window just received, at `now`, with the display's time on
+    /// it in milliseconds if it has one: whether it goes on to it.
+    pub fn heard(&self, heard: &Heard, time: Option<u32>, now: Instant) -> Verdict {
         let mut s = self.lock();
+        let now = s.when(time, now);
         if let Heard::Key { code, down } = *heard {
             if !down && s.holding == Some(code) {
                 s.holding = None;
@@ -85,6 +89,27 @@ impl Hub {
 }
 
 impl State {
+    /// When an input arriving at `now` happened. A display that is busy
+    /// hands inputs over a frame's worth at a time, so arriving says little;
+    /// its own `time` on each says how far on from the input before it was
+    /// -- though never later than now. One with no time happened as it came.
+    fn when(&mut self, time: Option<u32>, now: Instant) -> Instant {
+        let Some(ms) = time else { return now };
+        let when = match self.clock {
+            // The difference in a u32 that wraps round every 49 days.
+            Some((at, last)) => match ms.wrapping_sub(last) as i32 {
+                gap @ 0.. => at + Duration::from_millis(gap.unsigned_abs().into()),
+                gap => {
+                    at.checked_sub(Duration::from_millis(gap.unsigned_abs().into())).unwrap_or(at)
+                }
+            },
+            None => now,
+        }
+        .min(now);
+        self.clock = Some((when, ms));
+        when
+    }
+
     /// The record key, pressed: the report starts, or it ends and closes.
     /// False when the recorder has gone, which disarms.
     fn toggle(&mut self, now: Instant) -> bool {
@@ -301,7 +326,7 @@ mod tests {
         let hub = Hub::default();
         let (ours, theirs) = UnixStream::pair().unwrap();
         hub.arm(theirs, F8);
-        assert_eq!(hub.heard(&key(30, true), Instant::now()), Verdict::Pass);
+        assert_eq!(hub.heard(&key(30, true), None, Instant::now()), Verdict::Pass);
         assert!(quiet(&ours));
     }
 
@@ -311,15 +336,15 @@ mod tests {
         let (ours, theirs) = UnixStream::pair().unwrap();
         hub.arm(theirs, F8);
         let t0 = Instant::now();
-        assert_eq!(hub.heard(&key(F8, true), t0), Verdict::Hold);
-        assert_eq!(hub.heard(&key(F8, false), after(t0, 0.1)), Verdict::Hold);
-        assert_eq!(hub.heard(&key(30, true), after(t0, 0.5)), Verdict::Pass);
+        assert_eq!(hub.heard(&key(F8, true), None, t0), Verdict::Hold);
+        assert_eq!(hub.heard(&key(F8, false), None, after(t0, 0.1)), Verdict::Hold);
+        assert_eq!(hub.heard(&key(30, true), None, after(t0, 0.5)), Verdict::Pass);
         let motion = Heard::Motion { x: 1.5, y: 2.0 };
-        assert_eq!(hub.heard(&motion, after(t0, 0.75)), Verdict::Pass);
-        assert_eq!(hub.heard(&key(F8, true), after(t0, 1.25)), Verdict::Hold);
-        assert_eq!(hub.heard(&key(F8, false), after(t0, 1.3)), Verdict::Hold);
+        assert_eq!(hub.heard(&motion, None, after(t0, 0.75)), Verdict::Pass);
+        assert_eq!(hub.heard(&key(F8, true), None, after(t0, 1.25)), Verdict::Hold);
+        assert_eq!(hub.heard(&key(F8, false), None, after(t0, 1.3)), Verdict::Hold);
         assert_eq!(
-            hub.heard(&key(F8, true), after(t0, 2.0)),
+            hub.heard(&key(F8, true), None, after(t0, 2.0)),
             Verdict::Pass,
             "the report is over: the key is the window's again"
         );
@@ -327,18 +352,52 @@ mod tests {
     }
 
     #[test]
+    fn inputs_are_timed_by_the_display_not_by_when_a_busy_one_hands_them_over() {
+        let hub = Hub::default();
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        hub.arm(theirs, F8);
+        let t0 = Instant::now();
+        hub.heard(&key(F8, true), Some(10_000), t0);
+        hub.heard(&key(F8, false), Some(10_050), after(t0, 0.05));
+        // A lagging display: a second of input, handed over all at once.
+        let late = after(t0, 1.5);
+        hub.heard(&key(30, true), Some(10_200), late);
+        hub.heard(&key(30, false), Some(10_700), late);
+        hub.heard(&Heard::Motion { x: 3.0, y: 4.0 }, None, late);
+        hub.heard(&key(F8, true), Some(11_200), late);
+        assert_eq!(
+            said(ours),
+            ["start", "key 0.200 30 down", "key 0.700 30 up", "motion 1.500 3 4", "stop 1.200"],
+            "an input with no time of its own happened as it came"
+        );
+    }
+
+    #[test]
+    fn the_display_s_clock_running_ahead_never_puts_an_input_in_the_future() {
+        let hub = Hub::default();
+        let (ours, theirs) = UnixStream::pair().unwrap();
+        hub.arm(theirs, F8);
+        let t0 = Instant::now();
+        hub.heard(&key(F8, true), Some(u32::MAX - 100), t0);
+        hub.heard(&key(30, true), Some(400), after(t0, 0.5)); // wrapped round
+        hub.heard(&key(30, false), Some(9_000), after(t0, 0.75));
+        hub.heard(&key(F8, true), Some(9_100), after(t0, 1.0));
+        assert_eq!(said(ours), ["start", "key 0.500 30 down", "key 0.750 30 up", "stop 0.850"]);
+    }
+
+    #[test]
     fn a_recording_opens_with_where_the_pointer_is_and_what_is_held_down() {
         let hub = Hub::default();
         let t0 = Instant::now();
-        hub.heard(&Heard::Motion { x: 10.0, y: 20.0 }, t0);
-        hub.heard(&key(17, true), t0);
-        hub.heard(&Heard::Button { code: 0x110, down: true }, t0);
-        hub.heard(&key(18, true), t0);
-        hub.heard(&key(18, false), t0);
+        hub.heard(&Heard::Motion { x: 10.0, y: 20.0 }, None, t0);
+        hub.heard(&key(17, true), None, t0);
+        hub.heard(&Heard::Button { code: 0x110, down: true }, None, t0);
+        hub.heard(&key(18, true), None, t0);
+        hub.heard(&key(18, false), None, t0);
         let (ours, theirs) = UnixStream::pair().unwrap();
         hub.arm(theirs, F8);
-        hub.heard(&key(F8, true), after(t0, 3.0));
-        hub.heard(&key(F8, true), after(t0, 4.0));
+        hub.heard(&key(F8, true), None, after(t0, 3.0));
+        hub.heard(&key(F8, true), None, after(t0, 4.0));
         assert_eq!(
             said(ours),
             [
@@ -357,8 +416,8 @@ mod tests {
         let (ours, theirs) = UnixStream::pair().unwrap();
         hub.arm(theirs, F8);
         drop(ours);
-        assert_eq!(hub.heard(&key(F8, true), Instant::now()), Verdict::Pass);
-        assert_eq!(hub.heard(&key(F8, false), Instant::now()), Verdict::Pass);
+        assert_eq!(hub.heard(&key(F8, true), None, Instant::now()), Verdict::Pass);
+        assert_eq!(hub.heard(&key(F8, false), None, Instant::now()), Verdict::Pass);
     }
 
     #[test]
@@ -367,10 +426,10 @@ mod tests {
         let (ours, theirs) = UnixStream::pair().unwrap();
         hub.arm(theirs, F8);
         let t0 = Instant::now();
-        assert_eq!(hub.heard(&key(F8, true), t0), Verdict::Hold);
+        assert_eq!(hub.heard(&key(F8, true), None, t0), Verdict::Hold);
         drop(ours);
-        assert_eq!(hub.heard(&key(30, true), t0), Verdict::Pass);
-        assert_eq!(hub.heard(&key(F8, true), t0), Verdict::Pass, "no longer armed");
+        assert_eq!(hub.heard(&key(30, true), None, t0), Verdict::Pass);
+        assert_eq!(hub.heard(&key(F8, true), None, t0), Verdict::Pass, "no longer armed");
     }
 
     #[test]
@@ -381,8 +440,8 @@ mod tests {
         hub.arm(old_theirs, F8);
         hub.arm(new_theirs, F8);
         assert!(said(old).is_empty(), "the old one is closed, unsaid");
-        hub.heard(&key(F8, true), Instant::now());
-        hub.heard(&key(F8, true), Instant::now());
+        hub.heard(&key(F8, true), None, Instant::now());
+        hub.heard(&key(F8, true), None, Instant::now());
         assert_eq!(said(new).first().map(String::as_str), Some("start"));
     }
 
@@ -405,9 +464,13 @@ mod tests {
         let mut rec = Recorder::arm(&path, F8).unwrap();
         relay.join().unwrap();
         let t0 = Instant::now();
-        assert_eq!(hub.heard(&key(F8, true), t0), Verdict::Hold, "armed with the key asked for");
-        hub.heard(&key(30, true), after(t0, 0.5));
-        hub.heard(&key(F8, true), after(t0, 1.0));
+        assert_eq!(
+            hub.heard(&key(F8, true), None, t0),
+            Verdict::Hold,
+            "armed with the key asked for"
+        );
+        hub.heard(&key(30, true), None, after(t0, 0.5));
+        hub.heard(&key(F8, true), None, after(t0, 1.0));
         assert_eq!(rec.hear(), Ok(Report::Started));
         assert_eq!(rec.hear(), Ok(Report::Heard(Event { at: 0.5, heard: key(30, true) })));
         assert_eq!(rec.hear(), Ok(Report::Stopped(1.0)));

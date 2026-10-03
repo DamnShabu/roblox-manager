@@ -18,6 +18,10 @@ const GLIDE_TICK: f64 = 0.01;
 /// A wait this long or longer is reported; shorter ones are the rhythm of
 /// the steps around them.
 const REPORTED_WAIT: f64 = 1.0;
+/// Seconds a macro may fall behind its timeline and still catch up, by
+/// shortening the waits after. Further behind -- the machine stalled -- it
+/// carries on from where it is rather than rushing through steps.
+const MOST_BEHIND: f64 = 0.25;
 
 /// Where a macro's input goes. Adapters: [`super::wayland::VirtualInput`],
 /// and a recorder in the self-check. Dropping it lets go of the display.
@@ -34,17 +38,22 @@ pub trait Input {
 
 /// What a playing macro holds between its steps: the keys and buttons a
 /// Press left down, in the order pressed, the point it last put the
-/// pointer at, and the Repeats still tapping.
+/// pointer at, the Repeats still tapping, and where it is on its timeline.
 #[derive(Debug, Default)]
 pub struct Held {
     down: Vec<u16>,
     at: Option<(i32, i32)>,
     repeats: repeat::Repeats,
+    /// When the last wait was due to end. The next counts on from there,
+    /// not from whenever it began: a wait woken late, or a step slow to
+    /// send while the display lags, is made up by the waits after it, so
+    /// a macro keeps to the clock however busy the machine is.
+    due: Option<Instant>,
 }
 
 impl Held {
-    /// Wait `secs`, or until stopped (then true), tapping whatever Repeats
-    /// are due meanwhile.
+    /// Wait `secs` on from where the last wait was due to end, or until
+    /// stopped (then true), tapping whatever Repeats are due meanwhile.
     pub fn idle(
         &mut self,
         input: &mut dyn Input,
@@ -52,7 +61,30 @@ impl Held {
         stop: &StopFlag,
         pick: &dyn Fn(f64, f64) -> f64,
     ) -> io::Result<bool> {
-        let until = Instant::now() + Duration::try_from_secs_f64(secs).unwrap_or_default();
+        let until = self.on_time() + Duration::try_from_secs_f64(secs).unwrap_or_default();
+        self.idle_until(input, until, stop, pick)
+    }
+
+    /// Where the macro is on its timeline: when the last wait was due to
+    /// end -- or now, when it is further behind than can be made up.
+    fn on_time(&self) -> Instant {
+        let now = Instant::now();
+        match self.due {
+            Some(due) if now.saturating_duration_since(due).as_secs_f64() <= MOST_BEHIND => due,
+            _ => now,
+        }
+    }
+
+    /// Wait until `until`, or until stopped (then true), tapping whatever
+    /// Repeats are due meanwhile.
+    fn idle_until(
+        &mut self,
+        input: &mut dyn Input,
+        until: Instant,
+        stop: &StopFlag,
+        pick: &dyn Fn(f64, f64) -> f64,
+    ) -> io::Result<bool> {
+        self.due = Some(until);
         loop {
             self.repeats.fire(input, pick)?;
             let now = Instant::now();
@@ -75,8 +107,7 @@ impl Held {
         pick: &dyn Fn(f64, f64) -> f64,
     ) -> io::Result<bool> {
         while let Some(due) = self.repeats.next_due() {
-            let secs = due.saturating_duration_since(Instant::now()).as_secs_f64();
-            if self.idle(input, secs, stop, pick)? {
+            if self.idle_until(input, due, stop, pick)? {
                 return Ok(true);
             }
         }
@@ -261,7 +292,7 @@ pub fn play_step(
 }
 
 /// The pointer to `to`, over `secs`: from where the macro last put it, a
-/// small even step every tick, each due on time from the start so the
+/// small even step every tick, each due on the macro's timeline so the
 /// glide never drifts. With no point to start from, or no time, it goes
 /// straight there.
 fn glide(
@@ -282,13 +313,12 @@ fn glide(
         }
     };
     let ticks = (secs / GLIDE_TICK).round().max(1.0) as u32;
-    let start = Instant::now();
+    let start = held.on_time();
     let along = |a: i32, b: i32, t: f64| (f64::from(a) + f64::from(b - a) * t).round() as i32;
     for tick in 1..=ticks {
         let t = f64::from(tick) / f64::from(ticks);
         let due = start + Duration::from_secs_f64(secs * t);
-        let secs = due.saturating_duration_since(Instant::now()).as_secs_f64();
-        if held.idle(input, secs, stop, pick)? {
+        if held.idle_until(input, due, stop, pick)? {
             break;
         }
         let at = (along(from.0, to.0, t), along(from.1, to.1, t));

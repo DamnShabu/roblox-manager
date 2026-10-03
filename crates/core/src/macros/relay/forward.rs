@@ -104,8 +104,8 @@ fn events(
                         let input = lock(objects).event(&msg);
                         let verdict = match input {
                             None => Verdict::Pass,
-                            Some(Input::New(heard)) => {
-                                last = hub.heard(&heard, Instant::now());
+                            Some(Input::New(heard, time)) => {
+                                last = hub.heard(&heard, time, Instant::now());
                                 last
                             }
                             Some(Input::Again) => last,

@@ -498,3 +498,30 @@ fn a_macro_stopped_mid_repeat_lets_go_of_the_key() {
     got.unwrap();
     assert_eq!(*sent.borrow(), [Sent::Key(18, true), Sent::Key(18, false)]);
 }
+
+#[test]
+fn a_wait_makes_up_for_the_time_a_slow_step_took() {
+    let started = Instant::now();
+    let mut held = Held::default();
+    let mut r = Recorder::default();
+    let stop = StopFlag::default();
+    held.idle(&mut r, 0.1, &stop, &top).unwrap();
+    // A step that took 50 ms to send, the display lagging.
+    std::thread::sleep(Duration::from_millis(50));
+    held.idle(&mut r, 0.1, &stop, &top).unwrap();
+    let took = started.elapsed();
+    assert!(took >= Duration::from_millis(200), "{took:?}");
+    assert!(took < Duration::from_millis(245), "{took:?}: two waits of 0.1 s, nothing added");
+}
+
+#[test]
+fn a_macro_stalled_longer_than_it_can_make_up_carries_on_from_where_it_is() {
+    let mut held = Held::default();
+    let mut r = Recorder::default();
+    let stop = StopFlag::default();
+    held.idle(&mut r, 0.0, &stop, &top).unwrap();
+    std::thread::sleep(Duration::from_millis(400));
+    let resumed = Instant::now();
+    held.idle(&mut r, 0.1, &stop, &top).unwrap();
+    assert!(resumed.elapsed() >= Duration::from_millis(100), "the wait is not skipped");
+}
