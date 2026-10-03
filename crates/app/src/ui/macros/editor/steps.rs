@@ -13,9 +13,9 @@ use crate::ui::macros::card::step_icon;
 use crate::ui::macros::point;
 use crate::ui::widgets::{Btn, Fluent, LabelFluent, icon, lbl, plural, wrap};
 
-const STEP_TYPES: [&str; 12] = [
+const STEP_TYPES: [&str; 13] = [
     "Key", "Hold", "Press", "Release", "Repeat", "Type", "Click", "Move", "Scroll", "Wait",
-    "Start", "Note",
+    "Start", "Stagger", "Note",
 ];
 
 /// What a step's value looks like, as the entry's placeholder.
@@ -31,6 +31,7 @@ fn hint(kind: &str) -> &'static str {
         "Scroll" => "down  ·  up 3",
         "Wait" => "0.5  ·  60-240",
         "Start" => "45",
+        "Stagger" => "5  ·  seconds between the accounts it starts on",
         "Note" => "what this part does",
         "Timeline" => "3.5  ·  its length in seconds",
         "At" => "0.5 hold w 1  ·  under a Timeline step",

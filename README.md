@@ -258,6 +258,7 @@ coordinates, so keep it the same size when you play the macro back.
 | Scroll | `Scroll up 3` | Turn the mouse wheel some notches |
 | Wait | `Wait 60-240` | Pause |
 | Start | `Start 45` | Pause once, before the first round only |
+| Stagger | `Stagger 5` | Run on several accounts, start each this many seconds after the one before, in the order listed. Each then plays at its own pace |
 | Note | `# stay online` | A reminder that does nothing |
 
 <img src="docs/screenshots/macro-text.png" width="400" align="right" alt="The same macro in Text mode, one step per line, ending in loop 25">

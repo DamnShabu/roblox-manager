@@ -25,6 +25,7 @@ pub fn step_icon(kind: &str) -> &'static str {
         "Move" => "go-jump-symbolic",
         "Wait" => "appointment-soon-symbolic",
         "Start" => "alarm-symbolic",
+        "Stagger" => "view-continuous-symbolic",
         "Note" => "text-x-generic-symbolic",
         "Timeline" | "At" => "document-open-recent-symbolic",
         _ => "system-run-symbolic",
@@ -42,13 +43,17 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
         )
     };
     let (rows, loops) = grammar::rows(&text);
-    let steps = rows.iter().filter(|r| !matches!(r.kind.as_str(), "Note" | "Timeline")).count();
+    let steps =
+        rows.iter().filter(|r| !matches!(r.kind.as_str(), "Note" | "Timeline" | "Stagger")).count();
     let mut about = Vec::new();
     if hotkey.is_some() {
         about.push(hotkey_label(hotkey.as_deref()));
     }
     about.push(plural(steps, "step", "steps"));
     about.push(loop_label(loops).to_lowercase());
+    if let Some(r) = rows.iter().rfind(|r| r.kind == "Stagger" && !r.value.is_empty()) {
+        about.push(format!("{} s apart", r.value));
+    }
     let about = about.join(" · ");
 
     let list = boxed_list();
@@ -92,7 +97,7 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
         let shown = if r.kind == "Timeline" {
             let (drawn, n) = lanes::of_rows(&rows[i..i + len]);
             format!("{:.1} s · {}", drawn.secs, plural(n, "step", "steps"))
-        } else if matches!(r.kind.as_str(), "Wait" | "Start") && !r.value.is_empty() {
+        } else if matches!(r.kind.as_str(), "Wait" | "Start" | "Stagger") && !r.value.is_empty() {
             format!("{} s", r.value)
         } else if r.value.is_empty() {
             "—".to_owned()

@@ -190,8 +190,13 @@ impl Player<'_> {
             _ => went_away(e),
         })?;
         let mut held = Held::default();
+        let ahead = self.start.saturating_duration_since(Instant::now());
         let late = Instant::now().saturating_duration_since(self.start).as_secs_f64();
-        if late > MOST_BEHIND {
+        if ahead.as_secs_f64() >= REPORTED_WAIT {
+            let until = ((self.now)() + ahead).format("%H:%M:%S");
+            let secs = ahead.as_secs_f64().round();
+            (self.report)(format!("waiting {secs:.0}s for its turn, until {until}"));
+        } else if late > MOST_BEHIND {
             (self.report)(format!("starting {late:.1}s late: its client was slow to reach"));
         }
         let played = held

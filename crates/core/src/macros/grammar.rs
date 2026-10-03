@@ -2,6 +2,7 @@
 //! (text as rows, and back) and the player (text as steps).
 
 use std::fmt;
+use std::time::{Duration, Instant};
 
 use super::keys::{self, BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT};
 
@@ -24,7 +25,7 @@ const FURTHEST: i32 = 65_535;
 const MOST_NOTCHES: i32 = 1000;
 
 /// The editor's step types and the command each is in a macro's text.
-const STEP_TYPES: [(&str, &str); 16] = [
+const STEP_TYPES: [(&str, &str); 17] = [
     ("Key", "tap"),
     ("Hold", "hold"),
     ("Press", "press"),
@@ -36,6 +37,7 @@ const STEP_TYPES: [(&str, &str); 16] = [
     ("Scroll", "scroll"),
     ("Wait", "wait"),
     ("Start", "start"),
+    ("Stagger", "stagger"),
     ("Note", "#"),
     ("Timeline", "timeline"),
     ("At", "at"),
@@ -115,7 +117,19 @@ pub enum Step {
 pub struct Macro {
     /// 0 is until stopped.
     pub loops: u32,
+    /// Seconds between the accounts it is run on together, each starting
+    /// this long after the one before; 0 starts them all at once.
+    pub stagger: f64,
     pub steps: Vec<Step>,
+}
+
+impl Macro {
+    /// When the `nth` (from 0) of the accounts it is run on together
+    /// starts, the first starting at `first`.
+    pub fn start_of(&self, first: Instant, nth: usize) -> Instant {
+        let nth = u32::try_from(nth).unwrap_or(u32::MAX);
+        first + Duration::try_from_secs_f64(self.stagger * f64::from(nth)).unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -230,7 +244,7 @@ pub fn loop_label(loops: u32) -> String {
 
 /// The steps a macro's text stands for. The error names the line at fault.
 pub fn parse(text: &str) -> Result<Macro, ParseError> {
-    let mut m = Macro { loops: 0, steps: Vec::new() };
+    let mut m = Macro { loops: 0, stagger: 0.0, steps: Vec::new() };
     // Whether the last step is a timeline its `at` lines still go under.
     let mut open = false;
     for line in lines(text) {
@@ -252,6 +266,7 @@ pub fn parse(text: &str) -> Result<Macro, ParseError> {
                 m.steps.push(s);
             }
             Parsed::Loops(n) => m.loops = n,
+            Parsed::Stagger(secs) => m.stagger = secs,
         }
     }
     if m.steps.is_empty() {
@@ -263,6 +278,7 @@ pub fn parse(text: &str) -> Result<Macro, ParseError> {
 enum Parsed {
     Step(Step),
     Loops(u32),
+    Stagger(f64),
 }
 
 fn step(line: &Line<'_>) -> Result<Parsed, String> {
@@ -301,6 +317,12 @@ fn step(line: &Line<'_>) -> Result<Parsed, String> {
         ("turn", _) => timeline::turn(line.rest)?,
         ("timeline", []) => Step::Timeline { secs: (0.0, 0.0), items: Vec::new() },
         ("timeline", [secs]) => Step::Timeline { secs: seconds(secs)?, items: Vec::new() },
+        ("stagger", [secs]) => {
+            return match seconds(secs)? {
+                (lo, hi) if lo == hi => Ok(Parsed::Stagger(lo)),
+                _ => Err("a stagger is one number of seconds, not a range".into()),
+            };
+        }
         ("loop", [n]) if n.bytes().all(|b| b.is_ascii_digit()) => {
             return Ok(Parsed::Loops(n.parse().map_err(|_| format!("not a count: '{n}'"))?));
         }
@@ -321,7 +343,7 @@ fn timed(line: &Line<'_>) -> Result<Timed, String> {
     let inner = Line { command, rest: rest.trim(), ..*line };
     match step(&inner)? {
         Parsed::Step(step) => Ok(Timed { at, step }),
-        Parsed::Loops(_) => Err(format!("don't understand '{}'", line.text)),
+        Parsed::Loops(_) | Parsed::Stagger(_) => Err(format!("don't understand '{}'", line.text)),
     }
 }
 

@@ -279,3 +279,31 @@ fn a_timeline_lasts_until_its_last_step_ends() {
     assert_eq!(describe(&m.steps[0]), "playing a timeline");
     assert_eq!(describe(&Step::Turn(vec![])), "turning the camera");
 }
+
+#[test]
+fn a_stagger_spaces_the_accounts_a_macro_starts_on_and_is_no_step() {
+    let src = "stagger 5\ntap e\nloop 1\n";
+    let m = parse(src).unwrap();
+    assert_eq!((m.stagger, m.steps.len()), (5.0, 1));
+    let first = std::time::Instant::now();
+    assert_eq!(
+        [0, 1, 3].map(|nth| m.start_of(first, nth) - first),
+        [0, 5, 15].map(std::time::Duration::from_secs)
+    );
+    let (r, loops) = rows(src);
+    assert_eq!(r[0], Row { kind: "Stagger".into(), value: "5".into() });
+    assert_eq!(to_text(&r, loops), src);
+}
+
+#[test]
+fn a_macro_with_no_stagger_starts_every_account_at_once() {
+    let m = parse("tap e\n").unwrap();
+    let first = std::time::Instant::now();
+    assert_eq!((m.stagger, m.start_of(first, 4)), (0.0, first));
+}
+
+#[test]
+fn a_stagger_is_one_length() {
+    assert!(parse("stagger 2-4\ntap e\n").unwrap_err().message.contains("one number"));
+    assert!(parse("stagger\ntap e\n").is_err());
+}

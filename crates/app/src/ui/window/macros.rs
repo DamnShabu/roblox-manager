@@ -118,12 +118,16 @@ impl Window {
         if chosen.is_empty() {
             return self.toast("Select the accounts to run it on");
         }
-        // One moment for all of them, so they play in step.
+        // One moment for all of them, so they play in step -- or, staggered,
+        // a turn each from it, in the order listed. One that does not parse
+        // is told of by start_macro.
         let together = Instant::now() + TOGETHER;
-        for id in chosen {
+        let m = self.state().macros.text(name).and_then(|t| macros::grammar::parse(t).ok());
+        for (nth, id) in chosen.into_iter().enumerate() {
             // A macro cannot reach a normal window once you look away.
             self.state_mut().accounts.set_nested(id, true);
-            self.start_macro(id, name, together);
+            let start = m.as_ref().map_or(together, |m| m.start_of(together, nth));
+            self.start_macro(id, name, start);
         }
         self.save_accounts();
     }
