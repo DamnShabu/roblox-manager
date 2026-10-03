@@ -119,7 +119,8 @@ const PAGE: &[Block] = &[
     Text(
         "Any SECONDS can be a range — <tt>Wait 60-240</tt> — picked afresh every time. Every \
          key press is held for a random moment too (0.04–0.12 s for a tap unless you give \
-         one), and typed characters are 0.05–0.16 s apart.",
+         one), and typed characters are 0.05–0.16 s apart. The accounts one Run plays it on \
+         all pick the same, so they play alike; the next Run picks anew.",
     ),
     Heading("Example"),
     Code("Start  45\nWait   60-70\nKey    j\nWait   340-341\n\nPlayback: until stopped"),

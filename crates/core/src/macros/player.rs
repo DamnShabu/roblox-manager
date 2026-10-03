@@ -1,10 +1,13 @@
 //! Playing a macro into a macro-ready client's display.
 
+use std::cell::RefCell;
 use std::io;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
+use rand::rngs::StdRng;
+use rand::{RngExt, SeedableRng};
 
 use super::MacroError;
 use super::grammar::{Macro, Step, TAP_PRESS, TYPE_GAP, describe};
@@ -71,11 +74,7 @@ impl Held {
     /// Where the macro is on its timeline: when the last wait was due to
     /// end -- or now, when it is further behind than can be made up.
     fn on_time(&self) -> Instant {
-        let now = Instant::now();
-        match self.due {
-            Some(due) if now.saturating_duration_since(due).as_secs_f64() <= MOST_BEHIND => due,
-            _ => now,
-        }
+        self.due.map_or_else(Instant::now, on_clock)
     }
 
     /// Wait until `until`, or until stopped (then true), tapping whatever
@@ -89,8 +88,8 @@ impl Held {
     ) -> io::Result<bool> {
         self.due = Some(until);
         loop {
-            self.repeats.fire(input, pick)?;
             let now = Instant::now();
+            self.repeats.fire(input, now.min(until), pick)?;
             if now >= until {
                 return Ok(stop.is_set());
             }
@@ -152,10 +151,31 @@ impl Held {
     }
 }
 
-/// A random moment in [lo, hi]: humans never press a key for the same few
-/// milliseconds twice.
-pub fn random_pick(lo: f64, hi: f64) -> f64 {
-    if lo < hi { rand::random_range(lo..=hi) } else { lo }
+/// `due`, or now when that is further behind than can be made up.
+fn on_clock(due: Instant) -> Instant {
+    let now = Instant::now();
+    if now.saturating_duration_since(due).as_secs_f64() <= MOST_BEHIND { due } else { now }
+}
+
+/// What a run's random moments are drawn from: humans never press a key for
+/// the same few milliseconds twice. The clients a macro is started on
+/// together share one, so they pick the same moments in the same order and
+/// play alike -- a pick each of their own would set them apart a little
+/// more with every step. The next run draws a new one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Seed(u64);
+
+impl Seed {
+    pub fn fresh() -> Self {
+        Seed(rand::random())
+    }
+
+    /// A random moment in [lo, hi] each call: the same ones, in the same
+    /// order, for every picker from this seed.
+    pub fn picker(self) -> impl Fn(f64, f64) -> f64 {
+        let rng = RefCell::new(StdRng::seed_from_u64(self.0));
+        move |lo, hi| if lo < hi { rng.borrow_mut().random_range(lo..=hi) } else { lo }
+    }
 }
 
 /// Everything a playing macro reaches outside itself.
@@ -303,7 +323,9 @@ pub fn play_step(
         Step::Press(codes) => held.press(input, codes),
         Step::Release(codes) => held.release(input, codes),
         Step::Repeat { keys, lo, hi, every } => {
-            held.repeats.start(input, keys, pick(*lo, *hi), *every, pick)
+            let secs = pick(*lo, *hi);
+            let at = held.on_time();
+            held.repeats.start(input, keys, secs, *every, at, pick)
         }
         Step::Scroll { horizontal, notches } => input.scroll(*horizontal, *notches),
         Step::Path(_) | Step::Turn(_) => timeline::alone(input, step, stop, pick, held),

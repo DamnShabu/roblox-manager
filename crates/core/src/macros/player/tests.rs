@@ -429,15 +429,6 @@ fn a_stopped_macro_sends_nothing_more() {
 }
 
 #[test]
-fn a_random_pick_stays_in_its_range() {
-    for _ in 0..100 {
-        let p = random_pick(0.04, 0.12);
-        assert!((0.04..=0.12).contains(&p), "{p}");
-    }
-    assert_eq!(random_pick(5.0, 5.0), 5.0);
-}
-
-#[test]
 fn a_stop_flag_knows_its_own_clones_from_another_flag() {
     let a = StopFlag::default();
     assert!(a.same_as(&a.clone()));
@@ -528,4 +519,5 @@ fn a_macro_stalled_longer_than_it_can_make_up_carries_on_from_where_it_is() {
     assert!(resumed.elapsed() >= Duration::from_millis(100), "the wait is not skipped");
 }
 
+mod alike;
 mod start;

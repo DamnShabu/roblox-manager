@@ -23,7 +23,7 @@ pub(crate) mod wire;
 
 pub use grammar::{Macro, ParseError, Row, Step};
 pub use library::MacroLibrary;
-pub use player::{Input, Player, StopFlag, random_pick};
+pub use player::{Input, Player, Seed, StopFlag};
 pub use wayland::VirtualInput;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

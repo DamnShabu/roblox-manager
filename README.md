@@ -258,7 +258,7 @@ coordinates, so keep it the same size when you play the macro back.
 | Scroll | `Scroll up 3` | Turn the mouse wheel some notches |
 | Wait | `Wait 60-240` | Pause |
 | Start | `Start 45` | Pause once, before the first round only |
-| Stagger | `Stagger 5` | Run on several accounts, start each this many seconds after the one before, in the order listed. Each then plays at its own pace |
+| Stagger | `Stagger 5` | Run on several accounts, start each this many seconds after the one before, in the order listed. Each plays the same steps, that much after the one before |
 | Note | `# stay online` | A reminder that does nothing |
 
 <img src="docs/screenshots/macro-text.png" width="400" align="right" alt="The same macro in Text mode, one step per line, ending in loop 25">
@@ -268,7 +268,8 @@ them.
 
 Every time in seconds can be a range such as `60-240`, and a new value is
 picked each time. Key presses are also held for a random moment, and typed
-characters are spaced randomly.
+characters are spaced randomly. The accounts one Run plays a macro on all
+pick the same values, so they play it alike; the next Run picks new ones.
 
 Keys are letters, digits and punctuation, or names: `space`, `enter`,
 `esc`, `tab`, `shift`, `ctrl`, `alt`, `up`, `down`, `left`, `right`, `F1`
