@@ -16,7 +16,7 @@ pub const TYPE_GAP: (f64, f64) = (0.05, 0.16);
 /// A Repeat with no EVERY taps this far apart, press to press.
 pub const REPEAT_EVERY: (f64, f64) = (0.1, 0.2);
 /// The closest together a Repeat's taps may be.
-const SHORTEST_EVERY: f64 = 0.02;
+pub(crate) const SHORTEST_EVERY: f64 = 0.02;
 /// The longest any one duration may be: a day.
 const LONGEST_SECS: f64 = 86_400.0;
 /// The furthest a move or click may reach from where it starts.

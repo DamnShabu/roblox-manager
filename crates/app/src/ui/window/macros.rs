@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use adw::prelude::*;
-use rbxmgr_core::macros::{self, Player, StopFlag, VirtualInput, nested, random_pick};
+use rbxmgr_core::macros::{self, Player, Seed, StopFlag, VirtualInput, nested};
 use rbxmgr_core::types::{Profile, UserId};
 
 use super::Window;
@@ -119,15 +119,17 @@ impl Window {
             return self.toast("Select the accounts to run it on");
         }
         // One moment for all of them, so they play in step -- or, staggered,
-        // a turn each from it, in the order listed. One that does not parse
-        // is told of by start_macro.
+        // a turn each from it, in the order listed -- and one seed, so they
+        // pick the same random moments. One that does not parse is told of
+        // by start_macro.
         let together = Instant::now() + TOGETHER;
+        let seed = Seed::fresh();
         let m = self.state().macros.text(name).and_then(|t| macros::grammar::parse(t).ok());
         for (nth, id) in chosen.into_iter().enumerate() {
             // A macro cannot reach a normal window once you look away.
             self.state_mut().accounts.set_nested(id, true);
             let start = m.as_ref().map_or(together, |m| m.start_of(together, nth));
-            self.start_macro(id, name, start);
+            self.start_macro(id, name, start, seed);
         }
         self.save_accounts();
     }
@@ -147,7 +149,7 @@ impl Window {
         self.save_accounts();
         let name = self.state().accounts.get(id).and_then(|a| a.macro_name.clone());
         match name {
-            Some(name) => self.start_macro(id, &name, Instant::now()),
+            Some(name) => self.start_macro(id, &name, Instant::now(), Seed::fresh()),
             None => self.toast("Pick a macro first"),
         }
     }
@@ -231,8 +233,9 @@ impl Window {
     }
 
     /// Play `name` into the account's macro-ready client, on a thread.
-    /// Its first step is due at `start`.
-    pub fn start_macro(&self, id: UserId, name: &str, start: Instant) {
+    /// Its first step is due at `start`, and its random moments are drawn
+    /// from `seed`.
+    pub fn start_macro(&self, id: UserId, name: &str, start: Instant, seed: Seed) {
         let (label, text) = {
             let s = self.state();
             let Some(label) = s.accounts.get(id).map(|a| a.name.clone()) else { return };
@@ -278,12 +281,13 @@ impl Window {
                 };
                 let report = |text: String| log.line(format!("{label}: {name} -- {text}"));
                 let now = chrono::Local::now;
+                let pick = seed.picker();
                 let player = Player {
                     display: &display,
                     running: &running,
                     connect: &connect,
                     report: &report,
-                    pick: &random_pick,
+                    pick: &pick,
                     now: &now,
                     start,
                 };

@@ -26,6 +26,9 @@ pub struct Chrome {
     pub summary: Label,
     pub target_text: Label,
     pub btn_each: IconButton,
+    /// Shown only while more than one client runs: one has its own row's
+    /// stop.
+    pub stop_all: gtk::Button,
     pub launch_bar: gtk::Box,
     pub toasts: adw::ToastOverlay,
     pub shortcuts: gtk::ShortcutController,
@@ -258,6 +261,11 @@ impl Chrome {
             .tip("Close every account's client and stop every macro")
             .build(|| {});
         stop_all.button.set_action_name(Some("win.stop-all"));
+        stop_all.button.set_visible(false);
+        // The narrow layout hides the slot and the client count the button,
+        // so neither undoes the other.
+        let stop_slot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        stop_slot.append(&stop_all.button);
         let btn_each = Btn::new("")
             .text("Launch Selected")
             .tip("Each selected account into the target (Ctrl+Shift+Enter)")
@@ -274,7 +282,7 @@ impl Chrome {
             8,
             "launch-bar",
             summary_box.clone(),
-            stop_all.button.clone().centered(),
+            stop_slot.clone().centered(),
             btn_each.button.clone().centered(),
             btn_group.button.clone().centered()
         );
@@ -299,7 +307,7 @@ impl Chrome {
             let tiny = adw::Breakpoint::new(cond);
             tiny.add_setter(&split, "collapsed", Some(&true.to_value()));
             tiny.add_setter(&summary_box, "visible", Some(&false.to_value()));
-            tiny.add_setter(&stop_all.button, "visible", Some(&false.to_value()));
+            tiny.add_setter(&stop_slot, "visible", Some(&false.to_value()));
             win.add_breakpoint(tiny);
         }
 
@@ -321,6 +329,7 @@ impl Chrome {
             summary,
             target_text,
             btn_each,
+            stop_all: stop_all.button,
             launch_bar,
             toasts,
             shortcuts,

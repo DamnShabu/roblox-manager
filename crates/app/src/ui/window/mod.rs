@@ -296,6 +296,7 @@ impl Window {
         self.0.dialogs.borrow_mut().append(&mut added);
         self.0.ui.title.set_subtitle(&s.status_line());
         let live = !s.running.is_empty() || !s.launching.is_empty() || !s.macro_runs.is_empty();
+        self.0.ui.stop_all.set_visible(s.running.len() >= 2);
         self.refresh_window_actions(&s);
         drop(s);
         self.set_action_enabled("stop-all", live);
