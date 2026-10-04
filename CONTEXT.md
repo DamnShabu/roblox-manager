@@ -48,8 +48,9 @@ relay** unmaps instead, leaving the client's own window up inside the cage
 for macros. Not minimised: that is the compositor's, and niri has none.
 
 **Macro** -- a named sequence of steps (tap, hold, press, release, repeat, type,
-click, move, path, turn, scroll, wait, start, timeline) played into one client,
-a set number of **rounds** or until stopped.
+click, move, path, turn, scroll, wait, start, timeline, exit) played into one
+client, a set number of **rounds** or until stopped. An **exit** ends the round
+it is in, from a when as well.
 **Macro-ready window** -- a client run inside its own nested compositor
 (cage), where a macro's emulated input can reach it.
 

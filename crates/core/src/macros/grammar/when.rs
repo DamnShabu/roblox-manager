@@ -35,9 +35,12 @@ pub const IMAGE_LEAST: f64 = 0.9;
 pub const COLOR_WITHIN: u8 = 24;
 
 /// The steps a `do` line may play: those that play in turn. A repeat, a
-/// timeline or a start belongs to the macro's own steps.
-pub(super) const DOABLE: [&str; 11] =
-    ["tap", "hold", "press", "release", "type", "click", "move", "scroll", "wait", "path", "turn"];
+/// timeline or a start belongs to the macro's own steps. An exit ends the
+/// round the macro's own steps are in.
+pub(super) const DOABLE: [&str; 12] = [
+    "tap", "hold", "press", "release", "type", "click", "move", "scroll", "wait", "path", "turn",
+    "exit",
+];
 
 /// A `when` line's condition: `[not] image NAME X Y [PERCENT%]` or `[not]
 /// color X Y #RRGGBB [WITHIN]`.

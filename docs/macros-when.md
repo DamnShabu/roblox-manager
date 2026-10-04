@@ -34,6 +34,9 @@ makes a new image and never overwrites one another macro might use.
 | `when not color X Y #RRGGBB [WITHIN]` | the pixel was that colour and no longer is |
 
 A `do` line can be any step but Repeat, Start, Stagger or a Timeline.
+`do exit` ends the round the macro is in, straight away: the when's
+remaining steps are skipped, everything the round holds is let go of, and
+the next round starts (or the macro stops, after its last).
 
 ## How it plays
 

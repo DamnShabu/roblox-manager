@@ -128,7 +128,8 @@ fn schedule(
             | Step::Wait(..)
             | Step::Start(..)
             | Step::Repeat { .. }
-            | Step::Timeline { .. } => {}
+            | Step::Timeline { .. }
+            | Step::Exit => {}
         }
     }
     dues.sort_by(|a, b| a.t.total_cmp(&b.t).then(a.what.order().cmp(&b.what.order())));

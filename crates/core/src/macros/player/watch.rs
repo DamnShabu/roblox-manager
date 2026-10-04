@@ -194,26 +194,28 @@ pub struct When<'a> {
 
 impl When<'_> {
     /// Play every `when` that is due, each to its end or until stopped --
-    /// any it presses let go of after, whatever fails.
+    /// any it presses let go of after, whatever fails. True when one played
+    /// an Exit: the round it broke into is to end, and any `when` still due
+    /// plays at the next wait, in the round after.
     pub fn answer(
         &self,
         input: &mut dyn Input,
         stop: &StopFlag,
         pick: &dyn Fn(f64, f64) -> f64,
-    ) -> io::Result<()> {
+    ) -> io::Result<bool> {
         if let Some(said) = self.seen.said() {
             (self.report)(said);
         }
         while let Some(i) = self.seen.next()? {
             let Some(h) = self.handlers.get(i) else { continue };
             if stop.is_set() {
-                return Ok(());
+                return Ok(false);
             }
             let when = when::describe(&h.when);
             let mut held = Held::default();
             let mut result = Ok(());
             for step in &h.steps {
-                if stop.is_set() || result.is_err() {
+                if stop.is_set() || result.is_err() || held.exiting {
                     break;
                 }
                 (self.report)(format!("when {when}: {}", describe(step)));
@@ -224,8 +226,11 @@ impl When<'_> {
             }
             let let_go = held.release_all(input);
             result.and(let_go)?;
+            if held.exiting {
+                return Ok(true);
+            }
         }
-        Ok(())
+        Ok(false)
     }
 }
 

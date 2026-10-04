@@ -30,6 +30,7 @@ pub fn step_icon(kind: &str) -> &'static str {
         "Note" => "text-x-generic-symbolic",
         "Timeline" | "At" => "document-open-recent-symbolic",
         "When" | "Do" => "image-x-generic-symbolic",
+        "Exit" => "media-skip-forward-symbolic",
         _ => "system-run-symbolic",
     }
 }
