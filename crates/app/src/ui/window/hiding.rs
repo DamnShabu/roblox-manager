@@ -1,6 +1,7 @@
 //! Hiding running clients' windows and showing them again. The game goes on
-//! behind a hidden window; Stacked unmaps it on a signal (see
-//! `CordialProfiles::set_hidden`).
+//! behind a hidden window: Stacked unmaps it on a signal, and a macro-ready
+//! client's window relay unmaps its cage's, with macros still playing in it
+//! (see `CordialProfiles::set_hidden`).
 
 use std::collections::HashSet;
 
@@ -60,12 +61,13 @@ impl Window {
     }
 }
 
-/// Whether the account's window can be hidden. A macro-ready client's window
-/// is its cage's, which stays up whatever the client inside does -- and a
-/// macro's input needs the client's window there.
+/// Whether the account's window can be hidden: it is up, and something can
+/// hide it -- its engine, or a macro-ready client's window relay. A
+/// macro-ready client launched before window relays reports no window at
+/// all, since its engine could only hide its window inside cage, where a
+/// macro's input needs it.
 pub fn can_hide(s: &AppState, id: UserId) -> bool {
     s.windows.get(&id) == Some(&ClientWindow::Shown)
-        && s.accounts.get(id).is_some_and(|a| !a.nested)
 }
 
 fn hideable(s: &AppState) -> Vec<UserId> {

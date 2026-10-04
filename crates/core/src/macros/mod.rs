@@ -8,8 +8,11 @@
 //! any keyboard's.
 //!
 //! The client runs behind a [`relay`] there, which hears what its window
-//! receives -- told to nobody unless a [`recording`] is armed on it.
+//! receives -- told to nobody unless a [`recording`] is armed on it. Cage
+//! itself runs behind a window relay, [`cage_window`], which can take its
+//! window off the desktop with the client still playing inside.
 
+pub mod cage_window;
 pub mod grammar;
 pub mod keys;
 pub mod lanes;
@@ -18,6 +21,7 @@ pub mod nested;
 pub mod player;
 pub mod recording;
 pub mod relay;
+mod socket;
 pub mod wayland;
 pub(crate) mod wire;
 

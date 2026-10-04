@@ -126,9 +126,10 @@ const PAGE: &[Block] = &[
     Code("Start  45\nWait   60-70\nKey    j\nWait   340-341\n\nPlayback: until stopped"),
     Heading("Good to know"),
     Text(
-        "A macro keeps playing with its window on another workspace, scrolled out of view or \
-         behind others; launch the client again if it was started before this version. Stop \
-         lets go of any held key at once. Points are the client window's own, from its corner: \
+        "A macro keeps playing with its window on another workspace, scrolled out of view, \
+         behind others or hidden with the account's hide button; launch the client again if \
+         it was started before this version. Stop lets go of any held key at once. Points are \
+         the client window's own, from its corner: \
          keep the window the size it was when a macro was recorded or its points were picked. \
          Roblox games have their own rules on macros — AFK use can be against them.",
     ),

@@ -10,7 +10,7 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use rbxmgr_core::accounts::AccountStore;
-use rbxmgr_core::macros::{MacroLibrary, relay};
+use rbxmgr_core::macros::{MacroLibrary, cage_window, relay};
 use rbxmgr_core::update;
 
 use crate::services::Services;
@@ -21,9 +21,12 @@ pub const APP_ID: &str = "io.github.mujo.RobloxManager";
 
 fn main() -> glib::ExitCode {
     let mut args: Vec<String> = std::env::args().collect();
-    // Started by a macro-ready launch, as its client's relay: no window.
-    if args.get(1).map(String::as_str) == Some(relay::FLAG) {
-        std::process::exit(relay::run(&args[2..]));
+    // Started by a macro-ready launch, as its client's relay or its cage's
+    // window relay: no window.
+    match args.get(1).map(String::as_str) {
+        Some(relay::FLAG) => std::process::exit(relay::run(&args[2..])),
+        Some(cage_window::FLAG) => std::process::exit(cage_window::run(&args[2..])),
+        _ => {}
     }
     let app = adw::Application::builder()
         .application_id(APP_ID)

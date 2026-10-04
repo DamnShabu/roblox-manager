@@ -4,6 +4,7 @@
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 
 use rustix::fs::{FlockOperation, flock};
@@ -45,6 +46,13 @@ pub fn hold_parent_display(
 /// user's runtime directory -- for the link (`cage_argv`) and for macros alike.
 pub fn display_file(runtime_dir: &Path, profile: &Profile) -> PathBuf {
     runtime_dir.join("rbxmgr").join(format!("{profile}.wayland"))
+}
+
+/// Whether a client is up in a macro-ready window at `display_file`: its
+/// cage takes connections there. A link left behind by a cage that was
+/// killed refuses them.
+pub fn is_up(display_file: &Path) -> bool {
+    UnixStream::connect(display_file).is_ok()
 }
 
 /// `argv` in a cage of its own. The shell hard-links cage's socket to the
