@@ -7,6 +7,12 @@
 //! looked for everywhere in the smallest frame, and only the few places
 //! most like it are looked at again, a size up each time, to full size. Where it was found last is tried before all
 //! of that: an image that has not moved is found at once.
+//!
+//! How alike is the share of the image's pixels the frame shows within
+//! [`TOLERANCE`], each channel. Not the summed difference that ranks places
+//! on the way down: a game's dark, smooth frame is never far from any
+//! picked image on average -- a red ball scores 94% against a red arrow on
+//! a pumpkin -- while its pixels, one by one, are not alike at all.
 
 use super::{Area, Image};
 
@@ -14,6 +20,11 @@ use super::{Area, Image};
 /// for and still be found there: a pixel or two of jitter in a game's own
 /// layout, or a window resized by a hair.
 pub const SLACK: i32 = 4;
+
+/// How far a channel of the frame may be from the image's and the pixel
+/// still count as alike: the image is cut from the same game's frame, so
+/// it is its own pixels give or take a little light.
+const TOLERANCE: u8 = 32;
 
 /// The fewest pixels a shrunk image keeps across and down: any fewer and
 /// one image looks like many others.
@@ -69,7 +80,6 @@ pub fn find(
     let mut places = best_places(f, t, bounds(levels), loose);
     for l in (0..levels).rev() {
         let (f, t) = level(l);
-        let least = if l == 0 { least } else { loose };
         let (bx0, by0, bx1, by1) = bounds(l);
         let mut next: Vec<(u64, i64, i64)> = places
             .iter()
@@ -78,7 +88,7 @@ pub fn find(
                 // either way for an image that sits across the halving.
                 let window = ((2 * x - 1).max(bx0), (2 * y - 1).max(by0));
                 let window = (window.0, window.1, (2 * x + 2).min(bx1), (2 * y + 2).min(by1));
-                best_places(f, t, window, least).first().and_then(|&(x, y)| {
+                best_places(f, t, window, loose).first().and_then(|&(x, y)| {
                     Some((difference(f, t, x as usize, y as usize, u64::MAX)?, x, y))
                 })
             })
@@ -87,7 +97,20 @@ pub fn find(
         next.dedup_by_key(|p| (p.1, p.2));
         places = next.into_iter().map(|(_, x, y)| (x, y)).collect();
     }
-    places.first().map(|&(x, y)| (x as i32 + shows.x, y as i32 + shows.y))
+    // Ranked by summed difference, the places are only likely: each, and a
+    // pixel either way, is held to the share of its pixels that are alike.
+    let allowed = allowed(template, least);
+    places
+        .iter()
+        .flat_map(|&(x, y)| {
+            let xs = (x - 1).max(x0)..=(x + 1).min(x1);
+            ((y - 1).max(y0)..=(y + 1).min(y1)).flat_map(move |y| xs.clone().map(move |x| (x, y)))
+        })
+        .filter_map(|(x, y)| {
+            Some((mismatches(frame, template, x as usize, y as usize, allowed)?, x, y))
+        })
+        .min()
+        .map(|(_, x, y)| (x as i32 + shows.x, y as i32 + shows.y))
 }
 
 /// Where `template` is within [`SLACK`] of (`x`, `y`), at least `least`
@@ -102,7 +125,7 @@ pub fn near(
     if template.width == 0 || template.height == 0 {
         return None;
     }
-    let budget = budget(template, least);
+    let allowed = allowed(template, least);
     offsets().into_iter().find_map(|(ox, oy)| {
         let (left, top) = (i64::from(x + ox - shows.x), i64::from(y + oy - shows.y));
         let fits = left >= 0
@@ -112,7 +135,7 @@ pub fn near(
         if !fits {
             return None;
         }
-        difference(frame, template, left as usize, top as usize, budget)?;
+        mismatches(frame, template, left as usize, top as usize, allowed)?;
         Some((x + ox, y + oy))
     })
 }
@@ -124,8 +147,18 @@ fn budget(template: &Image, least: f64) -> u64 {
     ((1.0 - least).max(0.0) * 255.0 * 3.0 * pixels as f64) as u64
 }
 
+/// The most of `template`'s pixels that may be unlike and still leave
+/// `least` of them alike.
+fn allowed(template: &Image, least: f64) -> u32 {
+    let pixels = f64::from(template.width) * f64::from(template.height);
+    ((1.0 - least).max(0.0) * pixels) as u32
+}
+
 /// The places, among (`x0`..=`x1`, `y0`..=`y1`), most like `template` and
-/// at least `least` alike: up to [`CANDIDATES`] of them, most alike first.
+/// at least `least` alike by summed difference: up to [`CANDIDATES`] of
+/// them, most alike first, each a sighting of its own -- a place within
+/// half the image of a better one is the same thing seen again, and would
+/// crowd out the others.
 fn best_places(
     frame: &Image,
     template: &Image,
@@ -135,6 +168,9 @@ fn best_places(
     let x1 = x1.min(i64::from(frame.width) - i64::from(template.width));
     let y1 = y1.min(i64::from(frame.height) - i64::from(template.height));
     let budget = budget(template, least);
+    let reach = i64::from(template.width.min(template.height) / 2).max(1);
+    let close =
+        |b: &(u64, i64, i64), x: i64, y: i64| (b.1 - x).abs() <= reach && (b.2 - y).abs() <= reach;
     let mut best: Vec<(u64, i64, i64)> = Vec::with_capacity(CANDIDATES + 1);
     for y in y0..=y1 {
         for x in x0..=x1 {
@@ -142,6 +178,10 @@ fn best_places(
             // them is worth counting to the end.
             let limit = if best.len() < CANDIDATES { budget } else { best[CANDIDATES - 1].0 };
             if let Some(d) = difference(frame, template, x as usize, y as usize, limit) {
+                if best.iter().any(|b| b.0 <= d && close(b, x, y)) {
+                    continue;
+                }
+                best.retain(|b| !close(b, x, y));
                 let at = best.partition_point(|b| b.0 <= d);
                 best.insert(at, (d, x, y));
                 best.truncate(CANDIDATES);
@@ -209,6 +249,24 @@ fn difference(frame: &Image, template: &Image, left: usize, top: usize, limit: u
         }
     }
     Some(diff)
+}
+
+/// How many of `template`'s pixels the frame at (`left`, `top`) does not
+/// show within [`TOLERANCE`], each channel; None once past `limit`.
+fn mismatches(frame: &Image, template: &Image, left: usize, top: usize, limit: u32) -> Option<u32> {
+    let (fw, tw) = (frame.width as usize * 3, template.width as usize * 3);
+    let mut unlike = 0u32;
+    for row in 0..template.height as usize {
+        let f = (top + row) * fw + left * 3;
+        let a = frame.rgb.get(f..f + tw)?;
+        let b = template.rgb.get(row * tw..(row + 1) * tw)?;
+        let far = |(p, q): (&[u8], &[u8])| p.iter().zip(q).any(|(c, d)| c.abs_diff(*d) > TOLERANCE);
+        unlike += a.chunks_exact(3).zip(b.chunks_exact(3)).filter(|&pq| far(pq)).count() as u32;
+        if unlike > limit {
+            return None;
+        }
+    }
+    Some(unlike)
 }
 
 #[cfg(test)]

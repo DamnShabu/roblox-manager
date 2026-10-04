@@ -65,6 +65,25 @@ fn an_image_that_is_not_there_is_not_found() {
 }
 
 #[test]
+fn an_image_near_on_average_but_unlike_pixel_by_pixel_is_not_found() {
+    // What a game's frame does: a place whose colours are close overall,
+    // every other pixel well off -- 91% alike by summed difference.
+    let frame = smooth(&noise(320, 200, 7));
+    let mut speckled = cut(&frame, 213, 131, 40, 24);
+    for (i, px) in speckled.rgb.chunks_exact_mut(3).enumerate() {
+        let (x, y) = (i % 40, i / 40);
+        if (x + y) % 2 == 0 {
+            px.iter_mut().for_each(|c| *c = if *c < 128 { *c + 45 } else { *c - 45 });
+        }
+    }
+    assert_eq!(find(&frame, whole(&frame), &speckled, whole(&frame), 0.9, None), None);
+    assert_eq!(near(&frame, whole(&frame), &speckled, (213, 131), 0.9), None);
+    // Half its pixels are alike, though.
+    let half = find(&frame, whole(&frame), &speckled, whole(&frame), 0.45, None);
+    assert_eq!(half, Some((213, 131)));
+}
+
+#[test]
 fn a_rectangle_keeps_the_search_inside_it() {
     let frame = smooth(&noise(320, 200, 7));
     let coin = cut(&frame, 213, 131, 40, 24);

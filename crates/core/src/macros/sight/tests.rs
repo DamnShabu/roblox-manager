@@ -42,8 +42,11 @@ fn an_image_a_little_off_colour_still_matches_but_another_does_not() {
     let mut dim = coin();
     dim.rgb.iter_mut().for_each(|c| *c = c.saturating_sub(10));
     let frame = with(plain(40, 30, [0, 0, 0]), &dim, 10, 10);
-    assert_eq!(near(&frame, SHOWS, &coin(), at, 0.95), Some(at));
-    assert_eq!(near(&frame, SHOWS, &coin(), at, 0.99), None, "not that alike");
+    assert_eq!(near(&frame, SHOWS, &coin(), at, 0.99), Some(at), "every pixel within reach");
+    let mut washed = coin();
+    washed.rgb.iter_mut().for_each(|c| *c = c.saturating_add(60));
+    let frame = with(plain(40, 30, [0, 0, 0]), &washed, 10, 10);
+    assert_eq!(near(&frame, SHOWS, &coin(), at, 0.5), None, "not that alike");
     let other = with(plain(40, 30, [0, 0, 0]), &plain(6, 6, [255, 0, 0]), 10, 10);
     assert_eq!(near(&other, SHOWS, &coin(), at, 0.9), None);
 }

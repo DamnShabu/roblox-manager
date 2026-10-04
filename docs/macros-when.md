@@ -28,7 +28,7 @@ the row already named (`in X Y W H`) is kept.
 
 | Line | Plays when |
 | --- | --- |
-| `when image NAME [PERCENT%]` | the image shows anywhere in the window, at least PERCENT alike (90% by default) |
+| `when image NAME [PERCENT%]` | the image shows anywhere in the window, at least PERCENT of its pixels alike (90% by default; a pixel is alike when each channel is within 32) |
 | `when image NAME in X Y W H [PERCENT%]` | the image shows anywhere in that rectangle: corner X Y, W wide and H high |
 | `when image NAME X Y [PERCENT%]` | the image shows with its corner at X Y, within 4 pixels |
 | `when not image NAME ...` | the image was there and has gone |

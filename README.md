@@ -313,7 +313,7 @@ over and over while it stays. `When image image1 in 0 0 400 300` looks
 only in that rectangle, `When image image1 812 40` only at that point.
 `When not image ...` waits for it to go, `When color 960 30 #ff3030` for
 one pixel to turn a colour, and a percentage at the end (`95%`) sets how
-alike the image must be (90% unless you give one). A macro can be nothing but Whens. It keeps seeing with its
+many of the image's pixels must be alike (90% unless you give one). A macro can be nothing but Whens. It keeps seeing with its
 window hidden or on another workspace. More in [docs/macros-when.md](docs/macros-when.md).
 
 ### Hotkeys
