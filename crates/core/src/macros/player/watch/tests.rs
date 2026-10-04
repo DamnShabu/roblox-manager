@@ -32,10 +32,10 @@ impl Eyes for Frames {
 /// and what was seen.
 fn watched(text: &str, frames: Vec<io::Result<Image>>) -> (u64, Seen, Vec<Area>) {
     let m = parse(text).unwrap();
-    let looks = Looks::new(&m.handlers, &|_| Ok(pixel(RED))).unwrap();
+    let mut looks = Looks::new(&m.handlers, &|_| Ok(pixel(RED))).unwrap();
     let (stop, done, seen) = (StopFlag::default(), StopFlag::default(), Seen::default());
     let mut eyes = Frames { frames, done: done.clone(), asked: Vec::new() };
-    watch(&mut eyes, &looks, &seen, &stop, &done);
+    watch(&mut eyes, &mut looks, &seen, &stop, &done);
     (stop.rings(), seen, eyes.asked)
 }
 
@@ -89,4 +89,27 @@ fn a_when_naming_an_image_there_is_not_cannot_look() {
     let m = parse("when image gone 1 1\ndo tap e\n").unwrap();
     let got = Looks::new(&m.handlers, &|name| Err(format!("no image named {name}")));
     assert_eq!(got.err().as_deref(), Some("no image named gone"));
+}
+
+#[test]
+fn an_image_named_with_no_place_is_looked_for_in_the_whole_window() {
+    let blank = Image { width: 30, height: 20, rgb: vec![0; 30 * 20 * 3] };
+    let mut shown = blank.clone();
+    // The picked image: a 9x9 red square with a dark dot in it, anywhere.
+    let mut coin = Image { width: 9, height: 9, rgb: RED.repeat(81) };
+    coin.rgb[40 * 3..40 * 3 + 3].copy_from_slice(&[0, 0, 0]);
+    for y in 0..9 {
+        for x in 0..9 {
+            let to = ((y + 7) * 30 + x + 17) * 3;
+            shown.rgb[to..to + 3].copy_from_slice(&coin.rgb[(y * 9 + x) * 3..(y * 9 + x) * 3 + 3]);
+        }
+    }
+    let m = parse("when image coin\ndo tap e\n").unwrap();
+    let mut looks = Looks::new(&m.handlers, &|_| Ok(coin.clone())).unwrap();
+    let (stop, done, seen) = (StopFlag::default(), StopFlag::default(), Seen::default());
+    let frames = vec![Ok(blank), Ok(shown)];
+    let mut eyes = Frames { frames, done: done.clone(), asked: Vec::new() };
+    watch(&mut eyes, &mut looks, &seen, &stop, &done);
+    assert_eq!(stop.rings(), 1, "seen once it shows, wherever it is");
+    assert_eq!(eyes.asked[0], WHOLE);
 }

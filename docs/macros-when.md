@@ -6,7 +6,7 @@ lines under it play the moment it does.
 ```
 tap w
 wait 2
-when image image1 812 40
+when image image1
 do tap e
 do wait 0.5
 do click 400 300
@@ -20,16 +20,18 @@ Add a **When** step in the editor and press the image button on its row.
 If more than one macro-ready client is running, pick one. Drag over what
 to wait for. When you let go, that area of the client is copied and kept
 as `~/.local/share/rbxmgr/macro-images/imageN.png`, and the row reads
-`image imageN X Y`, where X Y is the area's top-left corner in the
-client window's coordinates (the same ones a Click uses). Picking again
-makes a new image and never overwrites one another macro might use.
+`image imageN`: looked for anywhere in the window. Picking again makes a
+new image and never overwrites one another macro might use; a rectangle
+the row already named (`in X Y W H`) is kept.
 
 ## What it can wait for
 
 | Line | Plays when |
 | --- | --- |
-| `when image NAME X Y [PERCENT%]` | the image is at X Y again, within 4 pixels, and at least PERCENT alike (90% by default) |
-| `when not image NAME X Y [PERCENT%]` | the image was there and has gone |
+| `when image NAME [PERCENT%]` | the image shows anywhere in the window, at least PERCENT alike (90% by default) |
+| `when image NAME in X Y W H [PERCENT%]` | the image shows anywhere in that rectangle: corner X Y, W wide and H high |
+| `when image NAME X Y [PERCENT%]` | the image shows with its corner at X Y, within 4 pixels |
+| `when not image NAME ...` | the image was there and has gone |
 | `when color X Y #RRGGBB [WITHIN]` | the pixel at X Y is that colour, each channel within WITHIN (24 by default) |
 | `when not color X Y #RRGGBB [WITHIN]` | the pixel was that colour and no longer is |
 
@@ -56,8 +58,12 @@ A macro can be nothing but whens. It then watches until you stop it.
 ## What it cannot do
 
 Points and images are in the window's own pixels, so keep the window the
-size it was when you picked them. The image is looked for where you picked
-it, give or take 4 pixels. It is not searched for across the whole window.
+size it was when you picked them: an image is matched at the size it was
+picked, not scaled. A look at the whole window takes a few milliseconds
+(a copy of a 1280×720 window measured 5–11 ms, the search 1.5–3 ms for
+an image 24 pixels or more across, about 9 ms for a 12-pixel one). A
+rectangle or a point makes it cheaper. Where the image was last found is
+tried first, so one that stays put costs almost nothing.
 
 The frame is copied out by cage, the macro-ready window's own compositor,
 the way a screenshot tool asks for one. Nothing reads from or reaches into

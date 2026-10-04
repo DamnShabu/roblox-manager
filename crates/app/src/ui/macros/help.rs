@@ -65,7 +65,7 @@ const PAGE: &[Block] = &[
         "A <b>When</b> step plays the <b>Do</b> steps under it the moment something shows in \
          the client, wherever the macro is in its own steps. Press the image button on a When \
          row and drag over what to wait for in a running client; that area is kept as an \
-         image, and the macro looks for it twenty times a second. Its own steps pause while \
+         image, and the macro looks for it anywhere in the window twenty times a second. Its own steps pause while \
          a When plays and carry on after, keys they hold still down. A When plays once each \
          time what it waits for appears, and keeps seeing with the window hidden.",
     ),
@@ -118,9 +118,10 @@ const PAGE: &[Block] = &[
             "move the mouse raw, as a game turns its camera: DX DY all told by T seconds in",
         ),
         (
-            "When [not] image NAME X Y [90%]",
-            "play the Do steps under it the moment a picked image shows at X Y (within a few \
-             pixels), or with not, the moment it goes",
+            "When [not] image NAME [in X Y W H | X Y] [90%]",
+            "play the Do steps under it the moment a picked image shows anywhere in the \
+             window, or in that rectangle, or at that point (within a few pixels); with not, \
+             the moment it goes",
         ),
         (
             "When [not] color X Y #RRGGBB [24]",

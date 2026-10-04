@@ -298,20 +298,22 @@ A **When** step plays the steps under it the moment something appears in
 the client, wherever the macro is in its own steps. Press the image button
 on a When row and drag over what to wait for in a running macro-ready
 client: a button, an icon, a bar. That area is kept as an image, and from
-then on the macro checks for it twenty times a second.
+then on the macro looks for it anywhere in the window, twenty times a
+second.
 
 ```
-When image image1 812 40
+When image image1
 Do   tap e
 Do   click 400 300
 ```
 
 The macro's own steps pause while a When plays, then carry on, and keys
 they hold stay down. A When plays once each time its image appears, not
-over and over while it stays. `When not image ...` waits for it to go,
-`When color 960 30 #ff3030` for one pixel to turn a colour, and a percentage
-after the point (`95%`) sets how alike the image must be (90% unless you
-give one). A macro can be nothing but Whens. It keeps seeing with its
+over and over while it stays. `When image image1 in 0 0 400 300` looks
+only in that rectangle, `When image image1 812 40` only at that point.
+`When not image ...` waits for it to go, `When color 960 30 #ff3030` for
+one pixel to turn a colour, and a percentage at the end (`95%`) sets how
+alike the image must be (90% unless you give one). A macro can be nothing but Whens. It keeps seeing with its
 window hidden or on another workspace. More in [docs/macros-when.md](docs/macros-when.md).
 
 ### Hotkeys
