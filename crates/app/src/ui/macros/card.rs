@@ -29,6 +29,7 @@ pub fn step_icon(kind: &str) -> &'static str {
         "Stagger" => "view-continuous-symbolic",
         "Note" => "text-x-generic-symbolic",
         "Timeline" | "At" => "document-open-recent-symbolic",
+        "When" | "Do" => "image-x-generic-symbolic",
         _ => "system-run-symbolic",
     }
 }

@@ -79,6 +79,12 @@ impl Paths {
         self.state().join("macros.json")
     }
 
+    /// Images picked from a client for macros' `when`s, one PNG each, by
+    /// the name a macro calls it.
+    pub fn macro_images(&self) -> PathBuf {
+        self.state().join("macro-images")
+    }
+
     /// The newest Stacked, once updated to: a link to its Nix build.
     pub fn stacked(&self) -> PathBuf {
         self.state().join("stacked")
@@ -204,6 +210,7 @@ mod tests {
         );
         assert_eq!(p.window_state(), PathBuf::from("/s/rbxmgr/window.json"));
         assert_eq!(p.macros(), PathBuf::from("/d/rbxmgr/macros.json"));
+        assert_eq!(p.macro_images(), PathBuf::from("/d/rbxmgr/macro-images"));
         assert_eq!(p.logs(), PathBuf::from("/c/rbxmgr/logs"));
         assert_eq!(p.runtime_dir(), Path::new("/r"));
         assert_eq!(

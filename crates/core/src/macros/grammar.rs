@@ -7,7 +7,9 @@ use std::time::{Duration, Instant};
 use super::keys::{self, BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT};
 
 pub mod timeline;
+pub mod when;
 pub use timeline::Timed;
+pub use when::{Condition, Handler, Sight};
 
 /// A tap is a short hold: its press length is random as well.
 pub const TAP_PRESS: (f64, f64) = (0.04, 0.12);
@@ -25,7 +27,7 @@ const FURTHEST: i32 = 65_535;
 const MOST_NOTCHES: i32 = 1000;
 
 /// The editor's step types and the command each is in a macro's text.
-const STEP_TYPES: [(&str, &str); 17] = [
+const STEP_TYPES: [(&str, &str); 19] = [
     ("Key", "tap"),
     ("Hold", "hold"),
     ("Press", "press"),
@@ -43,6 +45,8 @@ const STEP_TYPES: [(&str, &str); 17] = [
     ("At", "at"),
     ("Path", "path"),
     ("Turn", "turn"),
+    ("When", "when"),
+    ("Do", "do"),
 ];
 
 /// One line as the editor shows it: a step type and its value.
@@ -121,6 +125,8 @@ pub struct Macro {
     /// this long after the one before; 0 starts them all at once.
     pub stagger: f64,
     pub steps: Vec<Step>,
+    /// What plays out of turn, the moment its `when` sees what it waits for.
+    pub handlers: Vec<Handler>,
 }
 
 impl Macro {
@@ -244,32 +250,59 @@ pub fn loop_label(loops: u32) -> String {
 
 /// The steps a macro's text stands for. The error names the line at fault.
 pub fn parse(text: &str) -> Result<Macro, ParseError> {
-    let mut m = Macro { loops: 0, stagger: 0.0, steps: Vec::new() };
-    // Whether the last step is a timeline its `at` lines still go under.
+    let mut m = Macro { loops: 0, stagger: 0.0, steps: Vec::new(), handlers: Vec::new() };
+    // Whether the last step is a timeline its `at` lines still go under, or
+    // a `when` its `do` lines do.
     let mut open = false;
+    let mut open_when = false;
+    // Each `when`'s line, for the one left with no steps.
+    let mut when_lines = Vec::new();
     for line in lines(text) {
         if line.command == "#" {
             continue;
         }
         let at_line = |message: String| ParseError { line: Some(line.number), message };
-        if line.command == "at" {
-            let item = timed(&line).map_err(at_line)?;
-            match m.steps.last_mut() {
-                Some(Step::Timeline { items, .. }) if open => items.push(item),
-                _ => return Err(at_line("an 'at' step goes under a 'timeline' line".into())),
+        match line.command.as_str() {
+            "at" => {
+                let item = timed(&line).map_err(at_line)?;
+                match m.steps.last_mut() {
+                    Some(Step::Timeline { items, .. }) if open => items.push(item),
+                    _ => return Err(at_line("an 'at' step goes under a 'timeline' line".into())),
+                }
+                continue;
             }
-            continue;
+            "when" => {
+                let when = when::condition(line.rest).map_err(at_line)?;
+                m.handlers.push(Handler { when, steps: Vec::new() });
+                when_lines.push(line.number);
+                (open, open_when) = (false, true);
+                continue;
+            }
+            "do" => {
+                let step = done(&line).map_err(at_line)?;
+                match m.handlers.last_mut() {
+                    Some(h) if open_when => h.steps.push(step),
+                    _ => return Err(at_line("a 'do' step goes under a 'when' line".into())),
+                }
+                continue;
+            }
+            _ => {}
         }
         match step(&line).map_err(at_line)? {
             Parsed::Step(s) => {
                 open = matches!(s, Step::Timeline { .. });
+                open_when = false;
                 m.steps.push(s);
             }
             Parsed::Loops(n) => m.loops = n,
             Parsed::Stagger(secs) => m.stagger = secs,
         }
     }
-    if m.steps.is_empty() {
+    if let Some(i) = m.handlers.iter().position(|h| h.steps.is_empty()) {
+        let message = "a 'when' needs a 'do' line under it: what to do".into();
+        return Err(ParseError { line: when_lines.get(i).copied(), message });
+    }
+    if m.steps.is_empty() && m.handlers.is_empty() {
         return Err(ParseError { line: None, message: "the macro has no steps".into() });
     }
     Ok(m)
@@ -343,6 +376,21 @@ fn timed(line: &Line<'_>) -> Result<Timed, String> {
     let inner = Line { command, rest: rest.trim(), ..*line };
     match step(&inner)? {
         Parsed::Step(step) => Ok(Timed { at, step }),
+        Parsed::Loops(_) | Parsed::Stagger(_) => Err(format!("don't understand '{}'", line.text)),
+    }
+}
+
+/// A `do` line: one of the steps a `when` may play.
+fn done(line: &Line<'_>) -> Result<Step, String> {
+    let (command, rest) = line.rest.split_once(' ').unwrap_or((line.rest, ""));
+    let command = alias(&command.to_lowercase()).to_owned();
+    if !when::DOABLE.contains(&command.as_str()) {
+        let allowed = when::DOABLE.join(", ");
+        return Err(format!("a 'when' cannot '{command}' -- only {allowed}"));
+    }
+    let inner = Line { command, rest: rest.trim(), ..*line };
+    match step(&inner)? {
+        Parsed::Step(step) => Ok(step),
         Parsed::Loops(_) | Parsed::Stagger(_) => Err(format!("don't understand '{}'", line.text)),
     }
 }

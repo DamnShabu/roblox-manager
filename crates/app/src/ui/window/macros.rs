@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use gtk::glib;
-use rbxmgr_core::macros::{self, Player, Seed, StopFlag, VirtualInput, nested};
+use rbxmgr_core::macros::sight::Eyes;
+use rbxmgr_core::macros::sight::screencopy::Screencopy;
+use rbxmgr_core::macros::{self, Player, Seed, Sight, StopFlag, VirtualInput, nested};
 use rbxmgr_core::types::{Profile, UserId};
 
 use super::Window;
@@ -24,6 +26,7 @@ pub struct ReadyClient {
     pub display: PathBuf,
 }
 use crate::ui::macros::card::macro_card;
+use crate::ui::macros::images;
 use crate::ui::widgets::{boxed_list, clear, hotkey_label};
 use crate::worker;
 
@@ -274,6 +277,8 @@ impl Window {
         self.log(&format!("{label}: playing {name}"));
         let profile = Profile::of(id);
         let display = nested::display_file(self.services().paths.runtime_dir(), &profile);
+        // The images its `when`s look for, read here where GDK reads them.
+        let images = images::for_macro(&self.services().paths.macro_images(), &m);
         let (profiles, log, name) =
             (self.services().profiles.clone(), self.logger(), name.to_owned());
         let mine = stop.clone();
@@ -292,6 +297,16 @@ impl Window {
                 };
                 let now = chrono::Local::now;
                 let pick = seed.picker();
+                let open = |p: &std::path::Path| -> std::io::Result<Box<dyn Eyes + Send>> {
+                    Ok(Box::new(Screencopy::connect(p)?))
+                };
+                let image = |name: &str| {
+                    images
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_else(|| Err(format!("no image named {name}")))
+                };
+                let sight = Sight { open: &open, image: &image };
                 let player = Player {
                     display: &display,
                     running: &running,
@@ -300,6 +315,7 @@ impl Window {
                     pick: &pick,
                     now: &now,
                     start,
+                    sight: &sight,
                 };
                 match player.play(&m, &stop) {
                     Ok(()) => log.line(format!(

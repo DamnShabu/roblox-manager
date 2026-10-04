@@ -223,3 +223,21 @@ fn a_surface_the_desktop_lets_go_of_is_forgotten() {
     s.event(message(DISPLAY, DELETE_ID, &words(&[SURFACE])), NOW);
     assert_eq!(s.set_hidden(true, NOW), [], "no window left to hide");
 }
+
+#[test]
+fn a_frame_asked_for_is_answered_once_hidden_or_not() {
+    let mut s = cage();
+    draw(&mut s, 20, 30);
+    s.set_hidden(true, NOW);
+    // Hidden: cage waits on 30, which only a copy of the frame answers.
+    assert_eq!(s.draw(NOW), [Out::Cage(done(30))]);
+    assert_eq!(s.draw(NOW), [], "it has had that one");
+    assert_eq!(s.event(done(30), NOW), [], "nor does the desktop's own reach it");
+    draw(&mut s, 21, 31);
+    s.set_hidden(false, NOW);
+    let shown = s.event(configure(7), NOW);
+    assert!(!shown.contains(&Out::Cage(done(31))), "the desktop's to answer now");
+    // Shown but out of the desktop's sight: answered here, and once.
+    assert_eq!(s.draw(NOW), [Out::Cage(done(31))]);
+    assert_eq!(s.event(done(31), NOW), []);
+}

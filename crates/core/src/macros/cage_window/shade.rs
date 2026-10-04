@@ -119,6 +119,9 @@ pub struct Shade {
     /// wl_surface: syncobj surface, made before it is a toplevel's.
     syncobjs: HashMap<u32, u32>,
     toplevels: HashMap<u32, Toplevel>,
+    /// Frame callbacks answered here for a copy of the frame, whose done
+    /// from the desktop, if it ever comes, is not passed on twice.
+    drawn: HashSet<u32>,
 }
 
 impl Shade {
@@ -158,6 +161,9 @@ impl Shade {
     pub fn event(&mut self, msg: Vec<u8>, now_ms: u32) -> Vec<Out> {
         let (obj, op) = header(&msg);
         let body = msg.get(8..).unwrap_or_default();
+        if op == DONE && self.drawn.remove(&obj) {
+            return Vec::new();
+        }
         if obj == DISPLAY && op == DELETE_ID {
             self.forget(word(body, 0));
             return vec![Out::Cage(msg)];
@@ -197,6 +203,22 @@ impl Shade {
         let mut out = Vec::new();
         for (surface, t) in &mut self.toplevels {
             out.extend(if hide { t.hide(*surface) } else { t.show(*surface, now_ms) });
+        }
+        out
+    }
+
+    /// Have cage draw its next frame now: the frame callback it waits on,
+    /// answered here. Asked for by a macro copying the frame out, which a
+    /// cage left waiting -- hidden, or out of the desktop's sight -- never
+    /// draws.
+    pub fn draw(&mut self, now_ms: u32) -> Vec<Out> {
+        let mut out = Vec::new();
+        for t in self.toplevels.values_mut() {
+            if let Some(f) = t.frame.as_mut().filter(|f| !f.answered) {
+                f.answered = true;
+                self.drawn.insert(f.id);
+                out.push(Out::Cage(message(f.id, DONE, &words(&[now_ms]))));
+            }
         }
         out
     }
@@ -254,6 +276,7 @@ impl Shade {
         self.syncobjs.remove(&id);
         self.syncobjs.retain(|_, s| *s != id);
         self.toplevels.remove(&id);
+        self.drawn.remove(&id);
         for t in self.toplevels.values_mut() {
             if t.syncobj == Some(id) {
                 t.syncobj = None;

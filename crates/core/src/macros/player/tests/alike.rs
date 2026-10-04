@@ -68,6 +68,7 @@ fn clients_started_together_send_the_same_input_however_slow_each_display_is() {
             pick: &pick,
             now: &Local::now,
             start,
+            sight: &blind(),
         };
         player.play(&m, &StopFlag::default()).unwrap();
         sent.take()

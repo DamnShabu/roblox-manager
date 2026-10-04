@@ -30,11 +30,17 @@ pub struct Bar {
 /// The rows from `start`, a Timeline row, that belong to it: it, and the
 /// At rows after it -- with any notes between them, as the text reads.
 pub fn block(rows: &[Row], start: usize) -> usize {
+    block_of(rows, start, "At")
+}
+
+/// The rows from `start` that belong to it: it, and the rows of kind
+/// `under` after it, with any notes between them.
+fn block_of(rows: &[Row], start: usize, under: &str) -> usize {
     let mut end = start + 1;
     let mut last_at = end;
     while let Some(r) = rows.get(end) {
         match r.kind.as_str() {
-            "At" => last_at = end + 1,
+            k if k == under => last_at = end + 1,
             "Note" => {}
             _ => break,
         }
@@ -44,12 +50,16 @@ pub fn block(rows: &[Row], start: usize) -> usize {
 }
 
 /// The editor's steps as it lists them: (first row, how many rows) -- a
-/// row each, but a timeline and its rows as one.
+/// row each, but a timeline and its rows as one, and a when and its.
 pub fn units(rows: &[Row]) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let mut i = 0;
     while i < rows.len() {
-        let len = if rows[i].kind == "Timeline" { block(rows, i) } else { 1 };
+        let len = match rows[i].kind.as_str() {
+            "Timeline" => block(rows, i),
+            "When" => block_of(rows, i, "Do"),
+            _ => 1,
+        };
         out.push((i, len));
         i += len;
     }
@@ -196,5 +206,15 @@ mod tests {
         assert_eq!(kinds(&rows), ["Wait", "Key", "Timeline", "At"]);
         assert!(!shift(&mut rows, 0, true), "nothing before the first");
         assert!(!shift(&mut rows, 2, false), "nothing after the last");
+    }
+
+    #[test]
+    fn a_when_moves_with_its_do_rows() {
+        let kinds = |rows: &[Row]| rows.iter().map(|r| r.kind.clone()).collect::<Vec<_>>();
+        let mut rows =
+            vec![row("Key", "e"), row("When", ""), row("Do", "tap f"), row("Do", "tap g")];
+        assert_eq!(units(&rows), [(0, 1), (1, 3)]);
+        assert!(shift(&mut rows, 1, true));
+        assert_eq!(kinds(&rows), ["When", "Do", "Do", "Key"]);
     }
 }

@@ -60,6 +60,15 @@ const PAGE: &[Block] = &[
          and only until the second F8. A client launched before recording existed has to be \
          launched again first.",
     ),
+    Heading("When something shows"),
+    Text(
+        "A <b>When</b> step plays the <b>Do</b> steps under it the moment something shows in \
+         the client, wherever the macro is in its own steps. Press the image button on a When \
+         row and drag over what to wait for in a running client; that area is kept as an \
+         image, and the macro looks for it twenty times a second. Its own steps pause while \
+         a When plays and carry on after, keys they hold still down. A When plays once each \
+         time what it waits for appears, and keeps seeing with the window hidden.",
+    ),
     Heading("Hotkeys"),
     Text(
         "A macro's hotkey runs it on the selected accounts, or stops it, while this window has \
@@ -103,6 +112,17 @@ const PAGE: &[Block] = &[
             "Turn T DX DY, T DX DY, …",
             "move the mouse raw, as a game turns its camera: DX DY all told by T seconds in",
         ),
+        (
+            "When [not] image NAME X Y [90%]",
+            "play the Do steps under it the moment a picked image shows at X Y (within a few \
+             pixels), or with not, the moment it goes",
+        ),
+        (
+            "When [not] color X Y #RRGGBB [24]",
+            "play the Do steps under it the moment the pixel at X Y turns that colour, or stops \
+             being it",
+        ),
+        ("Do STEP", "a step a When plays: any but Repeat, Start, Stagger or Timeline"),
     ]),
     Text(
         "<b>Playback</b> plays the steps once, a set number of rounds, or until stopped.\n\n\

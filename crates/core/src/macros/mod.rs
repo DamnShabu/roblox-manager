@@ -11,6 +11,9 @@
 //! receives -- told to nobody unless a [`recording`] is armed on it. Cage
 //! itself runs behind a window relay, [`cage_window`], which can take its
 //! window off the desktop with the client still playing inside.
+//!
+//! A macro's `when`s look at the client's frame through [`sight`]: a copy
+//! cage hands over, as it would to any screenshot tool.
 
 pub mod cage_window;
 pub mod grammar;
@@ -21,13 +24,14 @@ pub mod nested;
 pub mod player;
 pub mod recording;
 pub mod relay;
+pub mod sight;
 mod socket;
 pub mod wayland;
 pub(crate) mod wire;
 
 pub use grammar::{Macro, ParseError, Row, Step};
 pub use library::MacroLibrary;
-pub use player::{Input, Player, Seed, StopFlag};
+pub use player::{Input, Player, Seed, Sight, StopFlag};
 pub use wayland::VirtualInput;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -52,4 +56,7 @@ pub enum MacroError {
     /// earlier version, or without one.
     #[error("its client was launched before it could record -- launch it again")]
     NoRelay,
+    /// A `when` cannot look for what it names: an image missing or unreadable.
+    #[error("{0}")]
+    Sight(String),
 }

@@ -57,6 +57,7 @@ fn clients_started_together_play_from_one_moment_however_slow_each_is_to_reach()
             pick: &top,
             now: &Local::now,
             start,
+            sight: &blind(),
         };
         player.play(&parse("tap e\nloop 1\n").unwrap(), &StopFlag::default()).unwrap();
         first.borrow().unwrap()
@@ -91,6 +92,7 @@ fn a_client_waiting_its_turn_says_until_when() {
         pick: &top,
         now: &now,
         start: Instant::now() + Duration::from_secs(10),
+        sight: &blind(),
     };
     player.play(&parse("tap e\n").unwrap(), &stop).unwrap();
     assert_eq!(reports.into_inner(), ["waiting 10s for its turn, until 12:00:09"]);
@@ -112,6 +114,7 @@ fn a_client_started_after_another_plays_from_step_1_while_the_first_plays_on() {
             pick: &top,
             now: &Local::now,
             start,
+            sight: &blind(),
         };
         player.play(&m, &StopFlag::default()).unwrap();
         reports.into_inner()
