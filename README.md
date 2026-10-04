@@ -110,8 +110,9 @@ Windows** in the main menu do every account at once, and hidden windows stay
 hidden if you close and reopen the manager.
 
 Hiding needs Stacked 0.21.7 or newer. If the button is missing, press
-**Update**, then launch the account again. A macro-ready window can't be
-hidden, because its macros need it.
+**Update**, then launch the account again. A macro-ready window hides too,
+and its macros keep playing while it is hidden; one launched by a version
+before 0.9.4 needs launching again first.
 
 ## Leader and auto-join
 

@@ -15,7 +15,7 @@ use super::build::Build;
 use super::process::{ProcessView, Runner, last_line};
 use super::{CordialError, clients, engine, session};
 use crate::keyring::{Attrs, Keyring};
-use crate::macros::{nested, relay};
+use crate::macros::{cage_window, nested, relay};
 use crate::paths::Paths;
 use crate::types::{Cookie, Profile, User, UserId};
 
@@ -52,7 +52,8 @@ pub struct CordialProfiles {
     /// Where pgrep and kill see the clients.
     view: ProcessView,
     sleep: Arc<dyn Fn(Duration) + Send + Sync>,
-    /// The program a macro-ready client runs behind, so it can be recorded.
+    /// The program a macro-ready client runs behind, so it can be recorded,
+    /// and its cage behind, so its window can be hidden.
     relay: Option<PathBuf>,
     /// The lock that keeps cages off the display they open on, held from the
     /// first macro-ready launch on. See [`nested::hold_parent_display`].
@@ -79,7 +80,8 @@ impl CordialProfiles {
     }
 
     /// Run macro-ready clients behind `relay` (the app itself), where a
-    /// recording can hear their windows. None runs them straight in cage.
+    /// recording can hear their windows, and their cages behind it too, where
+    /// their windows can be hidden. None runs them straight in cage.
     pub fn with_relay(mut self, relay: Option<PathBuf>) -> Self {
         self.relay = relay;
         self
@@ -178,6 +180,9 @@ impl CordialProfiles {
                 argv = relay::argv(relay, &display, &argv);
             }
             argv = nested::cage_argv(&display, &argv);
+            if let Some(relay) = &self.relay {
+                argv = cage_window::argv(relay, &display, &argv);
+            }
         }
         let mut child = self.runner.spawn(&argv, log, &env)?;
         (self.sleep)(STARTUP_CHECK);
@@ -256,10 +261,21 @@ impl CordialProfiles {
         Ok(pids.len())
     }
 
-    /// The window of a profile's running client, as its engine last said:
-    /// `<profile>/window-state`. None when the engine says nothing -- one
-    /// from before Stacked could hide its window, or no client at all.
+    /// The window of a profile's running client: in a macro-ready window,
+    /// as its window relay says; otherwise as its engine last said. None when
+    /// neither can hide it -- a client from before either could, or none.
     pub fn window(&self, profile: &Profile) -> Result<Option<Window>, CordialError> {
+        let display = nested::display_file(self.paths.runtime_dir(), profile);
+        match cage_window::hidden(&display).map_err(|e| io("could not ask the window relay", e))? {
+            Some(hidden) => Ok(Some(if hidden { Window::Hidden } else { Window::Shown })),
+            // Its engine's window is inside cage, where a macro needs it.
+            None if nested::is_up(&display) => Ok(None),
+            None => self.engine_window(profile),
+        }
+    }
+
+    /// The window as the engine last said: `<profile>/window-state`.
+    fn engine_window(&self, profile: &Profile) -> Result<Option<Window>, CordialError> {
         let path = self.path(profile).join("window-state");
         match fs::read_to_string(&path) {
             Ok(text) => Ok(match text.trim() {
@@ -273,18 +289,28 @@ impl CordialProfiles {
     }
 
     /// Hide or show the window of every client running one of `which`; the
-    /// game keeps running. Only clients whose engine publishes a window state
-    /// are signalled: to one from before that, SIGUSR1 is a kill. Returns how
-    /// many were signalled.
+    /// game keeps running. A macro-ready client's is cage's, which its window
+    /// relay hides; any other's is its engine's, signalled -- but only an
+    /// engine that publishes a window state, since to one from before that
+    /// SIGUSR1 is a kill. Returns how many were hidden or shown.
     pub fn set_hidden(&self, which: &HashSet<Profile>, hide: bool) -> Result<usize, CordialError> {
-        let mut pids = Vec::new();
+        let (mut done, mut pids) = (0, Vec::new());
         for (pid, profile) in self.clients()? {
-            if which.contains(&profile) && self.window(&profile)?.is_some() {
-                pids.push(pid);
+            if !which.contains(&profile) {
+                continue;
+            }
+            let display = nested::display_file(self.paths.runtime_dir(), &profile);
+            match cage_window::set_hidden(&display, hide)
+                .map_err(|e| io("could not reach the window relay", e))?
+            {
+                Some(_) => done += 1,
+                None if nested::is_up(&display) => {}
+                None if self.engine_window(&profile)?.is_some() => pids.push(pid),
+                None => {}
             }
         }
         self.signal(Some(if hide { "-USR1" } else { "-USR2" }), &pids)?;
-        Ok(pids.len())
+        Ok(done + pids.len())
     }
 
     /// `kill` the pids, with `sig` or the default SIGTERM. None, no kill.

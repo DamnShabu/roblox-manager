@@ -43,7 +43,9 @@ an account along for the ride.
 
 **Hidden window** -- a client's window unmapped at the manager's request
 (SIGUSR1; SIGUSR2 shows it), the game still running behind it at a capped
-frame rate. Not minimised: that is the compositor's, and niri has none.
+frame rate. A macro-ready client's is its cage's window, which its **window
+relay** unmaps instead, leaving the client's own window up inside the cage
+for macros. Not minimised: that is the compositor's, and niri has none.
 
 **Macro** -- a named sequence of steps (tap, hold, press, release, repeat, type,
 click, move, path, turn, scroll, wait, start, timeline) played into one client,

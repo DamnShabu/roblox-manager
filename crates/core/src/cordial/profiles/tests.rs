@@ -194,9 +194,10 @@ fn a_macro_ready_client_with_a_relay_runs_behind_it_inside_its_cage() {
     profiles.launch(&p, None, &build(), ClientOpts { nested: true, low_power: false }).unwrap();
     let (argv, _) = &w.runner.spawned()[0];
     let link = nested::display_file(&w.dir.path().join("run"), &p).display().to_string();
-    assert_eq!(&argv[..2], ["cage", "--"]);
-    assert_eq!(argv[5], link, "the display link, as the script's $0");
-    assert_eq!(argv[6..11], ["/app/libexec/roblox-manager", "--relay", &link, "--", "cordial-run"]);
+    let relay = "/app/libexec/roblox-manager";
+    assert_eq!(argv[..6], [relay, "--window-relay", &link, "--", "cage", "--"], "cage behind one");
+    assert_eq!(argv[9], link, "the display link, as the script's $0");
+    assert_eq!(argv[10..15], [relay, "--relay", &link, "--", "cordial-run"]);
 }
 
 #[test]
@@ -332,4 +333,71 @@ fn hiding_a_client_that_cannot_hide_runs_no_kill() {
     let w = world_with(Recording::default().answer(0, "2 cordial-run --profile old\n", ""));
     assert_eq!(w.profiles.set_hidden(&HashSet::from([Profile::named("old")]), true).unwrap(), 0);
     assert_eq!(w.runner.ran().len(), 1);
+}
+
+/// A window relay for `profile`'s macro-ready client, answering `answer` to
+/// every line, and the lines it was sent.
+fn window_relay(w: &World, profile: &str, answer: &'static str) -> Arc<Mutex<Vec<String>>> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+    let display = nested::display_file(&w.dir.path().join("run"), &Profile::named(profile));
+    fs::create_dir_all(display.parent().unwrap()).unwrap();
+    let control = UnixListener::bind(display.with_extension("window")).unwrap();
+    let said = Arc::new(Mutex::new(Vec::new()));
+    let heard = Arc::clone(&said);
+    std::thread::spawn(move || {
+        for conn in control.incoming() {
+            let conn = conn.unwrap();
+            let mut line = String::new();
+            BufReader::new(&conn).read_line(&mut line).unwrap();
+            heard.lock().unwrap().push(line.trim().to_owned());
+            (&conn).write_all(answer.as_bytes()).unwrap();
+        }
+    });
+    said
+}
+
+/// `profile` up in a macro-ready window: its cage's display, linked.
+fn in_cage(w: &World, profile: &str) -> std::os::unix::net::UnixListener {
+    let display = nested::display_file(&w.dir.path().join("run"), &Profile::named(profile));
+    fs::create_dir_all(display.parent().unwrap()).unwrap();
+    std::os::unix::net::UnixListener::bind(display).unwrap()
+}
+
+#[test]
+fn a_macro_ready_client_s_window_is_as_its_window_relay_says() {
+    let w = world();
+    let _cage = in_cage(&w, "rbxmgr-7");
+    say_window(&w, "rbxmgr-7", "shown\n");
+    window_relay(&w, "rbxmgr-7", "hidden\n");
+    assert_eq!(w.profiles.window(&Profile::named("rbxmgr-7")).unwrap(), Some(Window::Hidden));
+}
+
+#[test]
+fn hiding_a_macro_ready_client_asks_its_window_relay_and_never_signals_the_engine() {
+    let runner = Recording::default();
+    *runner.pgrep.lock().unwrap() = Some("1 cordial-run --profile rbxmgr-7\n".into());
+    let w = world_with(runner);
+    let _cage = in_cage(&w, "rbxmgr-7");
+    say_window(&w, "rbxmgr-7", "shown\n");
+    let said = window_relay(&w, "rbxmgr-7", "hidden\n");
+    let which = HashSet::from([Profile::named("rbxmgr-7")]);
+    assert_eq!(w.profiles.set_hidden(&which, true).unwrap(), 1);
+    assert_eq!(w.profiles.set_hidden(&which, false).unwrap(), 1);
+    assert_eq!(*said.lock().unwrap(), ["hide", "show"]);
+    assert!(w.runner.ran().iter().all(|argv| argv[0] != "kill"), "{:?}", w.runner.ran());
+}
+
+#[test]
+fn a_macro_ready_client_from_before_window_relays_cannot_be_hidden() {
+    let runner = Recording::default();
+    *runner.pgrep.lock().unwrap() = Some("1 cordial-run --profile rbxmgr-7\n".into());
+    let w = world_with(runner);
+    let _cage = in_cage(&w, "rbxmgr-7");
+    // Its engine can hide its own window -- inside cage, where macros need it.
+    say_window(&w, "rbxmgr-7", "shown\n");
+    let p = Profile::named("rbxmgr-7");
+    assert_eq!(w.profiles.window(&p).unwrap(), None);
+    assert_eq!(w.profiles.set_hidden(&HashSet::from([p]), true).unwrap(), 0);
+    assert!(w.runner.ran().iter().all(|argv| argv[0] != "kill"));
 }

@@ -76,7 +76,7 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 /// `DISPLAY_FILE -- PROGRAM [ARGUMENT...]`.
-fn parse(args: &[String]) -> Option<(PathBuf, Vec<String>)> {
+pub(in crate::macros) fn parse(args: &[String]) -> Option<(PathBuf, Vec<String>)> {
     match args {
         [display, dashes, argv @ ..]
             if dashes == "--" && !argv.is_empty() && !display.is_empty() =>
@@ -146,7 +146,10 @@ impl Drop for Relay {
 }
 
 /// Take each connection on `listener` with `take`, telling what fails.
-fn accept(listener: &UnixListener, mut take: impl FnMut(UnixStream) -> io::Result<()>) {
+pub(in crate::macros) fn accept(
+    listener: &UnixListener,
+    mut take: impl FnMut(UnixStream) -> io::Result<()>,
+) {
     for conn in listener.incoming() {
         if let Err(e) = conn.and_then(&mut take) {
             eprintln!("rbxmgr relay: a connection was turned away: {e}");
@@ -158,7 +161,7 @@ fn accept(listener: &UnixListener, mut take: impl FnMut(UnixStream) -> io::Resul
 
 /// A socket at `path`: a stale one left there is replaced, a live one -- a
 /// relay still serving it -- never.
-fn listen(path: &Path) -> io::Result<UnixListener> {
+pub(in crate::macros) fn listen(path: &Path) -> io::Result<UnixListener> {
     if UnixStream::connect(path).is_ok() {
         let taken = format!("{} is another relay's", path.display());
         return Err(io::Error::new(io::ErrorKind::AddrInUse, taken));
@@ -171,7 +174,7 @@ fn listen(path: &Path) -> io::Result<UnixListener> {
     UnixListener::bind(path)
 }
 
-fn remove(path: &Path) {
+pub(in crate::macros) fn remove(path: &Path) {
     // Gone already is gone; anything else leaves only a stale file, which
     // the next relay replaces.
     let _ = fs::remove_file(path);
