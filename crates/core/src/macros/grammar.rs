@@ -27,7 +27,7 @@ const FURTHEST: i32 = 65_535;
 const MOST_NOTCHES: i32 = 1000;
 
 /// The editor's step types and the command each is in a macro's text.
-const STEP_TYPES: [(&str, &str); 19] = [
+const STEP_TYPES: [(&str, &str); 20] = [
     ("Key", "tap"),
     ("Hold", "hold"),
     ("Press", "press"),
@@ -47,6 +47,7 @@ const STEP_TYPES: [(&str, &str); 19] = [
     ("Turn", "turn"),
     ("When", "when"),
     ("Do", "do"),
+    ("Exit", "exit"),
 ];
 
 /// One line as the editor shows it: a step type and its value.
@@ -115,6 +116,9 @@ pub enum Step {
         secs: (f64, f64),
         items: Vec<Timed>,
     },
+    /// The round ends here, from a `when` as well: what it holds let go
+    /// of, and the next round starts, if there is one.
+    Exit,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -346,6 +350,7 @@ fn step(line: &Line<'_>) -> Result<Parsed, String> {
             Step::MoveTo { x: int(x)?, y: int(y)?, lo, hi }
         }
         ("scroll", args) => scroll(args)?,
+        ("exit", []) => Step::Exit,
         ("path", _) => timeline::path(line.rest)?,
         ("turn", _) => timeline::turn(line.rest)?,
         ("timeline", []) => Step::Timeline { secs: (0.0, 0.0), items: Vec::new() },
@@ -510,6 +515,7 @@ pub fn describe(step: &Step) -> String {
         Step::Turn(_) => "turning the camera".into(),
         Step::Timeline { .. } => "playing a timeline".into(),
         Step::Wait(..) | Step::Start(..) => "waiting".into(),
+        Step::Exit => "ending the round".into(),
     }
 }
 

@@ -89,3 +89,23 @@ fn a_when_naming_a_missing_image_stops_before_the_first_step() {
     assert_eq!(got, Err(MacroError::Sight("no image named coin".into())));
     assert!(sent.is_empty());
 }
+
+#[test]
+fn a_when_that_exits_cuts_the_round_short_from_the_middle_of_a_wait() {
+    let started = Instant::now();
+    let m =
+        "press w\nwait 600\ntap f\nwhen color 0 0 #ff0000\ndo tap e\ndo exit\ndo tap g\nloop 1\n";
+    let (got, sent, reports) = play_seeing(m, Duration::from_millis(200), &StopFlag::default());
+    got.unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5), "the wait is not waited out");
+    let (w, e) = (keys::key_code("w").unwrap(), keys::key_code("e").unwrap());
+    assert_eq!(
+        sent,
+        [Sent::Key(w, true), Sent::Key(e, true), Sent::Key(e, false), Sent::Key(w, false)],
+        "neither f nor g, and w let go of"
+    );
+    assert!(
+        reports.iter().any(|r| r == "when 0, 0 turns #ff0000: ending the round"),
+        "{reports:?}"
+    );
+}

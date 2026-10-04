@@ -62,6 +62,10 @@ pub struct Held<'a> {
     /// a macro keeps to the clock however busy the machine is.
     due: Option<Instant>,
     when: Option<When<'a>>,
+    /// An Exit was played -- by the macro's own steps or by a `when` -- and
+    /// the round is ending: every wait from here on ends at once, as a stop
+    /// ends it, until the round has.
+    exiting: bool,
 }
 
 impl Held<'_> {
@@ -84,8 +88,8 @@ impl Held<'_> {
         self.due.map_or_else(Instant::now, on_clock)
     }
 
-    /// Wait until `until`, or until stopped (then true), tapping whatever
-    /// Repeats are due meanwhile.
+    /// Wait until `until`, or until stopped or the round exited (then
+    /// true), tapping whatever Repeats are due meanwhile.
     fn idle_until(
         &mut self,
         input: &mut dyn Input,
@@ -93,12 +97,18 @@ impl Held<'_> {
         stop: &StopFlag,
         pick: &dyn Fn(f64, f64) -> f64,
     ) -> io::Result<bool> {
+        if self.exiting {
+            return Ok(true);
+        }
         self.due = Some(until);
         loop {
             // Read before the `when`s are: one that sees after it rings past it.
             let rings = stop.rings();
             if let Some(when) = self.when {
-                when.answer(input, stop, pick)?;
+                if when.answer(input, stop, pick)? {
+                    self.exiting = true;
+                    return Ok(true);
+                }
             }
             let now = Instant::now();
             self.repeats.fire(input, now.min(until), pick)?;
@@ -112,8 +122,8 @@ impl Held<'_> {
         }
     }
 
-    /// Wait until every Repeat has tapped its last, or until stopped (then
-    /// true).
+    /// Wait until every Repeat has tapped its last, or until stopped or the
+    /// round exited (then true).
     pub fn finish_repeats(
         &mut self,
         input: &mut dyn Input,
@@ -140,6 +150,16 @@ impl Held<'_> {
             }
         }
         result
+    }
+
+    /// The round's end, however it came: everything let go of, and an exit
+    /// done with. An exit leaves the timeline where its cut-short wait was
+    /// due to end, so the next round counts from now instead.
+    fn end_exit(&mut self, input: &mut dyn Input) -> io::Result<()> {
+        if std::mem::take(&mut self.exiting) {
+            self.due = None;
+        }
+        self.release_all(input)
     }
 
     fn press(&mut self, input: &mut dyn Input, codes: &[u16]) -> io::Result<()> {
@@ -293,7 +313,11 @@ impl Player<'_> {
         if m.steps.is_empty() {
             // Only `when`s: they play as they see, until stopped -- its
             // client checked on every second meanwhile.
-            while !held.idle(input, 1.0, stop, self.pick).map_err(went_away)? {
+            // An exit there has no round to end, and only lets go.
+            while !held.idle(input, 1.0, stop, self.pick).map_err(went_away)? || held.exiting {
+                if held.exiting {
+                    held.end_exit(input).map_err(went_away)?;
+                }
                 if !(self.running)() {
                     return Err(MacroError::NotRunning);
                 }
@@ -320,6 +344,9 @@ impl Player<'_> {
                 if stop.is_set() {
                     return Ok(());
                 }
+                if held.exiting {
+                    break;
+                }
                 match step {
                     Step::Start(..) if done > 0 => {}
                     Step::Wait(lo, hi) | Step::Start(lo, hi) => {
@@ -339,10 +366,13 @@ impl Player<'_> {
                     }
                 }
             }
-            if held.finish_repeats(input, stop, self.pick).map_err(went_away)? {
+            if held.finish_repeats(input, stop, self.pick).map_err(went_away)? && !held.exiting {
                 return Ok(());
             }
-            held.release_all(input).map_err(went_away)?;
+            if stop.is_set() {
+                return Ok(());
+            }
+            held.end_exit(input).map_err(went_away)?;
             done += 1;
         }
         Ok(())
@@ -400,6 +430,10 @@ pub fn play_step(
         Step::Path(_) | Step::Turn(_) => timeline::alone(input, step, stop, pick, held),
         Step::Timeline { secs, items } => {
             timeline::play(input, items, pick(secs.0, secs.1), stop, pick, held)
+        }
+        Step::Exit => {
+            held.exiting = true;
+            Ok(())
         }
         Step::Wait(..) | Step::Start(..) => Ok(()),
     }

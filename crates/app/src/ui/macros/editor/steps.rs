@@ -13,9 +13,9 @@ use crate::ui::macros::card::step_icon;
 use crate::ui::macros::{area, point};
 use crate::ui::widgets::{Btn, Fluent, LabelFluent, icon, lbl, plural, wrap};
 
-const STEP_TYPES: [&str; 15] = [
+const STEP_TYPES: [&str; 16] = [
     "Key", "Hold", "Press", "Release", "Repeat", "Type", "Click", "Move", "Scroll", "Wait",
-    "Start", "Stagger", "Note", "When", "Do",
+    "Start", "Stagger", "Note", "When", "Do", "Exit",
 ];
 
 /// What a step's value looks like, as the entry's placeholder.
@@ -38,7 +38,8 @@ fn hint(kind: &str) -> &'static str {
         "Path" => "0 400 300, 0.5 520 310",
         "Turn" => "0.5 120 -10, 1 200 -15",
         "When" => "image coin 812 40  ·  not image coin 812 40 95%  ·  color 960 30 #ff3030",
-        "Do" => "tap e  ·  click 400 300  ·  under a When step",
+        "Do" => "tap e  ·  click 400 300  ·  exit  ·  under a When step",
+        "Exit" => "nothing to fill in  ·  ends the round, and the next starts",
         _ => "",
     }
 }

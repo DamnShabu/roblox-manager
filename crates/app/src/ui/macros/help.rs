@@ -98,6 +98,11 @@ const PAGE: &[Block] = &[
         ("Start SECONDS", "pause once, before the first round only"),
         ("Note TEXT", "a reminder; does nothing"),
         (
+            "Exit",
+            "end the round here: what it holds is let go of, and the next round starts, or the \
+             macro stops after its last",
+        ),
+        (
             "Timeline [SECONDS]",
             "play the At steps under it, each at its own time, over one another; it lasts \
              SECONDS, or until its last step ends",
@@ -122,7 +127,11 @@ const PAGE: &[Block] = &[
             "play the Do steps under it the moment the pixel at X Y turns that colour, or stops \
              being it",
         ),
-        ("Do STEP", "a step a When plays: any but Repeat, Start, Stagger or Timeline"),
+        (
+            "Do STEP",
+            "a step a When plays: any but Repeat, Start, Stagger or Timeline. Do exit ends the \
+             round the macro is in",
+        ),
     ]),
     Text(
         "<b>Playback</b> plays the steps once, a set number of rounds, or until stopped.\n\n\

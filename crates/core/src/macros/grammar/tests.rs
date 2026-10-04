@@ -307,3 +307,18 @@ fn a_stagger_is_one_length() {
     assert!(parse("stagger 2-4\ntap e\n").unwrap_err().message.contains("one number"));
     assert!(parse("stagger\ntap e\n").is_err());
 }
+
+#[test]
+fn an_exit_is_a_step_of_its_own_and_one_a_when_may_play() {
+    let src = "tap e\nexit\nwhen color 0 0 #ff0000\ndo exit\n";
+    let m = parse(src).unwrap();
+    assert_eq!(m.steps[1], Step::Exit);
+    assert_eq!(m.handlers[0].steps, [Step::Exit]);
+    let (r, loops) = rows(src);
+    assert_eq!(r[1], Row { kind: "Exit".into(), value: String::new() });
+    assert_eq!(to_text(&r, loops), src);
+    assert_eq!(parse("Exit\n").unwrap().steps, [Step::Exit]);
+    let err = parse("tap e\nexit 3\n").unwrap_err();
+    assert_eq!(err.line, Some(2));
+    assert!(parse("timeline\nat 0 exit\n").is_err(), "a timeline has no round of its own");
+}

@@ -267,6 +267,7 @@ coordinates, so keep it the same size when you play the macro back.
 | Start | `Start 45` | Pause once, before the first round only |
 | Stagger | `Stagger 5` | Run on several accounts, start each this many seconds after the one before, in the order listed. Each plays the same steps, that much after the one before |
 | Note | `# stay online` | A reminder that does nothing |
+| Exit | `Exit` | End the round here. Anything held is let go of, and the next round starts, or the macro stops after its last. `Do exit` under a When ends the round from wherever the macro is |
 
 <img src="docs/screenshots/macro-text.png" width="400" align="right" alt="The same macro in Text mode, one step per line, ending in loop 25">
 
