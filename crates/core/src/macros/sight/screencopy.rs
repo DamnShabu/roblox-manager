@@ -42,6 +42,9 @@ const FLAGS: u16 = 1;
 const READY: u16 = 2;
 const FAILED: u16 = 3;
 const BUFFER_DONE: u16 = 6;
+/// wl_output.mode, and its flag for the mode in use.
+const MODE: u16 = 1;
+const MODE_CURRENT: u32 = 1;
 /// Its flags: the copy is upside down.
 const Y_INVERT: u32 = 1;
 
@@ -53,6 +56,9 @@ pub struct Screencopy {
     display_file: PathBuf,
     shm: u32,
     output: u32,
+    /// The output's size in pixels, from its current mode: an area is kept
+    /// to it, since the display copies nothing of one that runs off it.
+    size: Option<(u32, u32)>,
     manager: u32,
     version: u32,
     pool: Option<Pool>,
@@ -85,6 +91,7 @@ impl Screencopy {
             display_file: display_file.to_owned(),
             shm: 0,
             output: 0,
+            size: None,
             manager: 0,
             version: 1,
             pool: None,
@@ -142,6 +149,10 @@ impl Screencopy {
                     // wl_display.error
                     let why = read_str(&body, 8).unwrap_or_default();
                     return Err(refused(&format!("its display refused a copy: {why}")));
+                }
+                if obj == self.output && op == MODE && word(&body, 0) & MODE_CURRENT != 0 {
+                    let (w, h) = (word(&body, 4), word(&body, 8));
+                    self.size = (w > 0 && h > 0).then_some((w, h));
                 }
                 return Ok(Some((obj, op, body)));
             }
@@ -271,7 +282,11 @@ impl Screencopy {
 
 impl Eyes for Screencopy {
     fn look(&mut self, area: Area) -> io::Result<Image> {
-        let area = area.on_display();
+        let mut area = area.on_display();
+        if let Some((w, h)) = self.size {
+            area.w = area.w.min(w.saturating_sub(area.x as u32));
+            area.h = area.h.min(h.saturating_sub(area.y as u32));
+        }
         if area.w == 0 || area.h == 0 {
             return Err(refused("that area is off the display"));
         }

@@ -264,9 +264,9 @@ impl Player<'_> {
         let seen = Seen::default();
         let done = StopFlag::default();
         thread::scope(|s| {
-            if let Some((looks, mut eyes)) = watching {
+            if let Some((mut looks, mut eyes)) = watching {
                 let (seen, done) = (&seen, &done);
-                s.spawn(move || watch::watch(eyes.as_mut(), &looks, seen, stop, done));
+                s.spawn(move || watch::watch(eyes.as_mut(), &mut looks, seen, stop, done));
             }
             let when = When { handlers: &m.handlers, seen: &seen, report: self.report };
             let played = self.play_with(m, stop, input.as_mut(), when);

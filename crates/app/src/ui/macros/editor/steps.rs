@@ -37,7 +37,7 @@ fn hint(kind: &str) -> &'static str {
         "At" => "0.5 hold w 1  ·  under a Timeline step",
         "Path" => "0 400 300, 0.5 520 310",
         "Turn" => "0.5 120 -10, 1 200 -15",
-        "When" => "image coin 812 40  ·  not image coin 812 40 95%  ·  color 960 30 #ff3030",
+        "When" => "image coin  ·  not image coin in 0 0 400 300 95%  ·  color 960 30 #ff3030",
         "Do" => "tap e  ·  click 400 300  ·  exit  ·  under a When step",
         "Exit" => "nothing to fill in  ·  ends the round, and the next starts",
         _ => "",

@@ -65,8 +65,8 @@ through points on the window. **Turn** -- raw (unaccelerated, relative) mouse
 movement, what a game turns its camera by; the pointer follows it.
 
 **When** -- steps (`do` lines) a macro plays the moment its client shows
-something (`when image coin 812 40`), out of turn: the macro's own steps
+something (`when image coin`), out of turn: the macro's own steps
 hold still while they play. **Sight** -- what a when looks for: a picked
-**image** back where it was picked, or a pixel's colour, checked in a copy
+**image** anywhere in the window (or a rectangle of it, or near a point), or a pixel's colour, checked in a copy
 of the frame cage hands over (wlr-screencopy), never anything read from
 the client.

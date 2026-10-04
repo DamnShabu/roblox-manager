@@ -29,11 +29,11 @@ const SHOWS: Area = Area { x: 100, y: 50, w: 40, h: 30 };
 fn an_image_is_found_where_it_was_picked_and_a_few_pixels_off() {
     let at = (110, 60);
     let frame = with(plain(40, 30, [0, 0, 0]), &coin(), 10, 10);
-    assert_eq!(image_score(&frame, SHOWS, &coin(), at, 0.9), Some(1.0));
+    assert_eq!(near(&frame, SHOWS, &coin(), at, 0.9), Some(at));
     let moved = with(plain(40, 30, [0, 0, 0]), &coin(), 13, 8);
-    assert_eq!(image_score(&moved, SHOWS, &coin(), at, 0.9), Some(1.0), "within the slack");
+    assert_eq!(near(&moved, SHOWS, &coin(), at, 0.9), Some((113, 58)), "within the slack");
     let far = with(plain(40, 30, [0, 0, 0]), &coin(), 20, 20);
-    assert_eq!(image_score(&far, SHOWS, &coin(), at, 0.9), None, "too far to be it");
+    assert_eq!(near(&far, SHOWS, &coin(), at, 0.9), None, "too far to be it");
 }
 
 #[test]
@@ -42,11 +42,10 @@ fn an_image_a_little_off_colour_still_matches_but_another_does_not() {
     let mut dim = coin();
     dim.rgb.iter_mut().for_each(|c| *c = c.saturating_sub(10));
     let frame = with(plain(40, 30, [0, 0, 0]), &dim, 10, 10);
-    let score = image_score(&frame, SHOWS, &coin(), at, 0.9).unwrap();
-    assert!((0.95..1.0).contains(&score), "{score}");
-    assert_eq!(image_score(&frame, SHOWS, &coin(), at, 0.99), None, "not that alike");
+    assert_eq!(near(&frame, SHOWS, &coin(), at, 0.95), Some(at));
+    assert_eq!(near(&frame, SHOWS, &coin(), at, 0.99), None, "not that alike");
     let other = with(plain(40, 30, [0, 0, 0]), &plain(6, 6, [255, 0, 0]), 10, 10);
-    assert_eq!(image_score(&other, SHOWS, &coin(), at, 0.9), None);
+    assert_eq!(near(&other, SHOWS, &coin(), at, 0.9), None);
 }
 
 #[test]

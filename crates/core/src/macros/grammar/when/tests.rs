@@ -9,7 +9,7 @@ fn a_when_s_do_lines_go_under_it_and_the_macro_s_own_steps_go_on_around() {
     assert_eq!(m.steps.len(), 2, "tap w and tap q");
     assert_eq!(m.handlers.len(), 1);
     let h = &m.handlers[0];
-    let image = Sight::Image { name: "coin".into(), x: 812, y: 40, least: 0.95 };
+    let image = Sight::Image { name: "coin".into(), place: Place::Near(812, 40), least: 0.95 };
     assert_eq!(h.when, Condition { sight: image, not: false });
     assert_eq!(h.steps.len(), 3);
     let (r, loops) = rows(src);
@@ -52,10 +52,29 @@ fn a_when_says_what_is_wrong_with_it_by_line() {
 }
 
 #[test]
-fn a_picked_image_replaces_what_the_when_looked_for_and_keeps_the_rest() {
-    assert_eq!(image_at("", "image3", 10, 20), "image image3 10 20");
-    assert_eq!(image_at("not image old 1 1 80%", "new", 5, 6), "not image new 5 6 80%");
-    assert_eq!(image_at("color 1 1 #ffffff", "new", 5, 6), "image new 5 6");
+fn an_image_is_looked_for_anywhere_near_a_point_or_in_a_rectangle() {
+    let place = |src: &str| match condition(src).unwrap().sight {
+        Sight::Image { place, least, .. } => (place, least),
+        Sight::Color { .. } => panic!("not an image"),
+    };
+    assert_eq!(place("image coin"), (Place::Anywhere, IMAGE_LEAST));
+    assert_eq!(place("image coin 80%"), (Place::Anywhere, 0.8));
+    assert_eq!(place("image coin 3 4"), (Place::Near(3, 4), IMAGE_LEAST));
+    assert_eq!(
+        place("image coin in 0 10 400 300 95%"),
+        (Place::Within { x: 0, y: 10, w: 400, h: 300 }, 0.95)
+    );
+    for bad in ["image coin 3", "image coin in 0 0 0 10", "image coin on 0 0 1 1", "image"] {
+        assert!(condition(bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn a_picked_image_is_looked_for_anywhere_unless_the_line_said_where() {
+    assert_eq!(picked_image("", "image3"), "image image3");
+    assert_eq!(picked_image("not image old 1 1 80%", "new"), "not image new 80%");
+    assert_eq!(picked_image("image old in 0 0 50 60", "new"), "image new in 0 0 50 60");
+    assert_eq!(picked_image("color 1 1 #ffffff", "new"), "image new");
 }
 
 #[test]

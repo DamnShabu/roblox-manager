@@ -1,8 +1,8 @@
 //! Picking the area a `when` looks for: an overlay opened inside a running
 //! client's own nested display (its cage), dragged over what to wait for.
 //! Once it is gone, that area of the client's frame is copied out as cage
-//! shows it and kept as the image the `when` names. Its coordinates are
-//! that display's, the ones a macro's clicks aim at too.
+//! shows it and kept as the image the `when` names, looked for anywhere in
+//! the window unless the `when` says where.
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -42,7 +42,7 @@ window.area-picker { background: rgba(0, 0, 0, 0.2); }
 }";
 
 /// A `when` step's button that picks its image: the image picked is kept,
-/// and its name and point go into `value`; what went wrong into `err`.
+/// and its name goes into `value`; what went wrong into `err`.
 pub fn button(window: &WeakWindow, value: &gtk::Entry, err: &gtk::Label) -> gtk::Button {
     const TIP: &str = "Pick the area to look for in a running client";
     let button = gtk::Button::builder()
@@ -58,9 +58,9 @@ pub fn button(window: &WeakWindow, value: &gtk::Entry, err: &gtk::Label) -> gtk:
         let dir = w.services().paths.macro_images();
         let (value, err) = (value.clone(), err.clone());
         choose(&w, anchor, dir, move |picked| match picked {
-            Ok(Some((name, area))) => {
+            Ok(Some((name, _))) => {
                 if let Some(value) = value.upgrade() {
-                    value.set_text(&when::image_at(&value.text(), &name, area.x, area.y));
+                    value.set_text(&when::picked_image(&value.text(), &name));
                 }
             }
             Ok(None) => {}

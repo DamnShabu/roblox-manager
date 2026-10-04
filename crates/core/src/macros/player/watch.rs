@@ -14,13 +14,17 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use super::{Held, Input, play_step};
+use crate::macros::grammar::when::Place;
 use crate::macros::grammar::{Handler, Sight, Step, describe, when};
-use crate::macros::sight::{Area, Eyes, Image, SLACK, color_matches, image_score};
+use crate::macros::sight::{Area, Eyes, Image, SLACK, color_matches, find, near};
 use crate::stop::StopFlag;
 
 /// How often the frame is looked at: twenty times a second. The copy waits
 /// on cage's next frame, so it is never more often than the client draws.
 const LOOK_EVERY: f64 = 0.05;
+/// The whole window, as an area to copy: the display keeps a copy to the
+/// part on it, so this is all of it at any size.
+const WHOLE: Area = Area { x: 0, y: 0, w: 1 << 16, h: 1 << 16 };
 /// Seconds without a frame to look at before it is said: a client loading
 /// draws nothing for a while, and a when is no less ready for it.
 const BLIND_FOR: f64 = 3.0;
@@ -38,8 +42,25 @@ struct Look {
 }
 
 enum Seeing {
-    Image { template: Image, at: (i32, i32), least: f64 },
-    Color { at: (i32, i32), rgb: [u8; 3], within: u8 },
+    /// An image: near a place, or in an area -- and where it was last
+    /// found there, tried first.
+    Image {
+        template: Image,
+        place: Where,
+        least: f64,
+        last: Option<(i32, i32)>,
+    },
+    Color {
+        at: (i32, i32),
+        rgb: [u8; 3],
+        within: u8,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum Where {
+    Near(i32, i32),
+    Within(Area),
 }
 
 impl Looks {
@@ -52,15 +73,25 @@ impl Looks {
         let mut area: Option<Area> = None;
         for h in handlers {
             let (sight, covers) = match &h.when.sight {
-                Sight::Image { name, x, y, least } => {
+                Sight::Image { name, place, least } => {
                     let template = image(name)?;
-                    let covers = Area {
-                        x: x - SLACK,
-                        y: y - SLACK,
-                        w: template.width + 2 * SLACK as u32,
-                        h: template.height + 2 * SLACK as u32,
+                    let (place, covers) = match *place {
+                        Place::Anywhere => (Where::Within(WHOLE), WHOLE),
+                        Place::Near(x, y) => {
+                            let covers = Area {
+                                x: x - SLACK,
+                                y: y - SLACK,
+                                w: template.width + 2 * SLACK as u32,
+                                h: template.height + 2 * SLACK as u32,
+                            };
+                            (Where::Near(x, y), covers)
+                        }
+                        Place::Within { x, y, w, h } => {
+                            let area = Area { x, y, w, h };
+                            (Where::Within(area), area)
+                        }
                     };
-                    (Seeing::Image { template, at: (*x, *y), least: *least }, covers)
+                    (Seeing::Image { template, place, least: *least, last: None }, covers)
                 }
                 Sight::Color { x, y, rgb, within } => {
                     let covers = Area { x: *x, y: *y, w: 1, h: 1 };
@@ -75,16 +106,24 @@ impl Looks {
     }
 
     /// Whether each `when` sees what it waits for, in a copy of the area.
-    fn seen(&self, frame: &Image) -> Vec<bool> {
+    fn seen(&mut self, frame: &Image) -> Vec<bool> {
+        let shows_area = self.area;
         self.looks
-            .iter()
+            .iter_mut()
             .map(|look| {
-                let shows = match &look.sight {
-                    Seeing::Image { template, at, least } => {
-                        image_score(frame, self.area, template, *at, *least).is_some()
+                let shows = match &mut look.sight {
+                    Seeing::Image { template, place, least, last } => {
+                        let found = match *place {
+                            Where::Near(x, y) => near(frame, shows_area, template, (x, y), *least),
+                            Where::Within(area) => {
+                                find(frame, shows_area, template, area, *least, *last)
+                            }
+                        };
+                        *last = found.or(*last);
+                        found.is_some()
                     }
                     Seeing::Color { at, rgb, within } => {
-                        color_matches(frame, self.area, *at, *rgb, *within)
+                        color_matches(frame, shows_area, *at, *rgb, *within)
                     }
                 };
                 shows != look.not
@@ -135,7 +174,13 @@ impl Seen {
 /// Look until `done` or `stop` is set, ringing `stop` for the player each
 /// time a `when` sees what it waits for. A display that fails ends the
 /// looking, and the player with it; a frame slow to come only delays it.
-pub fn watch(eyes: &mut dyn Eyes, looks: &Looks, seen: &Seen, stop: &StopFlag, done: &StopFlag) {
+pub fn watch(
+    eyes: &mut dyn Eyes,
+    looks: &mut Looks,
+    seen: &Seen,
+    stop: &StopFlag,
+    done: &StopFlag,
+) {
     // Whether each saw what it waits for last look. A `when not` starts out
     // seeing it: it waits for what it waits on to go, so has to see it first.
     let mut was: Vec<bool> = looks.looks.iter().map(|l| l.not).collect();

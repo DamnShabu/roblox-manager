@@ -1,19 +1,18 @@
 //! What a macro sees of its client: areas of the frame cage composes,
 //! copied out by the compositor on request, and the checks a `when` line
-//! makes of them -- an image back where it was picked, a colour at a point.
+//! makes of them -- an image anywhere in the window, or near where it was
+//! picked, and a colour at a point.
 //!
 //! Nothing reaches into the client: cage hands over a copy of what it shows,
 //! as it would to a screenshot tool, through [`screencopy`].
 
 pub mod screencopy;
+mod search;
+
+pub use search::{SLACK, find, near};
 
 use std::io;
 use std::path::{Path, PathBuf};
-
-/// How far, either way, an image may have shifted from where it was picked
-/// and still be found: a pixel or two of jitter in a game's own layout, or
-/// a window resized by a hair.
-pub const SLACK: i32 = 4;
 
 /// A rectangle of the display, from its top-left corner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -109,65 +108,6 @@ pub trait Eyes {
     /// frame that does not come in time is `TimedOut`, and worth asking for
     /// again: a client that is loading draws nothing for a while.
     fn look(&mut self, area: Area) -> io::Result<Image>;
-}
-
-/// How alike `template` is to the frame at (`x`, `y`), from 0 (nothing
-/// alike) to 1 (the same pixels), at the first place within [`SLACK`] of
-/// there that scores at least `least` -- None when none does. `frame`
-/// shows `shows`.
-pub fn image_score(
-    frame: &Image,
-    shows: Area,
-    template: &Image,
-    (x, y): (i32, i32),
-    least: f64,
-) -> Option<f64> {
-    let pixels = u64::from(template.width) * u64::from(template.height);
-    if pixels == 0 {
-        return None;
-    }
-    let most = 255.0 * 3.0 * pixels as f64;
-    // The most difference, summed over every channel, that still scores
-    // `least`: a place is given up on as soon as it is past it.
-    let budget = ((1.0 - least).max(0.0) * most) as u64;
-    offsets().into_iter().find_map(|(ox, oy)| {
-        let (left, top) = (i64::from(x + ox - shows.x), i64::from(y + oy - shows.y));
-        let fits = left >= 0
-            && top >= 0
-            && left + i64::from(template.width) <= i64::from(frame.width)
-            && top + i64::from(template.height) <= i64::from(frame.height);
-        if !fits {
-            return None;
-        }
-        let diff = difference(frame, template, left as usize, top as usize, budget)?;
-        Some(1.0 - diff as f64 / most)
-    })
-}
-
-/// Every offset within [`SLACK`], nearest first: the place it was picked is
-/// tried before any other, and is where an image that has not moved is.
-fn offsets() -> Vec<(i32, i32)> {
-    let mut all: Vec<(i32, i32)> =
-        (-SLACK..=SLACK).flat_map(|y| (-SLACK..=SLACK).map(move |x| (x, y))).collect();
-    all.sort_by_key(|(x, y)| x * x + y * y);
-    all
-}
-
-/// The summed difference of every channel of `template` against the frame
-/// at (`left`, `top`); None once it passes `limit`.
-fn difference(frame: &Image, template: &Image, left: usize, top: usize, limit: u64) -> Option<u64> {
-    let (fw, tw) = (frame.width as usize * 3, template.width as usize * 3);
-    let mut diff = 0u64;
-    for row in 0..template.height as usize {
-        let f = (top + row) * fw + left * 3;
-        let a = frame.rgb.get(f..f + tw)?;
-        let b = template.rgb.get(row * tw..(row + 1) * tw)?;
-        diff += a.iter().zip(b).map(|(p, q)| u64::from(p.abs_diff(*q))).sum::<u64>();
-        if diff > limit {
-            return None;
-        }
-    }
-    Some(diff)
 }
 
 /// Whether the frame's pixel at (`x`, `y`) is `rgb`, every channel within
