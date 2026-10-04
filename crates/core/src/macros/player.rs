@@ -3,6 +3,7 @@
 use std::cell::RefCell;
 use std::io;
 use std::path::Path;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Local};
@@ -12,10 +13,14 @@ use rand::{RngExt, SeedableRng};
 use super::MacroError;
 use super::grammar::{Macro, Step, TAP_PRESS, TYPE_GAP, describe};
 use super::keys::{self, SHIFT};
+use super::sight::{Eyes, Image};
 pub use crate::stop::StopFlag;
 
 mod repeat;
 mod timeline;
+mod watch;
+
+use watch::{Looks, Seen, When};
 
 /// How often a gliding pointer moves on: a hundred times a second.
 const GLIDE_TICK: f64 = 0.01;
@@ -44,9 +49,10 @@ pub trait Input {
 
 /// What a playing macro holds between its steps: the keys and buttons a
 /// Press left down, in the order pressed, the point it last put the
-/// pointer at, the Repeats still tapping, and where it is on its timeline.
-#[derive(Debug, Default)]
-pub struct Held {
+/// pointer at, the Repeats still tapping, where it is on its timeline, and
+/// the `when`s it answers while it waits.
+#[derive(Default)]
+pub struct Held<'a> {
     down: Vec<u16>,
     at: Option<(i32, i32)>,
     repeats: repeat::Repeats,
@@ -55,9 +61,10 @@ pub struct Held {
     /// send while the display lags, is made up by the waits after it, so
     /// a macro keeps to the clock however busy the machine is.
     due: Option<Instant>,
+    when: Option<When<'a>>,
 }
 
-impl Held {
+impl Held<'_> {
     /// Wait `secs` on from where the last wait was due to end, or until
     /// stopped (then true), tapping whatever Repeats are due meanwhile.
     pub fn idle(
@@ -88,13 +95,18 @@ impl Held {
     ) -> io::Result<bool> {
         self.due = Some(until);
         loop {
+            // Read before the `when`s are: one that sees after it rings past it.
+            let rings = stop.rings();
+            if let Some(when) = self.when {
+                when.answer(input, stop, pick)?;
+            }
             let now = Instant::now();
             self.repeats.fire(input, now.min(until), pick)?;
             if now >= until {
                 return Ok(stop.is_set());
             }
             let wake = self.repeats.next_due().map_or(until, |due| due.min(until));
-            if stop.wait(wake.saturating_duration_since(now).as_secs_f64()) {
+            if stop.wait_rung(wake.saturating_duration_since(now).as_secs_f64(), rings) {
                 return Ok(true);
             }
         }
@@ -178,6 +190,15 @@ impl Seed {
     }
 }
 
+/// How a macro with `when`s sees its client.
+pub struct Sight<'a> {
+    /// Eyes on the display at the path, which a thread of their own looks
+    /// through.
+    pub open: &'a dyn Fn(&Path) -> io::Result<Box<dyn Eyes + Send>>,
+    /// An image a `when` names, from wherever picked images are kept.
+    pub image: &'a dyn Fn(&str) -> Result<Image, String>,
+}
+
 /// Everything a playing macro reaches outside itself.
 pub struct Player<'a> {
     /// The client's display link (`nested::display_file`).
@@ -195,6 +216,7 @@ pub struct Player<'a> {
     /// share one, a little ahead: each gets ready to play in its own time,
     /// so counting from when each was ready would start them apart.
     pub start: Instant,
+    pub sight: &'a Sight<'a>,
 }
 
 impl Player<'_> {
@@ -205,10 +227,43 @@ impl Player<'_> {
         if !(self.running)() {
             return Err(MacroError::NotRunning);
         }
-        let mut input = (self.connect)(self.display).map_err(|e| match e.kind() {
+        let unreachable = |e: io::Error| match e.kind() {
             io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => MacroError::NotNested,
             _ => went_away(e),
-        })?;
+        };
+        let mut input = (self.connect)(self.display).map_err(unreachable)?;
+        // Ready to look before the first step, so a `when` that cannot see
+        // says so now and not mid-macro.
+        let watching = if m.handlers.is_empty() {
+            None
+        } else {
+            let looks = Looks::new(&m.handlers, self.sight.image).map_err(MacroError::Sight)?;
+            let eyes = (self.sight.open)(self.display).map_err(unreachable)?;
+            Some((looks, eyes))
+        };
+        let seen = Seen::default();
+        let done = StopFlag::default();
+        thread::scope(|s| {
+            if let Some((looks, mut eyes)) = watching {
+                let (seen, done) = (&seen, &done);
+                s.spawn(move || watch::watch(eyes.as_mut(), &looks, seen, stop, done));
+            }
+            let when = When { handlers: &m.handlers, seen: &seen, report: self.report };
+            let played = self.play_with(m, stop, input.as_mut(), when);
+            done.set();
+            played
+        })
+    }
+
+    /// [`Player::play`], once connected: its `when`s answered from the
+    /// first step.
+    fn play_with(
+        &self,
+        m: &Macro,
+        stop: &StopFlag,
+        input: &mut dyn Input,
+        when: When<'_>,
+    ) -> Result<(), MacroError> {
         let mut held = Held::default();
         let ahead = self.start.saturating_duration_since(Instant::now());
         let late = Instant::now().saturating_duration_since(self.start).as_secs_f64();
@@ -219,11 +274,12 @@ impl Player<'_> {
         } else if late > MOST_BEHIND {
             (self.report)(format!("starting {late:.1}s late: its client was slow to reach"));
         }
-        let played = held
-            .idle_until(input.as_mut(), self.start, stop, self.pick)
-            .map_err(went_away)
-            .and_then(|_| self.rounds(m, stop, input.as_mut(), &mut held));
-        let let_go = held.release_all(input.as_mut()).map_err(went_away);
+        let played =
+            held.idle_until(input, self.start, stop, self.pick).map_err(went_away).and_then(|_| {
+                held.when = Some(when);
+                self.rounds(m, stop, input, &mut held)
+            });
+        let let_go = held.release_all(input).map_err(went_away);
         played.and(let_go)
     }
 
@@ -232,8 +288,18 @@ impl Player<'_> {
         m: &Macro,
         stop: &StopFlag,
         input: &mut dyn Input,
-        held: &mut Held,
+        held: &mut Held<'_>,
     ) -> Result<(), MacroError> {
+        if m.steps.is_empty() {
+            // Only `when`s: they play as they see, until stopped -- its
+            // client checked on every second meanwhile.
+            while !held.idle(input, 1.0, stop, self.pick).map_err(went_away)? {
+                if !(self.running)() {
+                    return Err(MacroError::NotRunning);
+                }
+            }
+            return Ok(());
+        }
         let mut last = String::new();
         let mut say = |line: String| {
             if line != last {

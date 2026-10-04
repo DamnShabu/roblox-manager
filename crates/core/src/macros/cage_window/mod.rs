@@ -53,6 +53,13 @@ pub fn set_hidden(display_file: &Path, hide: bool) -> io::Result<Option<bool>> {
     ask(display_file, if hide { "hide" } else { "show" })
 }
 
+/// Have the cage beside `display_file` draw its next frame, hidden or not:
+/// for a macro copying the frame out, which a cage whose window nobody can
+/// see would otherwise never draw. Nothing to do without a window relay.
+pub fn draw(display_file: &Path) -> io::Result<()> {
+    ask(display_file, "draw").map(drop)
+}
+
 /// Where a window relay takes hide and show.
 fn control_file(display_file: &Path) -> PathBuf {
     display_file.with_extension("window")
@@ -178,7 +185,7 @@ fn serve(cages: UnixListener, controls: UnixListener, desktop: PathBuf) {
     });
 }
 
-/// One control connection: a line -- hide, show or state -- and the state
+/// One control connection: a line -- hide, show, draw or state -- and the state
 /// after it.
 fn control(conn: UnixStream, windows: &Windows) -> io::Result<()> {
     conn.set_read_timeout(Some(Duration::from_secs(5)))?;
@@ -187,6 +194,7 @@ fn control(conn: UnixStream, windows: &Windows) -> io::Result<()> {
     match line.trim() {
         "hide" => windows.set_hidden(true),
         "show" => windows.set_hidden(false),
+        "draw" => windows.draw(),
         "state" => {}
         other => return Err(io::Error::other(format!("not a window command: {other:?}"))),
     }

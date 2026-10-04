@@ -54,6 +54,20 @@ impl Windows {
         }
     }
 
+    /// Have every window cage has draw its next frame, hidden or not.
+    pub fn draw(&self) {
+        let now = self.now_ms();
+        let mut links = lock(&self.links);
+        links.retain(|l| l.strong_count() > 0);
+        for link in links.iter().filter_map(Weak::upgrade) {
+            let mut link = lock(&link);
+            let out = link.shade.draw(now);
+            if let Err(e) = link.deliver(out) {
+                eprintln!("rbxmgr window relay: a display connection ended: {e}");
+            }
+        }
+    }
+
     /// Pass cage's connection through to the desktop until either end
     /// closes. Cage makes its window as it starts, so a window is never
     /// made hidden: there is nothing to hide before then.

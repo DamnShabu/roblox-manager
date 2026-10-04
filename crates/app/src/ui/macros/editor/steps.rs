@@ -10,12 +10,12 @@ use rbxmgr_core::macros::lanes;
 
 use super::MacroDialog;
 use crate::ui::macros::card::step_icon;
-use crate::ui::macros::point;
+use crate::ui::macros::{area, point};
 use crate::ui::widgets::{Btn, Fluent, LabelFluent, icon, lbl, plural, wrap};
 
-const STEP_TYPES: [&str; 13] = [
+const STEP_TYPES: [&str; 15] = [
     "Key", "Hold", "Press", "Release", "Repeat", "Type", "Click", "Move", "Scroll", "Wait",
-    "Start", "Stagger", "Note",
+    "Start", "Stagger", "Note", "When", "Do",
 ];
 
 /// What a step's value looks like, as the entry's placeholder.
@@ -37,6 +37,8 @@ fn hint(kind: &str) -> &'static str {
         "At" => "0.5 hold w 1  ·  under a Timeline step",
         "Path" => "0 400 300, 0.5 520 310",
         "Turn" => "0.5 120 -10, 1 200 -15",
+        "When" => "image coin 812 40  ·  not image coin 812 40 95%  ·  color 960 30 #ff3030",
+        "Do" => "tap e  ·  click 400 300  ·  under a When step",
         _ => "",
     }
 }
@@ -65,6 +67,7 @@ impl MacroDialog {
                     .upcast()
             })
             .collect();
+        adds.push(self.when_button().upcast());
         adds.push(self.record_button().upcast());
         for (name, label) in [("steps", "Steps"), ("text", "Text")] {
             self.view.add(adw::Toggle::builder().name(name).label(label).build());
@@ -129,75 +132,93 @@ impl MacroDialog {
                 self.list.append(&self.timeline_row(u + 1, count, i, len));
                 continue;
             }
-            let r = &rows[i];
-            let mut kinds: Vec<&str> = STEP_TYPES.to_vec();
-            if !kinds.contains(&r.kind.as_str()) {
-                kinds.push(&r.kind);
+            for (k, row) in (i..i + len).enumerate() {
+                // A when's do rows go with it: numbered with it, moved with it.
+                let number = if k == 0 { format!("{}", u + 1) } else { String::new() };
+                let moves = if k == 0 { (u > 0, u + 1 < count) } else { (false, false) };
+                self.list.append(&self.step_row(&rows, row, &number, moves));
             }
-            let kind = gtk::DropDown::from_strings(&kinds);
-            kind.set_valign(Align::Center);
-            // One width for every type, so the values line up.
-            kind.set_width_request(104);
-            kind.set_selected(kinds.iter().position(|k| *k == r.kind).unwrap_or(0) as u32);
-            let (me, owned): (_, Vec<String>) =
-                (Rc::downgrade(self), kinds.iter().map(|k| (*k).to_owned()).collect());
-            kind.connect_selected_notify(move |d| {
-                if let (Some(me), Some(k)) = (me.upgrade(), owned.get(d.selected() as usize)) {
-                    me.retype(i, k.clone());
-                }
-            });
-            let value = gtk::Entry::builder()
-                .text(&r.value)
-                .placeholder_text(hint(&r.kind))
-                .hexpand(true)
-                .valign(Align::Center)
-                .css_classes(["monospace"])
-                .build();
-            let me = Rc::downgrade(self);
-            value.connect_changed(move |e| {
-                if let Some(d) = me.upgrade() {
-                    if let Some(row) = d.rows.borrow_mut().get_mut(i) {
-                        row.value = e.text().to_string();
-                    }
-                }
-            });
-            let button = |ic: &str, tip: &str, on: bool, act: fn(&Rc<Self>, usize)| {
-                let me = Rc::downgrade(self);
-                let b = Btn::new("flat circular").icon(ic).tip(tip).build(move || {
-                    if let Some(d) = me.upgrade() {
-                        act(&d, i);
-                    }
-                });
-                b.button.set_sensitive(on);
-                b.button.set_valign(Align::Center);
-                b.button
-            };
-            let line = hbox!(
-                8,
-                "",
-                lbl(&format!("{}", u + 1), "number dimmed").xalign(1.0),
-                icon(step_icon(&r.kind)).css("dimmed"),
-                kind,
-                value,
-                button("go-up-symbolic", "Move up", u > 0, |d, i| d.shift(i, true)),
-                button("go-down-symbolic", "Move down", u + 1 < count, |d, i| d.shift(i, false)),
-                button("user-trash-symbolic", "Remove step", true, |d, i| {
-                    d.rows.borrow_mut().remove(i);
-                    d.draw_steps();
-                })
-            );
-            if r.kind == "Click" {
-                let pick = point::button(&self.window, &value, &self.err);
-                line.insert_child_after(&pick, Some(&value));
-            }
-            let row = gtk::ListBoxRow::builder()
-                .activatable(false)
-                .selectable(false)
-                .child(&line)
-                .build();
-            row.add_css_class("step-row");
-            self.list.append(&row);
         }
+    }
+
+    /// Row `i` as a step row, numbered `number` (empty for a when's rows
+    /// after its first), with its moves on or off.
+    fn step_row(
+        self: &Rc<Self>,
+        rows: &[Row],
+        i: usize,
+        number: &str,
+        (up, down): (bool, bool),
+    ) -> gtk::ListBoxRow {
+        let r = &rows[i];
+        let mut kinds: Vec<&str> = STEP_TYPES.to_vec();
+        if !kinds.contains(&r.kind.as_str()) {
+            kinds.push(&r.kind);
+        }
+        let kind = gtk::DropDown::from_strings(&kinds);
+        kind.set_valign(Align::Center);
+        // One width for every type, so the values line up.
+        kind.set_width_request(104);
+        kind.set_selected(kinds.iter().position(|k| *k == r.kind).unwrap_or(0) as u32);
+        let (me, owned): (_, Vec<String>) =
+            (Rc::downgrade(self), kinds.iter().map(|k| (*k).to_owned()).collect());
+        kind.connect_selected_notify(move |d| {
+            if let (Some(me), Some(k)) = (me.upgrade(), owned.get(d.selected() as usize)) {
+                me.retype(i, k.clone());
+            }
+        });
+        let value = gtk::Entry::builder()
+            .text(&r.value)
+            .placeholder_text(hint(&r.kind))
+            .hexpand(true)
+            .valign(Align::Center)
+            .css_classes(["monospace"])
+            .build();
+        let me = Rc::downgrade(self);
+        value.connect_changed(move |e| {
+            if let Some(d) = me.upgrade() {
+                if let Some(row) = d.rows.borrow_mut().get_mut(i) {
+                    row.value = e.text().to_string();
+                }
+            }
+        });
+        let button = |ic: &str, tip: &str, on: bool, act: fn(&Rc<Self>, usize)| {
+            let me = Rc::downgrade(self);
+            let b = Btn::new("flat circular").icon(ic).tip(tip).build(move || {
+                if let Some(d) = me.upgrade() {
+                    act(&d, i);
+                }
+            });
+            b.button.set_sensitive(on);
+            b.button.set_valign(Align::Center);
+            b.button
+        };
+        let line = hbox!(
+            8,
+            "",
+            lbl(number, "number dimmed").xalign(1.0),
+            icon(step_icon(&r.kind)).css("dimmed"),
+            kind,
+            value,
+            button("go-up-symbolic", "Move up", up, |d, i| d.shift(i, true)),
+            button("go-down-symbolic", "Move down", down, |d, i| d.shift(i, false)),
+            button("user-trash-symbolic", "Remove step", true, |d, i| {
+                d.rows.borrow_mut().remove(i);
+                d.draw_steps();
+            })
+        );
+        if r.kind == "Click" {
+            let pick = point::button(&self.window, &value, &self.err);
+            line.insert_child_after(&pick, Some(&value));
+        }
+        if r.kind == "When" {
+            let pick = area::button(&self.window, &value, &self.err);
+            line.insert_child_after(&pick, Some(&value));
+        }
+        let row =
+            gtk::ListBoxRow::builder().activatable(false).selectable(false).child(&line).build();
+        row.add_css_class("step-row");
+        row
     }
 
     fn retype(self: &Rc<Self>, i: usize, kind: String) {
@@ -216,6 +237,25 @@ impl MacroDialog {
                 }
             });
         }
+    }
+
+    /// When: a `when` and a first `do` under it, added at the end -- steps
+    /// that play the moment something shows in the client, out of turn.
+    fn when_button(self: &Rc<Self>) -> gtk::Button {
+        let me = Rc::downgrade(self);
+        Btn::new("")
+            .text("When")
+            .icon("list-add-symbolic")
+            .tip("Add steps that play the moment something shows in the client")
+            .build(move || {
+                if let Some(d) = me.upgrade() {
+                    d.add_rows(vec![
+                        Row { kind: "When".to_owned(), value: String::new() },
+                        Row { kind: "Do".to_owned(), value: String::new() },
+                    ]);
+                }
+            })
+            .button
     }
 
     /// Record: steps from playing in a running client, added at the end.

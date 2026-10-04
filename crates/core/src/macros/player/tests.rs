@@ -78,13 +78,26 @@ fn step(text: &str) -> Step {
     parse(text).unwrap().steps.remove(0)
 }
 
+fn no_eyes(_: &Path) -> io::Result<Box<dyn Eyes + Send>> {
+    Err(io::Error::other("these tests do not look"))
+}
+
+fn no_image(name: &str) -> Result<Image, String> {
+    Err(format!("no image named {name}"))
+}
+
+/// Sight for a macro with no `when`: never asked for anything.
+fn blind() -> Sight<'static> {
+    Sight { open: &no_eyes, image: &no_image }
+}
+
 /// The top of every range, so waits are known.
 fn top(_lo: f64, hi: f64) -> f64 {
     hi
 }
 
 /// Play `lines`, one step each, into `r` with nothing held at the start.
-fn steps(r: &mut Recorder, lines: &[&str]) -> io::Result<Held> {
+fn steps(r: &mut Recorder, lines: &[&str]) -> io::Result<Held<'static>> {
     let mut held = Held::default();
     for line in lines {
         play_step(r, &step(line), &StopFlag::default(), &top, &mut held)?;
@@ -254,6 +267,7 @@ fn run(
         pick: &top,
         now: &now,
         start: Instant::now(),
+        sight: &blind(),
     };
     let got = player.play(&parse(m).unwrap(), stop);
     (got, reports.into_inner())
@@ -307,6 +321,7 @@ fn a_playing_macro_says_each_step_it_is_at_and_the_waits_worth_watching() {
         pick: &top,
         now: &now,
         start: Instant::now(),
+        sight: &blind(),
     };
     let m = parse("start 0.1\ntap e\ntap e\nwait 0\nmove to 1 1\nmove to 2 2\nwait 5\ntap e\n");
     player.play(&m.unwrap(), &stop).unwrap();
@@ -527,3 +542,4 @@ fn a_macro_stalled_longer_than_it_can_make_up_carries_on_from_where_it_is() {
 
 mod alike;
 mod start;
+mod when;
