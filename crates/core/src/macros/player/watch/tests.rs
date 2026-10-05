@@ -113,3 +113,15 @@ fn an_image_named_with_no_place_is_looked_for_in_the_whole_window() {
     assert_eq!(stop.rings(), 1, "seen once it shows, wherever it is");
     assert_eq!(eyes.asked[0], WHOLE);
 }
+
+#[test]
+fn images_are_looked_for_twice_a_second_and_colours_twenty_times() {
+    let every = |text: &str| {
+        let m = parse(text).unwrap();
+        Looks::new(&m.handlers, &|_| Ok(pixel(RED))).unwrap().every
+    };
+    assert_eq!(every("when color 1 1 #ff0000\ndo tap e"), LOOK_EVERY);
+    assert_eq!(every("when image coin\ndo tap e"), LOOK_FOR_IMAGES_EVERY);
+    let both = "when color 1 1 #ff0000\ndo tap e\nwhen image coin\ndo tap f";
+    assert_eq!(every(both), LOOK_FOR_IMAGES_EVERY, "one copy a look serves both");
+}
