@@ -19,15 +19,9 @@ use crate::macros::grammar::{Handler, Sight, Step, describe, when};
 use crate::macros::sight::{Area, Eyes, Image, SLACK, color_matches, find, near};
 use crate::stop::StopFlag;
 
-/// How often the frame is looked at for colours alone: twenty times a
-/// second. A pixel's copy is next to nothing, and waits on cage's next
-/// frame, so it is never more often than the client draws.
+/// How often the frame is looked at: twenty times a second. The copy waits
+/// on cage's next frame, so it is never more often than the client draws.
 const LOOK_EVERY: f64 = 0.05;
-/// How often it is looked at when a `when` waits on an image: twice a
-/// second. Each look copies the window and searches it -- 5 to 14 ms of a
-/// core, and with the window hidden a frame cage draws for it alone -- and
-/// an image seen half a second late is still seen in time.
-const LOOK_FOR_IMAGES_EVERY: f64 = 0.5;
 /// The whole window, as an area to copy: the display keeps a copy to the
 /// part on it, so this is all of it at any size.
 const WHOLE: Area = Area { x: 0, y: 0, w: 1 << 16, h: 1 << 16 };
@@ -40,8 +34,6 @@ const BLIND_FOR: f64 = 3.0;
 pub struct Looks {
     looks: Vec<Look>,
     area: Area,
-    /// Seconds between looks.
-    every: f64,
 }
 
 struct Look {
@@ -110,9 +102,7 @@ impl Looks {
             looks.push(Look { sight, not: h.when.not });
         }
         let area = area.ok_or("the macro has no 'when' to look for")?.on_display();
-        let images = looks.iter().any(|l| matches!(l.sight, Seeing::Image { .. }));
-        let every = if images { LOOK_FOR_IMAGES_EVERY } else { LOOK_EVERY };
-        Ok(Looks { looks, area, every })
+        Ok(Looks { looks, area })
     }
 
     /// Whether each `when` sees what it waits for, in a copy of the area.
@@ -232,7 +222,7 @@ pub fn watch(
                 return;
             }
         }
-        let left = looks.every - started.elapsed().as_secs_f64();
+        let left = LOOK_EVERY - started.elapsed().as_secs_f64();
         if left > 0.0 && done.wait(left) {
             return;
         }
