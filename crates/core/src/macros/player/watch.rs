@@ -173,7 +173,8 @@ impl Seen {
 
 /// Look until `done` or `stop` is set, ringing `stop` for the player each
 /// time a `when` sees what it waits for. A display that fails ends the
-/// looking, and the player with it; a frame slow to come only delays it.
+/// looking, and the player with it; a frame slow to come, or one it could
+/// not copy, only delays it.
 pub fn watch(
     eyes: &mut dyn Eyes,
     looks: &mut Looks,
@@ -209,7 +210,9 @@ pub fn watch(
                     stop.ring();
                 }
             }
-            Err(e) if e.kind() == io::ErrorKind::TimedOut => {
+            // No frame this time -- late, or one the display failed to
+            // copy -- is waited out; only a display that is gone ends it.
+            Err(e) if matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::ResourceBusy) => {
                 if !blind && seen_last.elapsed().as_secs_f64() >= BLIND_FOR {
                     blind = true;
                     seen.found().said = Some(format!("cannot see its window: {e}"));
