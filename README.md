@@ -298,7 +298,7 @@ A **When** step plays the steps under it the moment something appears in
 the client, wherever the macro is in its own steps. Press the image button
 on a When row and drag over what to wait for in a running macro-ready
 client: a button, an icon, a bar. That area is kept as an image, and from
-then on the macro looks for it anywhere in the window, twenty times a
+then on the macro looks for it anywhere in the window, twice a
 second.
 
 ```
