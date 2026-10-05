@@ -97,3 +97,14 @@ fn a_line_that_is_no_command_is_turned_away() {
     assert!(ask(&display, "explode").is_err());
     assert_eq!(hidden(&display).unwrap(), Some(false), "and nothing changed");
 }
+
+#[test]
+fn a_window_relay_slow_to_answer_is_a_timeout() {
+    let dir = tempfile::tempdir().unwrap();
+    let display = dir.path().join("rbxmgr-7.wayland");
+    // Takes the line and never answers: a relay stuck behind its cage.
+    let listener = UnixListener::bind(control_file(&display)).unwrap();
+    let err = draw(&display).err().unwrap();
+    drop(listener);
+    assert_eq!(err.kind(), io::ErrorKind::TimedOut, "{err}");
+}
