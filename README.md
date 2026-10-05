@@ -275,9 +275,10 @@ coordinates, so keep it the same size when you play the macro back.
 them.
 
 Every time in seconds can be a range such as `60-240`, and a new value is
-picked each time. Key presses are also held for a random moment, and typed
-characters are spaced randomly. The accounts one Run plays a macro on all
-pick the same values, so they play it alike; the next Run picks new ones.
+picked each time. Nothing else is random: a tap is held for 0.08 s, typed
+characters are 0.1 s apart and a Repeat with no EVERY taps every 0.15 s. The
+accounts one Run plays a macro on all pick the same values from a range, so
+they play it alike; the next Run picks new ones.
 
 Keys are letters, digits and punctuation, or names: `space`, `enter`,
 `esc`, `tab`, `shift`, `ctrl`, `alt`, `up`, `down`, `left`, `right`, `F1`
