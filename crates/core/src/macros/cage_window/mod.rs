@@ -85,7 +85,15 @@ fn ask(display_file: &Path, line: &str) -> io::Result<Option<bool>> {
     conn.set_read_timeout(Some(Duration::from_secs(5)))?;
     conn.write_all(format!("{line}\n").as_bytes())?;
     let mut answer = String::new();
-    BufReader::new(conn).read_line(&mut answer)?;
+    // A relay slow to answer is a timeout, whatever the platform calls it:
+    // a macro looking through it waits out a timeout, and gives up on
+    // anything else.
+    BufReader::new(conn).read_line(&mut answer).map_err(|e| match e.kind() {
+        io::ErrorKind::WouldBlock => {
+            io::Error::new(io::ErrorKind::TimedOut, "the window relay did not answer")
+        }
+        _ => e,
+    })?;
     match answer.trim() {
         "hidden" => Ok(Some(true)),
         "shown" => Ok(Some(false)),

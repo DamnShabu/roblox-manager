@@ -2,7 +2,7 @@
 //! real socket, with the keymap passed as a file descriptor.
 
 use std::fs::File;
-use std::io::Seek;
+use std::io::{Read, Seek};
 use std::mem::MaybeUninit;
 use std::os::unix::net::UnixListener;
 use std::sync::{Arc, Mutex};
@@ -296,4 +296,25 @@ fn a_scroll_is_whole_wheel_notches() {
         ],
         "a wheel's source, its notches (15 apiece), and a frame"
     );
+}
+
+#[test]
+fn a_display_slow_to_read_holds_input_up_rather_than_failing_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("wl");
+    let seen = Arc::new(Mutex::new(Seen::default()));
+    let server = compositor(&path, &GLOBALS, Arc::clone(&seen));
+    let mut input = VirtualInput::connect(&path).unwrap();
+    let pointer = input.pointer;
+    // Far more than a socket holds: the stand-in falls behind, as a cage
+    // busy drawing does, and every motion still has to reach it.
+    const MOTIONS: usize = 100_000;
+    for _ in 0..MOTIONS {
+        input.motion(1.0, 0.0).unwrap();
+    }
+    drop(input);
+    server.join().unwrap();
+    let seen = seen.lock().unwrap();
+    let motions = seen.requests.iter().filter(|(o, op, _)| *o == pointer && *op == 0).count();
+    assert_eq!(motions, MOTIONS);
 }

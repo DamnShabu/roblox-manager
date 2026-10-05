@@ -9,7 +9,7 @@
 //! less than a binding library would be to ship.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::{self, IoSlice, Read, Write};
+use std::io::{self, IoSlice, Write};
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -128,15 +128,24 @@ impl VirtualInput {
         Ok(())
     }
 
-    /// Events that have arrived; a protocol error is raised.
+    /// Events that have arrived; a protocol error is raised. Not waiting
+    /// is asked of this one read, never set on the socket: a socket left
+    /// non-blocking fails the next send with EAGAIN the moment a busy cage
+    /// falls behind reading, and that ended macros for good a while in.
     fn pump(&mut self, block: bool) -> io::Result<Vec<(u32, u16, Vec<u8>)>> {
+        use rustix::net::{RecvFlags, recv};
         let mut data = [0u8; 65536];
-        self.sock.set_nonblocking(!block)?;
-        let got = match self.sock.read(&mut data) {
-            Ok(0) => return Err(io::Error::new(io::ErrorKind::BrokenPipe, "its display closed")),
-            Ok(n) => n,
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => 0,
-            Err(e) => return Err(e),
+        let flags = if block { RecvFlags::empty() } else { RecvFlags::DONTWAIT };
+        let got = loop {
+            match recv(&self.sock, &mut data, flags) {
+                Ok((0, _)) => {
+                    return Err(io::Error::new(io::ErrorKind::BrokenPipe, "its display closed"));
+                }
+                Ok((n, _)) => break n,
+                Err(rustix::io::Errno::AGAIN) if !block => break 0,
+                Err(rustix::io::Errno::INTR) => {}
+                Err(e) => return Err(e.into()),
+            }
         };
         self.framer.push(&data[..got]);
         let mut events = Vec::new();

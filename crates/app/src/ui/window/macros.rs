@@ -286,7 +286,16 @@ impl Window {
         let weak = self.weak();
         worker::run(
             move || {
-                let running = || profiles.running().is_ok_and(|up| up.contains(&profile));
+                // Only a client seen gone ends the run. Not being able to
+                // list the clients -- pgrep slow with thirty of them up -- is
+                // no sign this one went, and its display says if it did.
+                let running = || match profiles.running() {
+                    Ok(up) => up.contains(&profile),
+                    Err(e) => {
+                        log.line(format!("{label}: {name} carries on -- {e}"));
+                        true
+                    }
+                };
                 let connect = |p: &std::path::Path| -> std::io::Result<Box<dyn macros::Input>> {
                     Ok(Box::new(VirtualInput::connect(p)?))
                 };
@@ -318,14 +327,19 @@ impl Window {
                     sight: &sight,
                 };
                 match player.play(&m, &stop) {
-                    Ok(()) => log.line(format!(
-                        "{label}: {name} {}",
-                        if stop.is_set() { "stopped" } else { "finished" }
-                    )),
-                    Err(e) => log.line(format!("{label}: {name} stopped -- {e}")),
+                    Ok(()) => {
+                        let end = if stop.is_set() { "stopped" } else { "finished" };
+                        log.line(format!("{label}: {name} {end}"));
+                        None
+                    }
+                    Err(e) => {
+                        let why = format!("{label}: {name} stopped -- {e}");
+                        log.line(why.clone());
+                        Some(why)
+                    }
                 }
             },
-            move |()| {
+            move |failed: Option<String>| {
                 let Some(w) = weak.upgrade() else { return };
                 let mut s = w.state_mut();
                 // Only this run's entry: a newer run may have replaced it.
@@ -335,6 +349,11 @@ impl Window {
                 }
                 drop(s);
                 w.refresh_states();
+                // A run that ends on its own is said where it is seen: its
+                // row just goes quiet, which reads as never having started.
+                if let Some(why) = failed {
+                    w.toast(&why);
+                }
             },
         );
     }
