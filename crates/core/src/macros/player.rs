@@ -189,11 +189,11 @@ fn on_clock(due: Instant) -> Instant {
     if now.saturating_duration_since(due).as_secs_f64() <= MOST_BEHIND { due } else { now }
 }
 
-/// What a run's random moments are drawn from: humans never press a key for
-/// the same few milliseconds twice. The clients a macro is started on
-/// together share one, so they pick the same moments in the same order and
-/// play alike -- a pick each of their own would set them apart a little
-/// more with every step. The next run draws a new one.
+/// What a run's picks from a written range (`wait 60-240`) are drawn from.
+/// Nothing the user did not write as a range is picked. The clients a
+/// macro is started on together share one, so they pick the same moments in
+/// the same order and play alike -- a pick each of their own would set them
+/// apart a little more with every step. The next run draws a new one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Seed(u64);
 

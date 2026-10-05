@@ -11,12 +11,14 @@ pub mod when;
 pub use timeline::Timed;
 pub use when::{Condition, Handler, Sight};
 
-/// A tap is a short hold: its press length is random as well.
-pub const TAP_PRESS: (f64, f64) = (0.04, 0.12);
+/// A tap is a short hold of a fixed length. These defaults are single
+/// values rather than ranges: a macro presses exactly what its text says,
+/// and only a range the user wrote is picked from.
+pub const TAP_PRESS: (f64, f64) = (0.08, 0.08);
 /// Typed characters are this far apart.
-pub const TYPE_GAP: (f64, f64) = (0.05, 0.16);
+pub const TYPE_GAP: (f64, f64) = (0.1, 0.1);
 /// A Repeat with no EVERY taps this far apart, press to press.
-pub const REPEAT_EVERY: (f64, f64) = (0.1, 0.2);
+pub const REPEAT_EVERY: (f64, f64) = (0.15, 0.15);
 /// The closest together a Repeat's taps may be.
 pub(crate) const SHORTEST_EVERY: f64 = 0.02;
 /// The longest any one duration may be: a day.

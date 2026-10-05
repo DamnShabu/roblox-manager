@@ -322,3 +322,10 @@ fn an_exit_is_a_step_of_its_own_and_one_a_when_may_play() {
     assert_eq!(err.line, Some(2));
     assert!(parse("timeline\nat 0 exit\n").is_err(), "a timeline has no round of its own");
 }
+
+#[test]
+fn the_lengths_a_macro_does_not_write_are_not_random() {
+    for (lo, hi) in [TAP_PRESS, TYPE_GAP, REPEAT_EVERY] {
+        assert_eq!(lo, hi, "a default is one value, so the player never picks from it");
+    }
+}

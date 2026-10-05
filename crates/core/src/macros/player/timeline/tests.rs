@@ -94,7 +94,7 @@ fn a_move_to_glides_from_where_the_pointer_is_or_goes_at_once() {
 #[test]
 fn a_click_goes_to_its_point_and_presses_there() {
     let got = sends(&["at 2 click right 7 8"], None);
-    assert_eq!(got, [(2.0, Send::MoveTo(7, 8)), (2.0, Send::Down(0x111)), (2.12, Send::Up(0x111))]);
+    assert_eq!(got, [(2.0, Send::MoveTo(7, 8)), (2.0, Send::Down(0x111)), (2.08, Send::Up(0x111))]);
 }
 
 #[test]
