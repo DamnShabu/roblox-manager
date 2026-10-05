@@ -113,3 +113,11 @@ fn an_image_named_with_no_place_is_looked_for_in_the_whole_window() {
     assert_eq!(stop.rings(), 1, "seen once it shows, wherever it is");
     assert_eq!(eyes.asked[0], WHOLE);
 }
+
+#[test]
+fn a_frame_the_display_could_not_copy_is_waited_out() {
+    let failed = io::Error::new(io::ErrorKind::ResourceBusy, "could not copy that frame");
+    let frames = vec![Err(failed), Ok(pixel(RED))];
+    let (rings, seen, _) = watched("when color 0 0 #ff0000\ndo tap e\n", frames);
+    assert_eq!((rings, seen.next().unwrap()), (1, Some(0)));
+}

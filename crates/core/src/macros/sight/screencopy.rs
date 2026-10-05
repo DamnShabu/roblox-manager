@@ -250,7 +250,7 @@ impl Screencopy {
                     }
                 }
                 BUFFER_DONE => break,
-                FAILED => return Err(refused("its display could not copy that area")),
+                FAILED => return Err(uncopied()),
                 _ => {}
             }
         }
@@ -268,7 +268,7 @@ impl Screencopy {
             match op {
                 FLAGS => flags = word(&body, 0),
                 READY => break,
-                FAILED => return Err(refused("its display could not copy that area")),
+                FAILED => return Err(uncopied()),
                 _ => {}
             }
         }
@@ -356,6 +356,14 @@ fn fit(image: Image, area: Area) -> Image {
         }
     }
     Image { width: w, height: h, rgb }
+}
+
+/// The display could not copy this frame. wlroots says so for a frame it
+/// could not render into the buffer -- an output mid-change, or every cage
+/// at once while the desktop sleeps its monitor -- and the next can copy
+/// fine, so it is the watcher's to wait out, not the end of the macro.
+fn uncopied() -> io::Error {
+    io::Error::new(io::ErrorKind::ResourceBusy, "its display could not copy that frame")
 }
 
 fn late() -> io::Error {

@@ -106,7 +106,9 @@ pub fn free_image_name(dir: &Path) -> String {
 pub trait Eyes {
     /// The display's pixels in `area`, as they are on its next frame. A
     /// frame that does not come in time is `TimedOut`, and worth asking for
-    /// again: a client that is loading draws nothing for a while.
+    /// again: a client that is loading draws nothing for a while. A frame
+    /// the display could not copy is `ResourceBusy`, and worth asking for
+    /// again too.
     fn look(&mut self, area: Area) -> io::Result<Image>;
 }
 
