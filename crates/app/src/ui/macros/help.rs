@@ -65,7 +65,7 @@ const PAGE: &[Block] = &[
         "A <b>When</b> step plays the <b>Do</b> steps under it the moment something shows in \
          the client, wherever the macro is in its own steps. Press the image button on a When \
          row and drag over what to wait for in a running client; that area is kept as an \
-         image, and the macro looks for it anywhere in the window twice a second. Its own steps pause while \
+         image, and the macro looks for it anywhere in the window twenty times a second. Its own steps pause while \
          a When plays and carry on after, keys they hold still down. A When plays once each \
          time what it waits for appears, and keeps seeing with the window hidden.",
     ),
