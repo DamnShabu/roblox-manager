@@ -1393,7 +1393,7 @@ checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
 
 [[package]]
 name = "rbxmgr"
-version = "0.9.8"
+version = "0.9.9"
 dependencies = [
  "async-channel",
  "chrono",
@@ -1405,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "rbxmgr-core"
-version = "0.9.8"
+version = "0.9.9"
 dependencies = [
  "backhand",
  "chrono",
