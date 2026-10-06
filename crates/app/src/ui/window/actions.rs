@@ -39,13 +39,15 @@ type GroupAction = (&'static str, fn(&Window, &str));
 
 impl Window {
     pub(super) fn install_actions(&self) {
-        let actions: [Action; 20] = [
+        let actions: [Action; 22] = [
             ("add-account", Window::on_add),
             ("refresh", Window::refresh_all),
             ("update", Window::on_update),
             ("restart", Window::on_restart),
             ("new-group", Window::add_group),
             ("new-macro", |w| macros::editor::MacroDialog::open(w, None)),
+            ("open-scripts", Window::open_scripts_folder),
+            ("reload-scripts", Window::refresh_macros),
             ("launch-selected", Window::launch_selected),
             ("launch-group", Window::launch_chain),
             ("stop-all", Window::on_stop_all),

@@ -317,6 +317,27 @@ one pixel to turn a colour, and a percentage at the end (`95%`) sets how
 many of the image's pixels must be alike (90% unless you give one). A macro can be nothing but Whens. It keeps seeing with its
 window hidden or on another workspace. More in [docs/macros-when.md](docs/macros-when.md).
 
+### Advanced macros (Python)
+
+The pane's **Advanced** tab lists the Python scripts in
+`~/.local/share/rbxmgr/advanced-macros/` (the folder button opens it, with an
+example to copy). Press ▶ on one to run it for every ticked account, each its
+own `python3` process, and again to stop it. A script plays through the
+`rbxmgr` module, with the same keys, clicks and picked images as a plain macro:
+
+```python
+import rbxmgr as rb
+while True:
+    at = rb.find_center("image1")
+    if at:
+        rb.click(*at)
+    rb.tap("e")
+    rb.wait(0.5)
+```
+
+`print()` goes to the activity log. The whole module is in
+[docs/advanced-macros.md](docs/advanced-macros.md).
+
 ### Hotkeys
 
 Give a macro a hotkey in its editor. The hotkey runs or stops it on the

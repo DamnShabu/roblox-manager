@@ -46,6 +46,23 @@ pub fn for_macro(dir: &Path, m: &Macro) -> HashMap<String, Result<Image, String>
         .collect()
 }
 
+/// Every picked image, by name, or why each cannot be had: for a script,
+/// which may ask for any of them. A folder not there yet holds none.
+pub fn all(dir: &Path) -> HashMap<String, Result<Image, String>> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return HashMap::new() };
+    entries
+        .filter_map(|e| {
+            let path = e.ok()?.path();
+            let name = path.file_name()?.to_str()?.strip_suffix(".png")?.to_owned();
+            Some(name)
+        })
+        .map(|name| {
+            let image = load(dir, &name);
+            (name, image)
+        })
+        .collect()
+}
+
 /// `image` saved under a name no other image has; that name.
 pub fn save(dir: &Path, image: &Image) -> Result<String, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("could not keep the image: {e}"))?;
