@@ -9,6 +9,7 @@ pub mod engine;
 mod migrate;
 pub mod process;
 mod profiles;
+mod quality;
 pub mod session;
 pub mod stacked;
 

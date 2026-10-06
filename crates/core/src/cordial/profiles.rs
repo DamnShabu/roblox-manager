@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 
 use super::build::Build;
 use super::process::{ProcessView, Runner, last_line};
-use super::{CordialError, clients, engine, session};
+use super::{CordialError, clients, engine, quality, session};
 use crate::keyring::{Attrs, Keyring};
 use crate::macros::{cage_window, nested, relay};
 use crate::paths::Paths;
@@ -31,7 +31,8 @@ pub const SECRET_KINDS: [&str; 2] = ["identity", "cookies"];
 pub struct ClientOpts {
     /// In a cage of its own, where macros can reach it.
     pub nested: bool,
-    /// Throttled, FIFO-paced, niced, with frame and thread caps.
+    /// Throttled, FIFO-paced, niced, frame-capped, at the game's lowest
+    /// graphics quality.
     pub low_power: bool,
 }
 
@@ -160,7 +161,10 @@ impl CordialProfiles {
         self.clear_legacy_low_power_flags(profile)?;
         let mut env = engine::env(&engine::load_settings(&self.paths.cordial_shell_json()));
         if opts.low_power {
-            env = engine::with_low_power(env);
+            env = engine::with_low_power(env, opts.nested);
+            quality::lower(&self.path(profile))?;
+        } else {
+            quality::restore(&self.path(profile))?;
         }
         if opts.nested {
             env = engine::with_nested(env);

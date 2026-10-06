@@ -85,12 +85,13 @@ fn valid_fps_cap(cap: &u64) -> bool {
 
 /// A low-power client, for an account along for the ride: throttled when
 /// unfocused, FIFO-paced, no GameMode boost, 20 frames a second, a longer
-/// back-off in an idle poll loop (and niced by the launcher). These replace
-/// whatever the settings chose. 20 rather than 10: a macro's presses only
-/// reach the game a frame at a time, and at 10 a press lands up to a tenth
-/// of a second off -- enough for clients playing the same macro to drift
-/// apart. (At 10 frames against 20 with the default 250 us back-off, on
-/// Stacked 0.21.6's landing page, a client went from 4.3% to 2.8% of a core.)
+/// back-off in an idle poll loop (and niced by the launcher, with the game's
+/// own graphics quality at its lowest, see `quality.rs`). These replace
+/// whatever the settings chose. 20 rather than 10 for a macro-ready client:
+/// a macro's presses only reach the game a frame at a time, and at 10 a press
+/// lands up to a tenth of a second off -- enough for clients playing the
+/// same macro to drift apart. One no macro can reach gets
+/// [`UNREACHED_LOW_POWER_FPS_CAP`].
 pub const LOW_POWER_ENV: [(&str, &str); 5] = [
     ("CORDIAL_THROTTLE", "unfocused"),
     ("CORDIAL_PRESENT_MODE", "fifo"),
@@ -98,6 +99,12 @@ pub const LOW_POWER_ENV: [(&str, &str); 5] = [
     (FPS_CAP, "20"),
     ("CORDIAL_POLL_COALESCE_US", "2000"),
 ];
+
+/// The frame cap for a low-power client outside a macro-ready window, where
+/// no macro's timing depends on it. At 10 frames against 20 with the default
+/// 250 us back-off, on Stacked 0.21.6's landing page, a client went from
+/// 4.3% to 2.8% of a core.
+pub const UNREACHED_LOW_POWER_FPS_CAP: &str = "10";
 
 /// What earlier versions wrote into the profile's flags.json, taken back out.
 /// The frame-rate target there would outrank one set anywhere else; the
@@ -118,9 +125,11 @@ pub fn without_legacy_low_power_flags(flags: &Map<String, Value>) -> Map<String,
     flags
 }
 
-/// `env` with the low-power values in place of any the settings gave.
-pub fn with_low_power(env: Vec<(String, String)>) -> Vec<(String, String)> {
-    replaced(env, &LOW_POWER_ENV)
+/// `env` with the low-power values in place of any the settings gave, for a
+/// client in a macro-ready window or not.
+pub fn with_low_power(env: Vec<(String, String)>, nested: bool) -> Vec<(String, String)> {
+    let env = replaced(env, &LOW_POWER_ENV);
+    if nested { env } else { replaced(env, &[(FPS_CAP, UNREACHED_LOW_POWER_FPS_CAP)]) }
 }
 
 /// A macro-ready client's presents never wait on its display. Its cage is a
@@ -242,9 +251,9 @@ mod tests {
 
     #[test]
     fn low_power_replaces_what_the_settings_chose() {
-        let env = with_low_power(env(&map(json!({"throttle": "visible", "fps_cap": 144}))));
+        let chosen = env(&map(json!({"throttle": "visible", "fps_cap": 144})));
         assert_eq!(
-            env,
+            with_low_power(chosen.clone(), true),
             pairs(&[
                 ("CORDIAL_SECRET_STORE", "keyring"),
                 ("CORDIAL_THROTTLE", "unfocused"),
@@ -254,6 +263,12 @@ mod tests {
                 ("CORDIAL_POLL_COALESCE_US", "2000"),
             ])
         );
+        let caps: Vec<String> = with_low_power(chosen, false)
+            .into_iter()
+            .filter(|(k, _)| k == "CORDIAL_FPS_CAP")
+            .map(|(_, v)| v)
+            .collect();
+        assert_eq!(caps, ["10"], "no macro reaches it, so no macro's timing holds it at 20");
     }
 
     #[test]
@@ -263,7 +278,7 @@ mod tests {
             with_nested(fifo),
             pairs(&[("CORDIAL_SECRET_STORE", "keyring"), ("CORDIAL_PRESENT_MODE", "mailbox")])
         );
-        let low = with_nested(with_low_power(env(&map(json!({})))));
+        let low = with_nested(with_low_power(env(&map(json!({}))), true));
         let present: Vec<&str> = low
             .iter()
             .filter(|(k, _)| k == "CORDIAL_PRESENT_MODE")

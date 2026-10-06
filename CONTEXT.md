@@ -38,8 +38,8 @@ or a friend's server.
 Cordial profile and starting its **client**; its outcome per account is
 launched, expired or failed (a **launch report**).
 
-**Low-power client** -- a client throttled, FIFO-paced, niced and capped, for
-an account along for the ride.
+**Low-power client** -- a client throttled, FIFO-paced, niced, capped and at
+the game's lowest graphics quality, for an account along for the ride.
 
 **Hidden window** -- a client's window unmapped at the manager's request
 (SIGUSR1; SIGUSR2 shows it), the game still running behind it at a capped

@@ -182,10 +182,12 @@ Open them from an account's ⋮ menu, or by right-clicking its row.
   Roblox.
 - **Note** shows as a small icon next to the name. Don't put passwords
   here.
-- **Low-Power Client** caps the client at 20 FPS, idles more lightly, gives it
-  a lower priority, and slows it further when it's out of focus. Use it
-  for accounts that are just along for the ride. It applies from the next
-  launch.
+- **Low-Power Client** turns the game's graphics quality to its lowest, caps
+  the client at 10 FPS (20 in a macro-ready window, so macros keep their
+  timing), idles more lightly, gives it a lower priority, and slows it
+  further when it's out of focus. Use it for accounts that are just along for
+  the ride. It applies from the next launch; switching it off puts your own
+  graphics quality back.
 - **Macro** and **Macro-Ready Window**: see [Macros](#macros).
 - **Session** shows whether Roblox still accepts the stored sign-in.
   **Check** asks Roblox now. If a session has expired, the row says
