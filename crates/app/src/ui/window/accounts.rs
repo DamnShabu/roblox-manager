@@ -296,6 +296,24 @@ impl Window {
         }
     }
 
+    /// A rename that failed after its session moved: the session goes back
+    /// under the label the account still has, or every later read of it
+    /// would find nothing and the account would look signed out.
+    fn move_cookie_back(&self, from: Label, to: Label) {
+        let keyring = self.services().keyring.clone();
+        let weak = self.weak();
+        crate::worker::run(
+            move || keyring.move_cookie(&from, &to).map(|()| to),
+            move |back| {
+                let Some(w) = weak.upgrade() else { return };
+                if let Err(e) = back {
+                    w.log(&format!("Could not move the session back after a failed rename: {e}"));
+                    w.toast("The account's session could not be moved back: sign in again");
+                }
+            },
+        );
+    }
+
     /// Relabel an account, and move its keyring entry with it.
     pub fn rename_account(&self, id: UserId, new: &str) {
         let Some(old) = self.label_of(id) else { return };
@@ -329,6 +347,7 @@ impl Window {
                         Err(e) => {
                             w.toast(&format!("Could not rename {old}"));
                             w.log(&format!("Could not rename '{old}': {e}"));
+                            w.move_cookie_back(new, old);
                         }
                     }
                 }
