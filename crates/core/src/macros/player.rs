@@ -66,6 +66,10 @@ pub struct Held<'a> {
     /// the round is ending: every wait from here on ends at once, as a stop
     /// ends it, until the round has.
     exiting: bool,
+    /// Keys the steps a `when` broke into are holding. A `when` neither
+    /// presses nor lets go of them: they stay down through it, as its
+    /// help says, rather than being let go of by its first tap of one.
+    outer: Vec<u16>,
 }
 
 impl Held<'_> {
@@ -105,7 +109,7 @@ impl Held<'_> {
             // Read before the `when`s are: one that sees after it rings past it.
             let rings = stop.rings();
             if let Some(when) = self.when {
-                if when.answer(input, stop, pick)? {
+                if when.answer(input, stop, pick, self)? {
                     self.exiting = true;
                     return Ok(true);
                 }
@@ -162,9 +166,15 @@ impl Held<'_> {
         self.release_all(input)
     }
 
+    /// Whether `code` is already down, by a Press or by the steps a `when`
+    /// broke into.
+    fn holds(&self, code: u16) -> bool {
+        self.down.contains(&code) || self.outer.contains(&code)
+    }
+
     fn press(&mut self, input: &mut dyn Input, codes: &[u16]) -> io::Result<()> {
         for &code in codes {
-            if !self.down.contains(&code) {
+            if !self.holds(code) {
                 send(input, code, true)?;
                 self.down.push(code);
             }
@@ -484,7 +494,9 @@ fn send(input: &mut dyn Input, code: u16, down: bool) -> io::Result<()> {
 }
 
 /// Press `codes` in order, hold for `secs` (or until stopped), and release
-/// in reverse -- every one that went down, whatever failed.
+/// in reverse -- every one that went down, whatever failed. A key a Press
+/// is already holding is neither pressed again nor let go of: `press
+/// shift` then `type A` keeps shift down for what follows.
 fn press(
     input: &mut dyn Input,
     codes: &[u16],
@@ -495,7 +507,7 @@ fn press(
 ) -> io::Result<()> {
     let mut down = Vec::new();
     let mut result = Ok(());
-    for &code in codes {
+    for &code in codes.iter().filter(|&&c| !held.holds(c)) {
         match send(input, code, true) {
             Ok(()) => down.push(code),
             Err(e) => {

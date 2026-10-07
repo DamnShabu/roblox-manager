@@ -120,7 +120,7 @@ fn schedule(
             }
             Step::Turn(points) => {
                 let (dx, dy) = turn(points, t, &mut put);
-                at = at.map(|(x, y)| (x + dx, y + dy));
+                at = at.map(|(x, y)| (x.saturating_add(dx), y.saturating_add(dy)));
             }
             Step::Scroll { horizontal, notches } => put(t, Send::Scroll(*horizontal, *notches)),
             // Not timed: the grammar keeps them out of a timeline.

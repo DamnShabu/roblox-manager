@@ -245,11 +245,16 @@ impl When<'_> {
     /// any it presses let go of after, whatever fails. True when one played
     /// an Exit: the round it broke into is to end, and any `when` still due
     /// plays at the next wait, in the round after.
+    ///
+    /// `outer` is what the steps it broke into hold: their keys stay down
+    /// through it, and a Repeat caught mid-tap is let go of first, so a
+    /// long `when` does not turn a tap into a hold.
     pub fn answer(
         &self,
         input: &mut dyn Input,
         stop: &StopFlag,
         pick: &dyn Fn(f64, f64) -> f64,
+        outer: &mut Held,
     ) -> io::Result<bool> {
         if let Some(said) = self.seen.said() {
             (self.report)(said);
@@ -260,7 +265,8 @@ impl When<'_> {
                 return Ok(false);
             }
             let when = when::describe(&h.when);
-            let mut held = Held::default();
+            outer.repeats.let_go_now(input)?;
+            let mut held = Held { outer: outer.down.clone(), ..Held::default() };
             let mut result = Ok(());
             for step in &h.steps {
                 if stop.is_set() || result.is_err() || held.exiting {
