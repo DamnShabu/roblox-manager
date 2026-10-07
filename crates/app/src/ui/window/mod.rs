@@ -121,6 +121,10 @@ impl Window {
         for path in w.state().accounts.set_aside().iter().chain(w.state().macros.set_aside()) {
             w.toast(&format!("A settings file did not read; it was kept as {}", path.display()));
         }
+        if let Some(why) = w.state().macros.unreadable() {
+            w.log(&format!("macros.json could not be read; macros will not save: {why}"));
+            w.toast("Your macros could not be read, so changes to them will not be saved");
+        }
         let handle = w.weak();
         glib::timeout_add_seconds_local(2, move || match handle.upgrade() {
             Some(w) => {

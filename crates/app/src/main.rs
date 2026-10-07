@@ -99,13 +99,31 @@ fn window(app: &adw::Application) -> Option<Window> {
     let accounts = match AccountStore::load(&services.paths) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("roblox-manager: {e}");
-            app.quit();
+            cannot_start(app, &e.to_string());
             return None;
         }
     };
     let macros = MacroLibrary::load(&services.paths.macros());
     Some(Window::new(app, AppState::new(accounts, macros), services))
+}
+
+/// Say why there is no window, rather than quitting with only a line on a
+/// terminal nobody launching from the desktop has open. Nothing is saved:
+/// the accounts that could not be read are still on disk as they were.
+fn cannot_start(app: &adw::Application, why: &str) {
+    eprintln!("roblox-manager: {why}");
+    let dialog = adw::AlertDialog::new(
+        Some("Roblox Manager Could Not Start"),
+        Some(&format!("{why}\n\nNothing was changed or overwritten.")),
+    );
+    dialog.add_response("close", "_Close");
+    // A dialog with no parent is a window the app does not count; held, the
+    // app stays up until it is answered.
+    let hold = std::cell::RefCell::new(Some(app.hold()));
+    dialog.connect_closed(move |_| {
+        hold.take();
+    });
+    dialog.present(None::<&gtk::Widget>);
 }
 
 /// The app's stylesheet, and its dark surfaces while the style is dark --
