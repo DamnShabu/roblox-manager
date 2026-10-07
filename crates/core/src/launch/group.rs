@@ -27,18 +27,12 @@ pub(super) fn launch(
         Ok(false) => match run.start(leader, url(place, None)) {
             Ok(()) => false,
             Err(why) => {
-                run.log(format!(
-                    "{}: leader FAILED -- {why}; nobody has a server to join",
-                    leader.label
-                ));
+                leaderless(run, leader, followers, &why);
                 return None;
             }
         },
         Err(why) => {
-            run.log(format!(
-                "{}: leader FAILED -- {why}; nobody has a server to join",
-                leader.label
-            ));
+            leaderless(run, leader, followers, &why);
             return None;
         }
     };
@@ -50,10 +44,17 @@ pub(super) fn launch(
         }
         return None;
     }
-    if !already_running {
-        run.log(format!("{}: launched, waiting for its server", leader.label));
-    }
-    let (server, leader_place) = wait_for_server(run, leader, already_running);
+    // A leader just sent to the home screen is in no server and will not
+    // be: waiting would cost the whole timeout before the rest start.
+    let (server, leader_place) = if place.is_none() && !already_running {
+        run.log(format!("{}: launched to the home screen; nobody to join", leader.label));
+        (None, None)
+    } else {
+        if !already_running {
+            run.log(format!("{}: launched, waiting for its server", leader.label));
+        }
+        wait_for_server(run, leader, already_running)
+    };
     if run.stopped() {
         run.give_up(followers);
         return server;
@@ -73,6 +74,16 @@ pub(super) fn launch(
     server
 }
 
+/// The leader did not start, so there is no server to join and the rest
+/// never launch. Each of them is reported as failed with that reason, so a
+/// launch report never leaves out an account it was asked to start.
+fn leaderless(run: &Run<'_>, leader: &LaunchAccount, followers: &[LaunchAccount], why: &str) {
+    run.log(format!("{}: leader FAILED -- {why}; nobody has a server to join", leader.label));
+    for a in followers {
+        run.fail(a, format!("not started: the leader, {}, did not start", leader.label));
+    }
+}
+
 /// Poll the leader's presence until it reports a server, time runs out, or
 /// the launch is stopped. A leader that was already running is asked at
 /// once; a new one gets a poll's time to arrive first.
@@ -83,12 +94,14 @@ fn wait_for_server(
 ) -> (Option<ServerId>, Option<PlaceId>) {
     let pacing = run.pacing();
     let secs = pacing.leader_timeout.as_secs();
+    // A zero poll would never advance `waited`.
+    let poll = pacing.poll.max(std::time::Duration::from_millis(1));
     let mut waited = std::time::Duration::ZERO;
     while waited < pacing.leader_timeout {
-        if (!already_running || !waited.is_zero()) && !run.pause(pacing.poll) {
+        if (!already_running || !waited.is_zero()) && !run.pause(poll) {
             return (None, None);
         }
-        waited += pacing.poll;
+        waited += poll;
         match run.presence(leader) {
             Ok(p) => {
                 if let Some(server) = p.server {
