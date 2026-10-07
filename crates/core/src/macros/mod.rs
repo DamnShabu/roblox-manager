@@ -14,6 +14,9 @@
 //!
 //! A macro's `when`s look at the client's frame through [`sight`]: a copy
 //! cage hands over, as it would to any screenshot tool.
+//!
+//! An advanced macro, a Python [`script`], asks the manager for the same
+//! input and the same copies of the frame, one request at a time.
 
 pub mod cage_window;
 pub mod grammar;
@@ -24,6 +27,7 @@ pub mod nested;
 pub mod player;
 pub mod recording;
 pub mod relay;
+pub mod script;
 pub mod sight;
 mod socket;
 pub mod wayland;
@@ -59,4 +63,8 @@ pub enum MacroError {
     /// A `when` cannot look for what it names: an image missing or unreadable.
     #[error("{0}")]
     Sight(String),
+    /// An advanced macro could not start, or ended with an error: the last
+    /// thing it said.
+    #[error("{0}")]
+    Script(String),
 }

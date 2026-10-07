@@ -85,6 +85,16 @@ impl Paths {
         self.state().join("macro-images")
     }
 
+    /// Advanced macros: Python scripts, one `.py` file each.
+    pub fn macro_scripts(&self) -> PathBuf {
+        self.state().join("advanced-macros")
+    }
+
+    /// The `rbxmgr` module advanced macros import, written by this version.
+    pub fn script_helper(&self) -> PathBuf {
+        self.cache().join("python")
+    }
+
     /// The newest Stacked, once updated to: a link to its Nix build.
     pub fn stacked(&self) -> PathBuf {
         self.state().join("stacked")

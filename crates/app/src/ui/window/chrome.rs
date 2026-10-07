@@ -1,6 +1,6 @@
 //! The parts of the window that are built once: the header bar and its
 //! menu, the accounts page (or the welcome when there are none), the macros
-//! pane beside it, and the launch bar.
+//! pane beside it with its two tabs, and the launch bar.
 
 use adw::prelude::*;
 use gtk::{Align, Label, PolicyType, gio};
@@ -22,6 +22,7 @@ pub struct Chrome {
     pub select_all: IconButton,
     pub games: GameBar,
     pub macros_box: gtk::Box,
+    pub scripts_box: gtk::Box,
     pub log_box: gtk::Box,
     pub summary: Label,
     pub target_text: Label,
@@ -228,10 +229,48 @@ impl Chrome {
                 .build()
                 .upcast()],
         );
+        let scripts_box = vbox!(10, "");
+        let scripts_head = page_header(
+            "Advanced Macros",
+            Some("Python scripts from a folder, fully coded"),
+            &[
+                action_button("folder-open-symbolic", "Open the Folder", "win.open-scripts")
+                    .css("flat circular")
+                    .centered()
+                    .upcast(),
+                action_button("view-refresh-symbolic", "Look Again", "win.reload-scripts")
+                    .css("flat circular")
+                    .centered()
+                    .upcast(),
+            ],
+        );
+        let macro_tabs = adw::ViewStack::builder().vhomogeneous(false).build();
+        macro_tabs.add_titled_with_icon(
+            &vbox!(12, "", macros_head, macros_box.clone()),
+            Some("plain"),
+            "Macros",
+            "input-keyboard-symbolic",
+        );
+        macro_tabs.add_titled_with_icon(
+            &vbox!(12, "", scripts_head, scripts_box.clone()),
+            Some("advanced"),
+            "Advanced",
+            "text-x-script-symbolic",
+        );
+        // Scripts are files anyone may add meanwhile: the tab looks again
+        // each time it is opened.
+        let weak = w.clone();
+        macro_tabs.connect_visible_child_name_notify(move |_| {
+            if let Some(w) = weak.upgrade() {
+                w.refresh_macros();
+            }
+        });
+        let switcher =
+            adw::InlineViewSwitcher::builder().stack(&macro_tabs).homogeneous(true).build();
         let pane = vbox!(
             26,
             "pane",
-            vbox!(12, "", macros_head, macros_box.clone()),
+            vbox!(12, "", switcher, macro_tabs.clone()),
             vbox!(8, "", log_head, log_box.clone())
         );
         let pane_scroller = gtk::ScrolledWindow::builder()
@@ -325,6 +364,7 @@ impl Chrome {
             select_all,
             games,
             macros_box,
+            scripts_box,
             log_box,
             summary,
             target_text,

@@ -51,6 +51,10 @@ for macros. Not minimised: that is the compositor's, and niri has none.
 click, move, path, turn, scroll, wait, start, timeline, exit) played into one
 client, a set number of **rounds** or until stopped. An **exit** ends the round
 it is in, from a when as well.
+**Advanced macro** -- a Python script in the advanced macros folder, run as a
+process of its own for each account it is started on. It plays by asking the
+manager, through the `rbxmgr` module, for the same input and the same copies
+of the frame a macro uses; it never touches the client.
 **Macro-ready window** -- a client run inside its own nested compositor
 (cage), where a macro's emulated input can reach it.
 

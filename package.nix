@@ -51,11 +51,13 @@ in
     # always the one run, whatever else is on PATH. cage is the macro engine's
     # display -- one nested compositor per macro-ready client, which the app
     # then types into itself -- and is appended, so a host's own copy wins.
+    # python3 runs advanced macros, appended too: a host's own, with whatever
+    # modules its owner installed, is the one a script expects.
     # pgrep, kill and nice come from the session.
     preFixup = ''
       gappsWrapperArgs+=(
         --prefix PATH : ${pkgs.lib.makeBinPath [cordial]}
-        --suffix PATH : ${pkgs.lib.makeBinPath [pkgs.cage]}
+        --suffix PATH : ${pkgs.lib.makeBinPath [pkgs.cage pkgs.python3]}
       )
     '';
 

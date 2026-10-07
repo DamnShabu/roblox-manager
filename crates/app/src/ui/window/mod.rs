@@ -9,6 +9,7 @@ mod launching;
 mod links;
 mod macros;
 mod roblox;
+mod scripts;
 mod updates;
 
 pub use self::hiding::can_hide;
