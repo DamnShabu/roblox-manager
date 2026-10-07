@@ -129,10 +129,26 @@ fn a_low_power_client_is_niced_throttled_and_capped() {
     w.profiles.launch(&p, None, &build(), ClientOpts { low_power: true, nested: false }).unwrap();
     let (argv, env) = &w.runner.spawned()[0];
     assert_eq!(&argv[..4], ["nice", "-n", "10", "cordial-run"]);
-    for (k, v) in engine::LOW_POWER_ENV {
+    for (k, v) in engine::LOW_POWER_ENV.into_iter().filter(|(k, _)| *k != "CORDIAL_FPS_CAP") {
         assert!(env.contains(&(k.into(), v.into())), "{k}");
     }
+    let cap = ("CORDIAL_FPS_CAP".into(), engine::UNREACHED_LOW_POWER_FPS_CAP.into());
+    assert!(env.contains(&cap), "no macro reaches it, so it runs slower still");
     assert!(!flags(&w, &p).exists(), "low power writes no flags any more");
+}
+
+#[test]
+fn a_low_power_client_plays_at_the_lowest_graphics_quality_until_it_is_not() {
+    let w = world();
+    let p = Profile::named("rbxmgr-7");
+    let prefs = w.profiles.path(&p).join("data/files/appData/GlobalBasicSettings_13.xml");
+    fs::create_dir_all(prefs.parent().unwrap()).unwrap();
+    let mine = r#"<Properties><token name="SavedQualityLevel">7</token></Properties>"#;
+    fs::write(&prefs, mine).unwrap();
+    w.profiles.launch(&p, None, &build(), ClientOpts { low_power: true, nested: true }).unwrap();
+    assert!(fs::read_to_string(&prefs).unwrap().contains(r#""SavedQualityLevel">1<"#));
+    w.profiles.launch(&p, None, &build(), ClientOpts::default()).unwrap();
+    assert_eq!(fs::read_to_string(&prefs).unwrap(), mine, "the player's own level back");
 }
 
 #[test]
