@@ -56,9 +56,12 @@ pub fn lower(profile_dir: &Path) -> Result<(), CordialError> {
 /// changed since from the game's menu is the player's, and stays.
 pub fn restore(profile_dir: &Path) -> Result<(), CordialError> {
     let saved = saved_path(profile_dir);
-    let Some(before) = crate::json_file::read_opt::<BTreeMap<String, String>>(&saved) else {
-        return Ok(());
-    };
+    // The only record of the player's own level. One that does not read is
+    // moved aside rather than taken as empty and deleted, and one that
+    // cannot be read at all is an error, never a reason to remove it.
+    let owned = crate::json_file::read_owned::<BTreeMap<String, String>>(&saved)
+        .map_err(|e| CordialError::Io(format!("could not read the saved quality: {e}")))?;
+    let Some(before) = owned.value else { return Ok(()) };
     let path = settings_path(profile_dir);
     if let Some(xml) = read(&path)? {
         let restored = before.iter().fold(xml.clone(), |xml, (k, v)| match value(&xml, k) {
@@ -194,6 +197,21 @@ mod tests {
         let dir = profile(Some(XML));
         restore(dir.path()).unwrap();
         assert_eq!(settings(&dir), XML);
+    }
+
+    #[test]
+    fn a_saved_level_that_does_not_read_is_kept_not_deleted() {
+        let dir = profile(Some(XML));
+        lower(dir.path()).unwrap();
+        let saved = saved_path(dir.path());
+        fs::write(&saved, "{not json").unwrap();
+        restore(dir.path()).unwrap();
+        let kept: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok()?.file_name().into_string().ok())
+            .filter(|n| n.starts_with("rbxmgr-quality.json.bad-"))
+            .collect();
+        assert_eq!(kept.len(), 1, "set aside for the player to recover");
     }
 
     #[test]
