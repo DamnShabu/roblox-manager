@@ -14,7 +14,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::cordial::{Build, ClientOpts, CordialError, CordialProfiles};
-use crate::keyring::{Keyring, KeyringError};
+use crate::keyring::Keyring;
 use crate::roblox::{Presence, Roblox, RobloxError, join_url};
 use crate::stop::StopFlag;
 use crate::types::{Cookie, Label, PlaceId, Profile, ServerId, User, UserId};
@@ -240,28 +240,16 @@ impl Run<'_> {
     /// [`Run::start`] for every account in `accounts` at the same time, each
     /// logged as `launched` once up. Their sessions are read from the keyring
     /// first, one after another, so a locked keyring asks for its password
-    /// once rather than once per account.
-    /// A keyring that stays locked (its prompt dismissed or unanswered)
-    /// fails the rest without asking again: otherwise every account puts up
-    /// a prompt of its own, each waited on for minutes.
+    /// once rather than once per account ([`Keyring::cookies`]).
     fn start_all(&self, accounts: &[LaunchAccount], url: Option<&str>, launched: &str) {
+        let read = self.launcher.keyring.cookies(accounts.iter().map(|a| &a.label));
         let mut ready = Vec::new();
-        let mut locked: Option<String> = None;
-        for a in accounts {
-            let read = match &locked {
-                Some(why) => Err(why.clone()),
-                None => self.launcher.keyring.cookie(&a.label).map_err(|e| {
-                    if matches!(e, KeyringError::Locked(_)) {
-                        locked = Some(e.to_string());
-                    }
-                    e.to_string()
-                }),
-            };
+        for (a, read) in accounts.iter().zip(read) {
             match read {
                 Ok(cookie) => ready.push((a, cookie)),
                 Err(why) => {
                     self.log(format!("{}: FAILED -- {why}", a.label));
-                    self.fail(a, why);
+                    self.fail(a, why.to_string());
                 }
             }
         }
