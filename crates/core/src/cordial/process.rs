@@ -84,12 +84,18 @@ pub struct SystemRunner;
 
 impl Runner for SystemRunner {
     fn run(&self, argv: &[String], timeout: Duration) -> Result<Output, CordialError> {
+        use std::os::unix::process::CommandExt;
         let (program, args) = argv.split_first().ok_or_else(|| process_error("nothing to run"))?;
+        // A group of its own, so a timeout ends everything it started, not
+        // only itself: `nix build` and `flatpak-spawn --host` both leave the
+        // real work to children that would otherwise run on after the
+        // "timed out", and be started a second time by a retry.
         let mut child = Command::new(program)
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .process_group(0)
             .spawn()
             .map_err(|e| process_error(&format!("could not run {program}: {e}")))?;
         // Read both pipes while it runs, so a chatty program never blocks on
@@ -111,8 +117,7 @@ impl Runner for SystemRunner {
                 Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
                 Ok(None) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    end_group(&mut child);
                     return Err(process_error(&format!(
                         "{program} did not finish within {}s",
                         timeout.as_secs()
@@ -170,6 +175,25 @@ impl Drop for SystemChild {
             thread::spawn(move || child.wait());
         }
     }
+}
+
+/// End a program that overran, and its group: asked first (SIGTERM, which
+/// `flatpak-spawn` passes on to what it started on the host), then made
+/// (SIGKILL) a moment later. Best-effort by nature -- a group already gone
+/// has nothing to end -- and the overrun is the error reported.
+fn end_group(child: &mut std::process::Child) {
+    use rustix::process::{Pid, Signal, kill_process_group};
+    let group = i32::try_from(child.id()).ok().and_then(Pid::from_raw);
+    if let Some(group) = group {
+        let _ = kill_process_group(group, Signal::TERM);
+        let grace = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < grace && matches!(child.try_wait(), Ok(None)) {
+            thread::sleep(Duration::from_millis(20));
+        }
+        let _ = kill_process_group(group, Signal::KILL);
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn process_error(msg: &str) -> CordialError {
@@ -281,6 +305,20 @@ mod tests {
     fn a_program_that_overruns_is_killed_and_an_error() {
         let err = SystemRunner.run(&argv(&["sleep", "5"]), Duration::from_millis(100)).unwrap_err();
         assert!(err.to_string().contains("did not finish"), "{err}");
+    }
+
+    #[test]
+    fn an_overrun_ends_what_the_program_started_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let mark = dir.path().join("grandchild-ran-on");
+        // The shell starts a grandchild that would outlive it, then waits.
+        let script = format!("(sleep 1; touch {}) & wait", mark.display());
+        let err = SystemRunner
+            .run(&argv(&["sh", "-c", &script]), Duration::from_millis(100))
+            .unwrap_err();
+        assert!(err.to_string().contains("did not finish"), "{err}");
+        thread::sleep(Duration::from_millis(1500));
+        assert!(!mark.exists(), "the grandchild ran on after the timeout");
     }
 
     #[test]

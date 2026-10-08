@@ -211,6 +211,25 @@ fn a_hand_broken_accounts_file_is_set_aside_not_overwritten() {
 }
 
 #[test]
+fn an_accounts_file_that_cannot_be_read_stops_the_load_rather_than_reading_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::under(dir.path());
+    // groups.json readable, accounts.json not (a directory: the same branch
+    // EACCES and EIO take). Loading empty here would let the next save
+    // replace every account with nothing.
+    json_file::write(&paths.groups(), &json!([])).unwrap();
+    fs::create_dir_all(paths.accounts()).unwrap();
+    assert!(matches!(AccountStore::load(&paths), Err(AccountError::Unreadable(_))));
+    // And a groups.json that cannot be read is no first run to migrate.
+    fs::remove_dir(paths.accounts()).unwrap();
+    fs::remove_file(paths.groups()).unwrap();
+    fs::create_dir_all(paths.groups()).unwrap();
+    json_file::write(&paths.accounts(), &json!([{"name": "a", "user_id": 1}])).unwrap();
+    assert!(AccountStore::load(&paths).is_err());
+    assert!(paths.groups().is_dir());
+}
+
+#[test]
 fn the_accounts_for_join_links_are_remembered_and_replaced() {
     let mut s = store(&[("a", true), ("b", true), ("c", true)], &[]);
     assert!(s.link_accounts().is_empty());

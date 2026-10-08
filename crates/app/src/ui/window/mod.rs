@@ -65,6 +65,8 @@ pub struct Inner {
     /// stays hidden, and goes once the link needs nothing more of it.
     seen: Cell<bool>,
     polling: Cell<bool>,
+    /// Why the last look at the running clients failed, while it fails.
+    poll_failing: RefCell<Option<String>>,
 }
 
 impl Window {
@@ -103,6 +105,7 @@ impl Window {
                 link_popup: RefCell::default(),
                 seen: Cell::new(false),
                 polling: Cell::new(false),
+                poll_failing: RefCell::default(),
             }
         });
         let w = Window(inner);
@@ -120,6 +123,10 @@ impl Window {
         w.log("Ready");
         for path in w.state().accounts.set_aside().iter().chain(w.state().macros.set_aside()) {
             w.toast(&format!("A settings file did not read; it was kept as {}", path.display()));
+        }
+        if let Some(why) = w.state().macros.unreadable() {
+            w.log(&format!("macros.json could not be read; macros will not save: {why}"));
+            w.toast("Your macros could not be read, so changes to them will not be saved");
         }
         let handle = w.weak();
         glib::timeout_add_seconds_local(2, move || match handle.upgrade() {
@@ -205,6 +212,11 @@ impl Window {
         let open = self.0.log_view.borrow().as_ref().and_then(glib::WeakRef::upgrade);
         if let (Some(list), Some(newest)) = (open, s.activity.first()) {
             list.prepend(&activity::row(newest));
+            // The open log shows what is kept and no more: a macro reporting
+            // every step would otherwise grow it by thousands of rows an hour.
+            if let Some(oldest) = list.row_at_index(crate::state::ACTIVITY_KEPT as i32) {
+                list.remove(&oldest);
+            }
         }
     }
 
@@ -251,13 +263,15 @@ impl Window {
         done: impl FnOnce(&Window, T) + 'static,
     ) {
         self.set_busy(true);
-        let weak = self.weak();
+        // Held by the completion, and let go of however it ends: run, or
+        // dropped unrun because the work panicked. Either way the spinner
+        // stops and rename and remove are not refused for good.
+        let busy = Busy(self.weak());
         worker::run(work, move |result| {
-            if let Some(w) = weak.upgrade() {
+            if let Some(w) = busy.0.upgrade() {
                 done(&w, result);
-                w.set_busy(false);
-                w.leave_if_unseen();
             }
+            drop(busy);
         });
     }
 
@@ -333,7 +347,7 @@ impl Window {
         let weak = self.weak();
         worker::run(
             move || {
-                let live = profiles.running().ok()?;
+                let live = profiles.running().map_err(|e| e.to_string())?;
                 let running: HashSet<UserId> =
                     ids.into_iter().filter(|id| live.contains(&Profile::of(*id))).collect();
                 // A state file that does not read is a window the manager
@@ -342,12 +356,25 @@ impl Window {
                     .iter()
                     .filter_map(|id| Some((*id, profiles.window(&Profile::of(*id)).ok()??)))
                     .collect();
-                Some((running, windows))
+                Ok((running, windows))
             },
-            move |found| {
+            move |found: Result<_, String>| {
                 let Some(w) = weak.upgrade() else { return };
                 w.0.polling.set(false);
-                let Some((running, windows)) = found else { return };
+                // Said once when it starts failing and once when it is back,
+                // not every two seconds: a pgrep that cannot run otherwise
+                // leaves every row looking stopped with no hint why.
+                let failing = found.as_ref().err().cloned();
+                let was = w.0.poll_failing.replace(failing.clone());
+                match (&was, &failing) {
+                    (None, Some(why)) => {
+                        w.log(&format!("Could not see which clients are running: {why}"));
+                        w.toast("Could not see which clients are running");
+                    }
+                    (Some(_), None) => w.log("Running clients can be seen again"),
+                    _ => {}
+                }
+                let Ok((running, windows)) = found else { return };
                 let changed = {
                     let s = w.state();
                     running != s.running || windows != s.windows
@@ -364,21 +391,14 @@ impl Window {
     }
 
     // -- closing ------------------------------------------------------------
-    /// Macros play from this process, so closing stops them: asked first.
-    /// Clients are processes of their own and keep running.
+    /// Macros, launches and updates run in this process, so closing ends
+    /// them: asked first. Clients are processes of their own and keep running.
     fn on_close_request(&self) -> glib::Propagation {
-        let playing = self.state().macro_runs.len();
-        if playing == 0 {
+        let Some(body) = self.state().close_warning() else {
             self.close_now();
             return glib::Propagation::Proceed;
-        }
-        let body = format!(
-            "{} playing into {}. Closing Roblox Manager stops {}; the game clients keep running.",
-            if playing == 1 { "A macro is" } else { "Macros are" },
-            if playing == 1 { "a client" } else { "clients" },
-            if playing == 1 { "it" } else { "them" },
-        );
-        super::confirm::ask(self, "Stop Macros and Close?", &body, "_Close", |w| {
+        };
+        super::confirm::ask(self, "Stop and Close?", &body, "_Close", |w| {
             w.close_now();
             w.0.win.destroy();
         });
@@ -409,6 +429,18 @@ impl Window {
         };
         if let Err(e) = state.save(&self.services().paths.window_state()) {
             eprintln!("roblox-manager: could not remember the window's size: {e}");
+        }
+    }
+}
+
+/// One task the busy count holds for, ended when this is dropped.
+struct Busy(WeakWindow);
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        if let Some(w) = self.0.upgrade() {
+            w.set_busy(false);
+            w.leave_if_unseen();
         }
     }
 }

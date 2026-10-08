@@ -378,14 +378,21 @@ impl Window {
 
     fn stop_profiles(&self, label: String, which: HashSet<Profile>) {
         let profiles = self.services().profiles.clone();
-        let log = self.logger();
+        let weak = self.weak();
         crate::worker::run(
-            move || match profiles.stop(&which) {
-                Ok(0) => log.line(format!("{label}: was not running")),
-                Ok(_) => log.line(format!("Shut down {label}")),
-                Err(e) => log.line(format!("{label}: could not stop -- {e}")),
+            move || profiles.stop(&which),
+            move |stopped| {
+                let Some(w) = weak.upgrade() else { return };
+                match stopped {
+                    Ok(0) => w.log(&format!("{label}: was not running")),
+                    Ok(_) => w.log(&format!("Shut down {label}")),
+                    Err(e) => {
+                        w.log(&format!("{label}: could not stop -- {e}"));
+                        w.toast(&format!("Could not stop {label}"));
+                    }
+                }
+                w.poll_running();
             },
-            |()| {},
         );
     }
 
@@ -400,13 +407,20 @@ impl Window {
             }
             s.accounts.accounts().iter().map(|a| Profile::of(a.user_id)).collect()
         };
-        let (cordial, log) = (self.services().profiles.clone(), self.logger());
+        let (cordial, weak) = (self.services().profiles.clone(), self.weak());
         crate::worker::run(
-            move || match cordial.stop(&profiles) {
-                Ok(n) => log.line(format!("Stopped {n} client(s)")),
-                Err(e) => log.line(format!("Could not stop the clients: {e}")),
+            move || cordial.stop(&profiles),
+            move |stopped| {
+                let Some(w) = weak.upgrade() else { return };
+                match stopped {
+                    Ok(n) => w.log(&format!("Stopped {n} client(s)")),
+                    Err(e) => {
+                        w.log(&format!("Could not stop the clients: {e}"));
+                        w.toast("Could not stop the clients");
+                    }
+                }
+                w.poll_running();
             },
-            |()| {},
         );
     }
 }

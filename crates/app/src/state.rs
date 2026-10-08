@@ -281,6 +281,29 @@ impl AppState {
         }
     }
 
+    /// What closing the window would cut short, said for a confirmation;
+    /// None when nothing would be. Macros, launches and updates all run in
+    /// this process: closing it stops a macro, leaves a group's remaining
+    /// followers unlaunched, and breaks off a download or an unpack.
+    pub fn close_warning(&self) -> Option<String> {
+        let mut cut = Vec::new();
+        match self.macro_runs.len() {
+            0 => {}
+            1 => cut.push("a macro playing into a client".to_owned()),
+            n => cut.push(format!("macros playing into {n} clients")),
+        }
+        if !self.launches.is_empty() {
+            cut.push("a launch still starting accounts".to_owned());
+        }
+        if self.updating {
+            cut.push("an update still installing".to_owned());
+        }
+        let (last, rest) = cut.split_last()?;
+        let what =
+            if rest.is_empty() { last.clone() } else { format!("{} and {last}", rest.join(", ")) };
+        Some(format!("Closing Roblox Manager stops {what}. Clients already running keep running."))
+    }
+
     /// Add an activity line; the log keeps the latest [`ACTIVITY_KEPT`].
     pub fn log(&mut self, time: String, line: String) {
         self.activity.insert(0, Activity { time, line });
@@ -426,5 +449,22 @@ mod tests {
         }
         assert_eq!(s.activity.len(), ACTIVITY_KEPT);
         assert_eq!(s.activity[0].line, format!("line {}", ACTIVITY_KEPT + 2));
+    }
+
+    #[test]
+    fn closing_warns_of_what_it_would_cut_short() {
+        let (_d, mut s) = state();
+        assert_eq!(s.close_warning(), None);
+        s.launches.push((StopFlag::default(), vec![UserId(1)]));
+        let one = s.close_warning().unwrap();
+        assert!(one.contains("stops a launch still starting accounts."), "{one}");
+        s.macro_runs.insert(UserId(1), (StopFlag::default(), "m".into()));
+        s.macro_runs.insert(UserId(2), (StopFlag::default(), "m".into()));
+        s.updating = true;
+        let all = s.close_warning().unwrap();
+        assert!(
+            all.contains("macros playing into 2 clients, a launch still starting accounts and an update still installing"),
+            "{all}"
+        );
     }
 }

@@ -288,13 +288,30 @@ fn from_a_flatpak_clients_are_found_and_stopped_on_the_host() {
         Arc::new(|_| {}),
     );
     assert_eq!(profiles.stop(&HashSet::from([Profile::named("main")])).unwrap(), 1);
+    let uid = rustix::process::getuid().as_raw().to_string();
     assert_eq!(
         runner.ran(),
         [
-            vec!["flatpak-spawn", "--host", "pgrep", "-a", "-f", "cordial-run"],
+            vec!["flatpak-spawn", "--host", "pgrep", "-u", &uid, "-a", "-f", "cordial-run"],
             vec!["flatpak-spawn", "--host", "kill", "7"],
         ]
     );
+}
+
+#[test]
+fn a_kill_that_fails_is_an_error_but_a_client_already_gone_is_not() {
+    let pgrep = "1 cordial-run --profile main\n";
+    let refused = Recording::default().answer(0, pgrep, "").answer(
+        1,
+        "",
+        "kill: (1) - Operation not permitted\n",
+    );
+    let w = world_with(refused);
+    assert!(w.profiles.stop(&HashSet::from([Profile::named("main")])).is_err());
+    let gone =
+        Recording::default().answer(0, pgrep, "").answer(1, "", "kill: (1) - No such process\n");
+    let w = world_with(gone);
+    assert_eq!(w.profiles.stop(&HashSet::from([Profile::named("main")])).unwrap(), 1);
 }
 
 #[test]

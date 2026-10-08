@@ -79,12 +79,15 @@ fn read(path: &Path) -> Result<Option<String>, CordialError> {
     }
 }
 
-/// Leave the file alone, timestamp included, when nothing changes.
+/// Leave the file alone, timestamp included, when nothing changes. It holds
+/// every in-game setting (volume, keybinds, sensitivity), so it is replaced
+/// whole: a crash mid-write must not leave the engine half a file to reset.
 fn write_if_changed(path: &Path, old: &str, new: &str) -> Result<(), CordialError> {
     if old == new {
         return Ok(());
     }
-    fs::write(path, new).map_err(|e| io(&format!("could not write {}", path.display()), e))
+    crate::json_file::write_bytes(path, new.as_bytes())
+        .map_err(|e| io(&format!("could not write {}", path.display()), e))
 }
 
 /// The value of the property named `key`: `<int name="key">10</int>`.

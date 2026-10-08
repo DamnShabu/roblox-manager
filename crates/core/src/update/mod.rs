@@ -16,7 +16,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::cordial::stacked::{self, Host, Releases, Updated};
-use crate::cordial::{Runner, roblox_build};
+use crate::cordial::{CordialError, Runner, roblox_build};
 use crate::github::GithubError;
 use crate::install::Install;
 use crate::paths::Paths;
@@ -159,12 +159,32 @@ pub fn start_installed(
     for way in relaunch(install) {
         let file = File::create(&log)
             .map_err(|e| UpdateError::Io(format!("could not create {}: {e}", log.display())))?;
-        match runner.spawn(&way.argv, file, &way.env) {
-            Ok(_started) => return Ok(()),
+        match runner.spawn(&way.argv, file, &way.env).and_then(|mut c| failed_at_once(&mut *c)) {
+            Ok(None) => return Ok(()),
+            Ok(Some(status)) => {
+                why = format!("{} exited with status {status}", way.argv[0]);
+            }
             Err(e) => why = e.to_string(),
         }
     }
     Err(UpdateError::Install(format!("could not start the new version: {why}")))
+}
+
+/// A way that is started is not yet a way that worked: `systemd-run`
+/// exits non-zero at once with no user manager to ask, and this copy then
+/// exits for the restart with nothing coming back. Watched for a moment, a
+/// way that ends in failure gives its status (and the next way is tried);
+/// one still running, or ended well (`systemd-run` handing over), is None.
+fn failed_at_once(child: &mut dyn crate::cordial::Child) -> Result<Option<i32>, CordialError> {
+    let deadline = Instant::now() + Duration::from_millis(1500);
+    loop {
+        match child.exited()? {
+            Some(0) => return Ok(None),
+            Some(status) => return Ok(Some(status)),
+            None if Instant::now() >= deadline => return Ok(None),
+            None => std::thread::sleep(Duration::from_millis(50)),
+        }
+    }
 }
 
 /// Wait, up to `limit`, for the copy that restarted this one to give up the
@@ -208,5 +228,17 @@ mod tests {
         let spawned = runner.spawned();
         assert_eq!(spawned.len(), 1);
         assert_eq!(spawned[0].0, ["/usr/bin/roblox-manager", RESTARTED]);
+    }
+
+    #[test]
+    fn a_way_that_fails_at_once_falls_through_to_the_next() {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = crate::cordial::process::recording::Recording::default();
+        *runner.child_exit.lock().unwrap() = Some(1);
+        let paths = Paths::under(dir.path());
+        let install = Install::AppImage("/a/r.AppImage".into());
+        let err = start_installed(&runner, &install, &paths).unwrap_err();
+        assert!(err.to_string().contains("exited with status 1"), "{err}");
+        assert_eq!(runner.spawned().len(), 2, "both ways were tried");
     }
 }

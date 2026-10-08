@@ -189,6 +189,27 @@ fn a_key_is_pressed_once_and_only_what_is_down_is_released() {
 }
 
 #[test]
+fn a_tap_or_typed_shift_leaves_a_pressed_key_held() {
+    let mut r = Recorder::default();
+    let held =
+        steps(&mut r, &["press shift", "type A", "tap shift+w", "press w", "tap w"]).unwrap();
+    // shift goes down once and stays: typing A, and tapping shift+w, use the
+    // one already held instead of letting it go.
+    assert_eq!(
+        *r.sent.borrow(),
+        [
+            Sent::Key(42, true),
+            Sent::Key(30, true),
+            Sent::Key(30, false),
+            Sent::Key(17, true),
+            Sent::Key(17, false),
+            Sent::Key(17, true),
+        ]
+    );
+    assert_eq!(held.down, [42, 17]);
+}
+
+#[test]
 fn letting_go_of_everything_releases_the_last_pressed_first() {
     let mut r = Recorder::default();
     let mut held = steps(&mut r, &["press shift", "press w", "press mouse1"]).unwrap();

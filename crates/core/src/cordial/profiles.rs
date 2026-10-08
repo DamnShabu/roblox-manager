@@ -234,7 +234,10 @@ impl CordialProfiles {
     /// from Cordial directly included. pgrep exits 1 when nothing matches,
     /// which is an answer, not an error.
     pub fn clients(&self) -> Result<BTreeMap<u32, Profile>, CordialError> {
-        let argv = self.view.argv(&["pgrep", "-a", "-f", "cordial-run"]);
+        // This user's only: on a shared machine another user's clients are
+        // not ours to count, hide or stop.
+        let uid = rustix::process::getuid().as_raw().to_string();
+        let argv = self.view.argv(&["pgrep", "-u", &uid, "-a", "-f", "cordial-run"]);
         let out = self.runner.run(&argv, Duration::from_secs(10))?;
         // 1 is "nothing matched"; anything past it is pgrep failing.
         if out.status > 1 || out.status < 0 {
@@ -325,8 +328,19 @@ impl CordialProfiles {
         let pids: Vec<String> = pids.iter().map(u32::to_string).collect();
         let kill: Vec<&str> =
             std::iter::once("kill").chain(sig).chain(pids.iter().map(String::as_str)).collect();
-        self.runner.run(&self.view.argv(&kill), Duration::from_secs(10))?;
-        Ok(())
+        let out = self.runner.run(&self.view.argv(&kill), Duration::from_secs(10))?;
+        // A client that ended between the listing and the signal is no
+        // failure: kill says so for that pid and signals the rest.
+        let said = String::from_utf8_lossy(&out.stderr);
+        let gone = !said.trim().is_empty()
+            && said.lines().filter(|l| !l.trim().is_empty()).all(|l| l.contains("No such process"));
+        if out.success() || gone {
+            return Ok(());
+        }
+        Err(CordialError::Process(format!(
+            "could not signal the client: {}",
+            last_line(&out.stderr)
+        )))
     }
 
     pub(super) fn keyring(&self) -> &Keyring {

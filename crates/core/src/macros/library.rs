@@ -22,6 +22,10 @@ pub struct MacroLibrary {
     /// Entries that are no macro this version reads, written back as found.
     unread: Map<String, Value>,
     set_aside: Option<PathBuf>,
+    /// Why macros.json could not be read, when it could not. Nothing is
+    /// written while this is set: the library on screen is empty only
+    /// because the file did not read, and saving it would erase the file.
+    unreadable: Option<String>,
 }
 
 impl MacroLibrary {
@@ -33,8 +37,15 @@ impl MacroLibrary {
             hotkeys: BTreeMap::new(),
             unread: Map::new(),
             set_aside: None,
+            unreadable: None,
         };
-        let owned = json_file::read_owned::<Map<String, Value>>(path);
+        let owned = match json_file::read_owned::<Map<String, Value>>(path) {
+            Ok(owned) => owned,
+            Err(e) => {
+                lib.unreadable = Some(e.to_string());
+                return lib;
+            }
+        };
         lib.set_aside = owned.set_aside;
         let stored = owned.value.unwrap_or_default();
         for (name, entry) in stored {
@@ -69,6 +80,12 @@ impl MacroLibrary {
     /// Where a macros.json that did not parse was moved on load.
     pub fn set_aside(&self) -> &[PathBuf] {
         self.set_aside.as_slice()
+    }
+
+    /// Why macros.json could not be read, when it could not; until it can,
+    /// every change is refused rather than written over it.
+    pub fn unreadable(&self) -> Option<&str> {
+        self.unreadable.as_deref()
     }
 
     /// The names, sorted.
@@ -111,7 +128,9 @@ impl MacroLibrary {
         if new.is_empty() {
             return Err(MacroError::Name("A macro needs a name".into()));
         }
-        if old != Some(new) && self.contains(new) {
+        // An entry this version cannot read still holds its name: saving
+        // over it would lose what a newer version wrote.
+        if old != Some(new) && (self.contains(new) || self.unread.contains_key(new)) {
             return Err(MacroError::Name(format!("A macro called {new} already exists")));
         }
         let hotkey = hotkey.filter(|k| !k.is_empty());
@@ -123,39 +142,58 @@ impl MacroLibrary {
             }
         }
         grammar::parse(text)?;
-        if let Some(old) = old.filter(|o| *o != new) {
-            self.text.remove(old);
-            self.hotkeys.remove(old);
-            if self.off.remove(old) {
-                self.off.insert(new.to_owned());
+        self.commit(|lib| {
+            if let Some(old) = old.filter(|o| *o != new) {
+                lib.text.remove(old);
+                lib.hotkeys.remove(old);
+                if lib.off.remove(old) {
+                    lib.off.insert(new.to_owned());
+                }
             }
-        }
-        self.unread.remove(new);
-        self.text.insert(new.to_owned(), text.to_owned());
-        match hotkey {
-            Some(key) => self.hotkeys.insert(new.to_owned(), key.to_owned()),
-            None => self.hotkeys.remove(new),
-        };
-        self.write()
+            lib.text.insert(new.to_owned(), text.to_owned());
+            match hotkey {
+                Some(key) => lib.hotkeys.insert(new.to_owned(), key.to_owned()),
+                None => lib.hotkeys.remove(new),
+            };
+        })
     }
 
     pub fn set_enabled(&mut self, name: &str, on: bool) -> Result<(), MacroError> {
-        if on {
-            self.off.remove(name);
-        } else if self.contains(name) {
-            self.off.insert(name.to_owned());
-        }
-        self.write()
+        self.commit(|lib| {
+            if on {
+                lib.off.remove(name);
+            } else if lib.contains(name) {
+                lib.off.insert(name.to_owned());
+            }
+        })
     }
 
     pub fn delete(&mut self, name: &str) -> Result<(), MacroError> {
-        self.text.remove(name);
-        self.off.remove(name);
-        self.hotkeys.remove(name);
-        self.write()
+        self.commit(|lib| {
+            lib.text.remove(name);
+            lib.off.remove(name);
+            lib.hotkeys.remove(name);
+        })
+    }
+
+    /// Make `change` and write it; a write that fails puts everything back,
+    /// so the library on screen never shows an edit the file does not have.
+    fn commit(&mut self, change: impl FnOnce(&mut Self)) -> Result<(), MacroError> {
+        let before = (self.text.clone(), self.off.clone(), self.hotkeys.clone());
+        change(self);
+        let written = self.write();
+        if written.is_err() {
+            (self.text, self.off, self.hotkeys) = before;
+        }
+        written
     }
 
     fn write(&self) -> Result<(), MacroError> {
+        if let Some(why) = &self.unreadable {
+            return Err(MacroError::Io(format!(
+                "macros.json did not read, so nothing is saved over it ({why})"
+            )));
+        }
         let entries: Map<String, Value> = self
             .text
             .iter()
@@ -349,5 +387,40 @@ mod tests {
         lib.delete("a").unwrap();
         assert_eq!(lib.hotkeys().count(), 0);
         assert_eq!(on_disk(&dir), json!({}));
+    }
+
+    #[test]
+    fn a_macros_file_that_cannot_be_read_is_never_written_over() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory in the file's place: the read fails, and not with
+        // NotFound, the branch a permissions or I/O error takes.
+        let path = dir.path().join("macros.json");
+        fs::create_dir(&path).unwrap();
+        let mut lib = MacroLibrary::load(&path);
+        assert!(lib.unreadable().is_some());
+        assert!(matches!(lib.save(None, "b", "tap f", None), Err(MacroError::Io(_))));
+        assert!(!lib.contains("b"), "the refused edit must not show as saved");
+        assert!(path.is_dir());
+    }
+
+    #[test]
+    fn a_failed_write_puts_the_library_back_as_it_was() {
+        let (dir, mut lib) = library(json!({"a": "tap e\n"}));
+        // A directory where the file's parent should be refuses the write.
+        let blocked = dir.path().join("blocked");
+        fs::write(&blocked, "").unwrap();
+        lib.path = blocked.join("macros.json");
+        assert!(lib.save(Some("a"), "b", "tap f", None).is_err());
+        assert!(lib.delete("a").is_err());
+        assert_eq!(lib.names().collect::<Vec<_>>(), ["a"]);
+        assert_eq!(lib.text("a"), Some("tap e\n"));
+    }
+
+    #[test]
+    fn an_unreadable_entry_keeps_its_name() {
+        let (dir, mut lib) = library(json!({"x": 5}));
+        assert!(matches!(lib.save(None, "x", "tap e", None), Err(MacroError::Name(_))));
+        lib.save(None, "y", "tap e", None).unwrap();
+        assert_eq!(on_disk(&dir)["x"], json!(5));
     }
 }

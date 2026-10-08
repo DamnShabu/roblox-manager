@@ -304,11 +304,24 @@ fn with_no_server_in_time_the_followers_get_their_own() {
 
 #[test]
 fn a_failed_leader_launches_nobody_else() {
-    let w = world(2, &[("a1", "expired")], &[]);
-    let r = w.launch(request(&[1, 2], Mode::Group, Some("77"), None));
+    let w = world(3, &[("a1", "expired")], &[]);
+    let r = w.launch(request(&[1, 2, 3], Mode::Group, Some("77"), None));
     assert!(r.launched.is_empty());
     assert_eq!(r.expired, [UserId(1)]);
     assert!(w.logged("nobody has a server to join"));
+    // The followers are in the report, not silently left out of it.
+    let failed: Vec<u64> = r.failed.iter().map(|(id, _)| id.0).collect();
+    assert_eq!(failed, [2, 3]);
+    assert!(r.failed[0].1.contains("a1"), "{:?}", r.failed);
+}
+
+#[test]
+fn a_group_sent_to_the_home_screen_does_not_wait_for_a_server() {
+    let w = world(2, &[], &[]);
+    let r = w.launch(request(&[1, 2], Mode::Group, None, None));
+    assert_eq!(launched(&r), [1, 2]);
+    assert_eq!(*w.roblox.presence_asks.lock().unwrap(), 0);
+    assert!(w.slept.lock().unwrap().is_empty());
 }
 
 #[test]

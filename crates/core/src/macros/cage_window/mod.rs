@@ -97,6 +97,10 @@ fn ask(display_file: &Path, line: &str) -> io::Result<Option<bool>> {
     match answer.trim() {
         "hidden" => Ok(Some(true)),
         "shown" => Ok(Some(false)),
+        // Closed without a word: a relay between connections, or on its way
+        // out. Busy, not broken -- a macro looking through it waits this
+        // out, and a relay that is gone refuses the next connection.
+        "" => Err(io::Error::new(io::ErrorKind::ResourceBusy, "the window relay did not answer")),
         other => Err(io::Error::other(format!("the window relay said {other:?}"))),
     }
 }
