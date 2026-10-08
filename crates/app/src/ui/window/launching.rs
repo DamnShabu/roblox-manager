@@ -207,6 +207,7 @@ impl Window {
         mode: Mode,
         target: Option<(Option<PlaceId>, Option<ServerId>)>,
     ) {
+        let display_hz = monitor_hz();
         let (accounts, joining, place, server) = {
             let mut s = self.state_mut();
             let mut accounts = Vec::new();
@@ -217,8 +218,11 @@ impl Window {
                     self.log(&line);
                     continue;
                 }
-                let opts =
-                    rbxmgr_core::cordial::ClientOpts { nested: a.nested, low_power: a.low_power };
+                let opts = rbxmgr_core::cordial::ClientOpts {
+                    nested: a.nested,
+                    performance: a.performance(),
+                    display_hz,
+                };
                 accounts.push(LaunchAccount { id, label: a.name.clone(), opts });
             }
             let leader_skipped = mode == Mode::Group
@@ -417,4 +421,18 @@ impl Window {
             },
         );
     }
+}
+
+/// The fastest refresh rate among the desktop's monitors, which High and Max
+/// clients run at. Read here rather than by the client: a macro-ready one
+/// sees only its cage's output, never the monitor's.
+fn monitor_hz() -> Option<u32> {
+    use gtk::prelude::*;
+    let monitors = gtk::gdk::Display::default()?.monitors();
+    (0..monitors.n_items())
+        .filter_map(|i| monitors.item(i)?.downcast::<gtk::gdk::Monitor>().ok())
+        .filter_map(|m| u32::try_from(m.refresh_rate()).ok())
+        .map(|millihertz| (millihertz + 500) / 1000)
+        .filter(|hz| *hz > 0)
+        .max()
 }

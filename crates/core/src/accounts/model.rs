@@ -8,6 +8,7 @@ use serde::de::{DeserializeOwned, Deserializer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use crate::cordial::Performance;
 use crate::roblox::Game;
 use crate::types::{Label, PlaceId, UserId};
 
@@ -44,8 +45,18 @@ pub struct Account {
     /// The client runs in a cage of its own, where macros can reach it.
     #[serde(default, deserialize_with = "lenient", skip_serializing_if = "is_false")]
     pub nested: bool,
+    /// What earlier versions wrote for a Low client, still written so they
+    /// read a Low one the same. See [`Account::performance`].
     #[serde(default, deserialize_with = "lenient", skip_serializing_if = "is_false")]
     pub low_power: bool,
+    /// Its performance level. Absent in files earlier versions wrote.
+    #[serde(
+        rename = "performance",
+        default,
+        deserialize_with = "lenient",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub performance_level: Option<Performance>,
     /// The macro its Run plays.
     #[serde(
         rename = "macro",
@@ -86,6 +97,7 @@ impl Account {
             plays: BTreeMap::new(),
             nested: false,
             low_power: false,
+            performance_level: None,
             macro_name: None,
             leader: false,
             follow: None,
@@ -93,6 +105,23 @@ impl Account {
             join_links: false,
             extra: Map::new(),
         }
+    }
+}
+
+impl Account {
+    /// Its performance level: the one chosen, or what an earlier version's
+    /// low-power switch meant.
+    pub fn performance(&self) -> Performance {
+        self.performance_level.unwrap_or(if self.low_power {
+            Performance::Low
+        } else {
+            Performance::High
+        })
+    }
+
+    pub fn set_performance(&mut self, level: Performance) {
+        self.performance_level = Some(level);
+        self.low_power = level == Performance::Low;
     }
 }
 

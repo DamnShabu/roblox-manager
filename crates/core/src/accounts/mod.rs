@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
+use crate::cordial::Performance;
 use crate::json_file;
 use crate::paths::Paths;
 use crate::roblox::{AccountGames, Game, merge_favorites};
@@ -270,9 +271,9 @@ impl AccountStore {
         }
     }
 
-    pub fn set_low_power(&mut self, id: UserId, on: bool) {
+    pub fn set_performance(&mut self, id: UserId, level: Performance) {
         if let Ok(a) = self.get_mut(id) {
-            a.low_power = on;
+            a.set_performance(level);
         }
     }
 

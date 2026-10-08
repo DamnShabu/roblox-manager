@@ -271,8 +271,8 @@ impl Window {
         self.save_accounts();
     }
 
-    pub fn set_low_power(&self, id: UserId, on: bool) {
-        self.state_mut().accounts.set_low_power(id, on);
+    pub fn set_performance(&self, id: UserId, level: rbxmgr_core::cordial::Performance) {
+        self.state_mut().accounts.set_performance(id, level);
         self.changed();
     }
 

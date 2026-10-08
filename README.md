@@ -182,12 +182,19 @@ Open them from an account's ⋮ menu, or by right-clicking its row.
   Roblox.
 - **Note** shows as a small icon next to the name. Don't put passwords
   here.
-- **Low-Power Client** turns the game's graphics quality to its lowest, caps
-  the client at 10 FPS (20 in a macro-ready window, so macros keep their
-  timing), idles more lightly, gives it a lower priority, and slows it
-  further when it's out of focus. Use it for accounts that are just along for
-  the ride. It applies from the next launch; switching it off puts your own
-  graphics quality back.
+- **Performance** sets how much of your machine the client may use, from the
+  next launch:
+  - **Low**: 10 FPS, the lowest graphics, lower priority, slower still out of
+    focus. For accounts that are just along for the ride. At 10 FPS a
+    macro press can land up to a tenth of a second late.
+  - **Medium**: 60 FPS and reduced graphics.
+  - **High** (the default): your monitor's refresh rate and the game's own
+    graphics.
+  - **Max**: your monitor's refresh rate and the game's top graphics.
+
+  Low, Medium and Max set the game's graphics slider and a set of graphics
+  FastFlags through Stacked (a release newer than 0.21.7). Going back to High puts your
+  own slider setting back.
 - **Macro** and **Macro-Ready Window**: see [Macros](#macros).
 - **Session** shows whether Roblox still accepts the stored sign-in.
   **Check** asks Roblox now. If a session has expired, the row says

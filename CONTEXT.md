@@ -38,8 +38,10 @@ or a friend's server.
 Cordial profile and starting its **client**; its outcome per account is
 launched, expired or failed (a **launch report**).
 
-**Low-power client** -- a client throttled, FIFO-paced, niced, capped and at
-the game's lowest graphics quality, for an account along for the ride.
+**Performance level** -- how much of the machine a client may use: Low (10
+FPS, lowest graphics, niced, throttled), Medium (60 FPS, reduced graphics),
+High (the monitor's refresh rate, the game's own graphics) or Max (the
+monitor's refresh rate, top graphics). A **low-power client** is a Low one.
 
 **Hidden window** -- a client's window unmapped at the manager's request
 (SIGUSR1; SIGUSR2 shows it), the game still running behind it at a capped

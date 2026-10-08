@@ -1,5 +1,5 @@
-//! Roblox's own graphics-quality slider, set to its lowest for a low-power
-//! client and given back afterwards.
+//! Roblox's own graphics-quality slider, set for a client's performance
+//! level and given back to the player's own afterwards.
 //!
 //! The frame cap and throttle bound how often a client draws; this bounds
 //! what each frame costs and what the game keeps loaded: render distance,
@@ -17,12 +17,18 @@ use std::path::{Path, PathBuf};
 
 use super::CordialError;
 
-/// The slider ("SavedQualityLevel", 0 is Automatic) and the level the
-/// engine last ran at. Both are set, so the first frame is already cheap
-/// whichever one this build reads first.
+/// The slider ("SavedQualityLevel", 0 is Automatic, 1-10 its steps) and the
+/// level the engine last ran at. Both are set, so the first frame is already
+/// at the level whichever one this build reads first.
 const KEYS: [&str; 2] = ["SavedQualityLevel", "GraphicsQualityLevel"];
 
-/// The lowest step of the slider.
+/// The key in the saved file recording the level the manager set, so a
+/// level moved since in the game's menu is told apart and kept. Not a
+/// property name. A file without it was written when only the lowest step
+/// was ever set.
+const SET: &str = "set";
+
+/// What a file without [`SET`] was set to.
 const LOWEST: &str = "1";
 
 /// The engine's preferences file in a profile directory.
@@ -30,47 +36,54 @@ pub fn settings_path(profile_dir: &Path) -> PathBuf {
     profile_dir.join("data/files/appData/GlobalBasicSettings_13.xml")
 }
 
-/// Where the values the slider had before low power are kept, beside it.
+/// Where the values the slider had before the manager set it are kept.
 fn saved_path(profile_dir: &Path) -> PathBuf {
     profile_dir.join("rbxmgr-quality.json")
 }
 
-/// Turn the slider to its lowest, remembering what it was the first time.
+/// Turn the slider to `level`, remembering what it was the first time.
 /// A profile the engine has not run in yet has no file; its first run is at
-/// the engine's own choice and the next one is low.
-pub fn lower(profile_dir: &Path) -> Result<(), CordialError> {
+/// the engine's own choice and the next one at `level`.
+pub fn set(profile_dir: &Path, level: &str) -> Result<(), CordialError> {
     let path = settings_path(profile_dir);
     let Some(xml) = read(&path)? else { return Ok(()) };
     let saved = saved_path(profile_dir);
-    if !saved.exists() {
-        let before: BTreeMap<&str, &str> =
-            KEYS.iter().filter_map(|k| Some((*k, value(&xml, k)?))).collect();
-        crate::json_file::write(&saved, &before)
-            .map_err(|e| io(&format!("could not write {}", saved.display()), e))?;
-    }
-    let lowered = KEYS.iter().fold(xml.clone(), |xml, k| with_value(&xml, k, LOWEST));
-    write_if_changed(&path, &xml, &lowered)
+    let mut record = read_saved(&saved)?.unwrap_or_else(|| {
+        KEYS.iter().filter_map(|k| Some(((*k).to_owned(), value(&xml, k)?.to_owned()))).collect()
+    });
+    record.insert(SET.to_owned(), level.to_owned());
+    crate::json_file::write(&saved, &record)
+        .map_err(|e| io(&format!("could not write {}", saved.display()), e))?;
+    let changed = KEYS.iter().fold(xml.clone(), |xml, k| with_value(&xml, k, level));
+    write_if_changed(&path, &xml, &changed)
 }
 
-/// Put back what [`lower`] found, for a client no longer low power. A value
-/// changed since from the game's menu is the player's, and stays.
+/// Put back what [`set`] found, for a client that leaves the slider to the
+/// player. A value changed since from the game's menu is the player's, and
+/// stays.
 pub fn restore(profile_dir: &Path) -> Result<(), CordialError> {
     let saved = saved_path(profile_dir);
-    // The only record of the player's own level. One that does not read is
-    // moved aside rather than taken as empty and deleted, and one that
-    // cannot be read at all is an error, never a reason to remove it.
-    let owned = crate::json_file::read_owned::<BTreeMap<String, String>>(&saved)
-        .map_err(|e| CordialError::Io(format!("could not read the saved quality: {e}")))?;
-    let Some(before) = owned.value else { return Ok(()) };
+    let Some(mut before) = read_saved(&saved)? else { return Ok(()) };
+    let ours = before.remove(SET).unwrap_or_else(|| LOWEST.to_owned());
     let path = settings_path(profile_dir);
     if let Some(xml) = read(&path)? {
         let restored = before.iter().fold(xml.clone(), |xml, (k, v)| match value(&xml, k) {
-            Some(LOWEST) => with_value(&xml, k, v),
+            Some(now) if now == ours => with_value(&xml, k, v),
             _ => xml,
         });
         write_if_changed(&path, &xml, &restored)?;
     }
     fs::remove_file(&saved).map_err(|e| io(&format!("could not remove {}", saved.display()), e))
+}
+
+/// The player's own levels, as first found. The only record of them: one
+/// that does not read is moved aside rather than taken as empty and deleted,
+/// and one that cannot be read at all is an error, never a reason to remove
+/// it.
+fn read_saved(saved: &Path) -> Result<Option<BTreeMap<String, String>>, CordialError> {
+    crate::json_file::read_owned::<BTreeMap<String, String>>(saved)
+        .map(|owned| owned.value)
+        .map_err(|e| CordialError::Io(format!("could not read the saved quality: {e}")))
 }
 
 /// The file's text, or None when there is none yet.
@@ -152,7 +165,7 @@ mod tests {
     #[test]
     fn low_power_turns_the_slider_down_and_back() {
         let dir = profile(Some(XML));
-        lower(dir.path()).unwrap();
+        set(dir.path(), LOWEST).unwrap();
         let low = settings(&dir);
         assert_eq!(value(&low, "SavedQualityLevel"), Some("1"));
         assert_eq!(value(&low, "GraphicsQualityLevel"), Some("1"));
@@ -165,8 +178,8 @@ mod tests {
     #[test]
     fn launching_low_twice_still_remembers_the_players_own_level() {
         let dir = profile(Some(XML));
-        lower(dir.path()).unwrap();
-        lower(dir.path()).unwrap();
+        set(dir.path(), LOWEST).unwrap();
+        set(dir.path(), LOWEST).unwrap();
         restore(dir.path()).unwrap();
         assert_eq!(settings(&dir), XML);
     }
@@ -174,7 +187,7 @@ mod tests {
     #[test]
     fn a_level_chosen_in_the_game_meanwhile_is_kept() {
         let dir = profile(Some(XML));
-        lower(dir.path()).unwrap();
+        set(dir.path(), LOWEST).unwrap();
         let moved = with_value(&settings(&dir), "SavedQualityLevel", "5");
         fs::write(settings_path(dir.path()), moved).unwrap();
         restore(dir.path()).unwrap();
@@ -186,7 +199,7 @@ mod tests {
     #[test]
     fn a_profile_the_engine_never_ran_in_is_left_to_it() {
         let dir = profile(None);
-        lower(dir.path()).unwrap();
+        set(dir.path(), LOWEST).unwrap();
         restore(dir.path()).unwrap();
         assert!(!settings_path(dir.path()).exists());
         assert!(!saved_path(dir.path()).exists());
@@ -202,7 +215,7 @@ mod tests {
     #[test]
     fn a_saved_level_that_does_not_read_is_kept_not_deleted() {
         let dir = profile(Some(XML));
-        lower(dir.path()).unwrap();
+        set(dir.path(), LOWEST).unwrap();
         let saved = saved_path(dir.path());
         fs::write(&saved, "{not json").unwrap();
         restore(dir.path()).unwrap();
@@ -218,7 +231,7 @@ mod tests {
     fn a_property_the_file_lacks_is_not_invented() {
         let only = XML.replace("\t\t\t<int name=\"GraphicsQualityLevel\">8</int>\n", "");
         let dir = profile(Some(&only));
-        lower(dir.path()).unwrap();
+        set(dir.path(), LOWEST).unwrap();
         assert_eq!(value(&settings(&dir), "GraphicsQualityLevel"), None);
         restore(dir.path()).unwrap();
         assert_eq!(settings(&dir), only);

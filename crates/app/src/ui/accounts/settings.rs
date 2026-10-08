@@ -4,6 +4,7 @@
 use adw::prelude::*;
 use gtk::{Align, WrapMode};
 use rbxmgr_core::accounts::{Account, SessionState, relative_time};
+use rbxmgr_core::cordial::Performance;
 use rbxmgr_core::types::{Profile, UserId};
 
 use crate::ui::login::AddAccountDialog;
@@ -219,23 +220,46 @@ fn launching(
         }
     }
 
-    let low = adw::SwitchRow::builder()
-        .title("Low-Power Client")
-        .subtitle(
-            "For an account along for the ride: lowest graphics, 10 FPS (20 if macro-ready), a \
-             lighter idle loop, lower priority, and slower still out of focus. From the next \
-             launch.",
-        )
-        .active(acct.low_power)
-        .build();
+    let levels: Vec<&str> = Performance::ALL.iter().map(|p| p.label()).collect();
+    let performance =
+        adw::ComboRow::builder()
+            .title("Performance")
+            .subtitle(performance_detail(acct.performance()))
+            .model(&gtk::StringList::new(&levels))
+            .selected(
+                Performance::ALL.iter().position(|p| *p == acct.performance()).unwrap_or(2) as u32
+            )
+            .build();
     let weak = w.weak();
-    low.connect_active_notify(move |r| {
+    performance.connect_selected_notify(move |c| {
+        let Some(&level) = Performance::ALL.get(c.selected() as usize) else { return };
+        c.set_subtitle(performance_detail(level));
         if let Some(w) = weak.upgrade() {
-            w.set_low_power(id, r.is_active());
+            w.set_performance(id, level);
         }
     });
-    group.add(&low);
+    group.add(&performance);
     group
+}
+
+/// What a performance level does, under its row.
+fn performance_detail(level: Performance) -> &'static str {
+    match level {
+        Performance::Low => {
+            "10 FPS, the lowest graphics, lower priority, and slower still out of focus. For an \
+             account along for the ride. From the next launch."
+        }
+        Performance::Medium => {
+            "60 FPS, reduced graphics, slightly lower priority, and slower out of focus. From the \
+             next launch."
+        }
+        Performance::High => {
+            "Your monitor's refresh rate and the game's own graphics. From the next launch."
+        }
+        Performance::Max => {
+            "Your monitor's refresh rate and the game's top graphics. From the next launch."
+        }
+    }
 }
 
 /// Its macro-ready window, the macro its Run plays, and Run itself.

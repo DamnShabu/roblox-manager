@@ -122,40 +122,65 @@ fn a_client_that_stays_up_is_launched_with_its_log_rotated() {
     assert!(!flags(&w, &p).exists(), "a normal client writes no flags");
 }
 
-#[test]
-fn a_low_power_client_is_niced_throttled_and_capped() {
-    let w = world();
-    let p = Profile::named("rbxmgr-7");
-    w.profiles.launch(&p, None, &build(), ClientOpts { low_power: true, nested: false }).unwrap();
-    let (argv, env) = &w.runner.spawned()[0];
-    assert_eq!(&argv[..4], ["nice", "-n", "10", "cordial-run"]);
-    for (k, v) in engine::LOW_POWER_ENV.into_iter().filter(|(k, _)| *k != "CORDIAL_FPS_CAP") {
-        assert!(env.contains(&(k.into(), v.into())), "{k}");
-    }
-    let cap = ("CORDIAL_FPS_CAP".into(), engine::UNREACHED_LOW_POWER_FPS_CAP.into());
-    assert!(env.contains(&cap), "no macro reaches it, so it runs slower still");
-    assert!(!flags(&w, &p).exists(), "low power writes no flags any more");
+fn at(performance: Performance, nested: bool) -> ClientOpts {
+    ClientOpts { nested, performance, display_hz: Some(144) }
 }
 
 #[test]
-fn a_low_power_client_plays_at_the_lowest_graphics_quality_until_it_is_not() {
+fn a_low_client_is_niced_throttled_and_capped() {
+    let w = world();
+    let p = Profile::named("rbxmgr-7");
+    w.profiles.launch(&p, None, &build(), at(Performance::Low, false)).unwrap();
+    let (argv, env) = &w.runner.spawned()[0];
+    assert_eq!(&argv[..4], ["nice", "-n", "10", "cordial-run"]);
+    for (k, v) in [
+        ("CORDIAL_THROTTLE", "unfocused"),
+        ("CORDIAL_FPS_CAP", "10"),
+        ("CORDIAL_QUALITY", "low"),
+        ("CORDIAL_POLL_COALESCE_US", "2000"),
+    ] {
+        assert!(env.contains(&(k.into(), v.into())), "{k}");
+    }
+    assert!(!flags(&w, &p).exists(), "the flags go through Stacked, not the profile's file");
+}
+
+#[test]
+fn high_and_max_run_at_the_monitors_rate_unniced() {
+    let w = world();
+    let p = Profile::named("rbxmgr-7");
+    w.profiles.launch(&p, None, &build(), at(Performance::Max, false)).unwrap();
+    let (argv, env) = &w.runner.spawned()[0];
+    assert_eq!(argv[0], "cordial-run");
+    assert!(env.contains(&("CORDIAL_FPS_CAP".into(), "144".into())));
+    assert!(env.contains(&("CORDIAL_QUALITY".into(), "max".into())));
+}
+
+#[test]
+fn the_games_graphics_slider_follows_the_level_and_comes_back() {
     let w = world();
     let p = Profile::named("rbxmgr-7");
     let prefs = w.profiles.path(&p).join("data/files/appData/GlobalBasicSettings_13.xml");
     fs::create_dir_all(prefs.parent().unwrap()).unwrap();
     let mine = r#"<Properties><token name="SavedQualityLevel">7</token></Properties>"#;
     fs::write(&prefs, mine).unwrap();
-    w.profiles.launch(&p, None, &build(), ClientOpts { low_power: true, nested: true }).unwrap();
-    assert!(fs::read_to_string(&prefs).unwrap().contains(r#""SavedQualityLevel">1<"#));
+    let slider = || fs::read_to_string(&prefs).unwrap();
+    w.profiles.launch(&p, None, &build(), at(Performance::Low, true)).unwrap();
+    assert!(slider().contains(r#""SavedQualityLevel">1<"#));
+    w.profiles.launch(&p, None, &build(), at(Performance::Medium, true)).unwrap();
+    assert!(slider().contains(r#""SavedQualityLevel">4<"#));
+    w.profiles.launch(&p, None, &build(), at(Performance::Max, true)).unwrap();
+    assert!(slider().contains(r#""SavedQualityLevel">10<"#));
     w.profiles.launch(&p, None, &build(), ClientOpts::default()).unwrap();
-    assert_eq!(fs::read_to_string(&prefs).unwrap(), mine, "the player's own level back");
+    assert_eq!(slider(), mine, "the player's own level back at High");
 }
 
 #[test]
 fn a_macro_ready_client_runs_in_a_cage_linked_where_macros_look() {
     let w = world();
     let p = Profile::named("rbxmgr-7");
-    w.profiles.launch(&p, None, &build(), ClientOpts { nested: true, low_power: false }).unwrap();
+    w.profiles
+        .launch(&p, None, &build(), ClientOpts { nested: true, ..ClientOpts::default() })
+        .unwrap();
     let (argv, _) = &w.runner.spawned()[0];
     assert_eq!(&argv[..2], ["cage", "--"]);
     let link = nested::display_file(&w.dir.path().join("run"), &p);
@@ -164,15 +189,15 @@ fn a_macro_ready_client_runs_in_a_cage_linked_where_macros_look() {
 }
 
 #[test]
-fn a_macro_ready_client_keeps_playing_out_of_sight_low_power_or_not() {
+fn a_macro_ready_client_keeps_playing_out_of_sight_at_any_level() {
     let w = world();
     let p = Profile::named("rbxmgr-7");
-    w.profiles.launch(&p, None, &build(), ClientOpts { nested: true, low_power: true }).unwrap();
+    w.profiles.launch(&p, None, &build(), at(Performance::Low, true)).unwrap();
     let (_, env) = &w.runner.spawned()[0];
     let present: Vec<&str> =
         env.iter().filter(|(k, _)| k == "CORDIAL_PRESENT_MODE").map(|(_, v)| v.as_str()).collect();
     assert_eq!(present, ["mailbox"], "never FIFO, which waits on a cage nobody is looking at");
-    assert!(env.contains(&("CORDIAL_FPS_CAP".into(), "20".into())), "and still capped");
+    assert!(env.contains(&("CORDIAL_FPS_CAP".into(), "10".into())), "and still capped");
 }
 
 #[test]
@@ -196,7 +221,9 @@ fn a_macro_ready_launch_keeps_cages_off_the_display_they_open_on() {
         Arc::new(|_| {}),
     );
     let p = Profile::named("rbxmgr-7");
-    profiles.launch(&p, None, &build(), ClientOpts { nested: true, low_power: false }).unwrap();
+    profiles
+        .launch(&p, None, &build(), ClientOpts { nested: true, ..ClientOpts::default() })
+        .unwrap();
     // What a cage does to pick its own display name.
     let lock = File::open(dir.path().join("wayland-1.lock")).unwrap();
     assert!(flock(&lock, FlockOperation::NonBlockingLockExclusive).is_err());
@@ -207,7 +234,9 @@ fn a_macro_ready_client_with_a_relay_runs_behind_it_inside_its_cage() {
     let w = world();
     let profiles = w.profiles.with_relay(Some(PathBuf::from("/app/libexec/roblox-manager")));
     let p = Profile::named("rbxmgr-7");
-    profiles.launch(&p, None, &build(), ClientOpts { nested: true, low_power: false }).unwrap();
+    profiles
+        .launch(&p, None, &build(), ClientOpts { nested: true, ..ClientOpts::default() })
+        .unwrap();
     let (argv, _) = &w.runner.spawned()[0];
     let link = nested::display_file(&w.dir.path().join("run"), &p).display().to_string();
     let relay = "/app/libexec/roblox-manager";
