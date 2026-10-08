@@ -7,6 +7,7 @@ pub mod build;
 pub mod clients;
 pub mod engine;
 mod migrate;
+pub mod performance;
 pub mod process;
 mod profiles;
 mod quality;
@@ -14,6 +15,7 @@ pub mod session;
 pub mod stacked;
 
 pub use build::{Build, roblox_build};
+pub use performance::Performance;
 pub use process::{Child, Output, ProcessView, Runner, SystemRunner};
 pub use profiles::{ClientOpts, CordialProfiles, STARTUP_CHECK, Window};
 

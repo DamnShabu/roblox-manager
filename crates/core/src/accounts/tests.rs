@@ -242,3 +242,26 @@ fn the_accounts_for_join_links_are_remembered_and_replaced() {
     let unpicked = serde_json::to_value(s.get(UserId(1)).unwrap()).unwrap();
     assert!(unpicked.get("join_links").is_none(), "false is not written");
 }
+
+#[test]
+fn an_earlier_low_power_account_reads_as_low_and_stays_readable_to_them() {
+    let old: Account =
+        serde_json::from_value(json!({"name": "a", "user_id": 1, "low_power": true})).unwrap();
+    assert_eq!(old.performance(), Performance::Low);
+    let plain: Account = serde_json::from_value(json!({"name": "b", "user_id": 2})).unwrap();
+    assert_eq!(plain.performance(), Performance::High);
+    let mut a = plain;
+    a.set_performance(Performance::Low);
+    let written = serde_json::to_value(&a).unwrap();
+    assert_eq!(
+        (written["performance"].as_str(), written["low_power"].as_bool()),
+        (Some("low"), Some(true))
+    );
+    a.set_performance(Performance::Max);
+    let written = serde_json::to_value(&a).unwrap();
+    assert_eq!(written["performance"], "max");
+    assert!(written.get("low_power").is_none(), "an earlier version reads it as not low");
+    let odd: Account =
+        serde_json::from_value(json!({"name": "c", "user_id": 3, "performance": "turbo"})).unwrap();
+    assert_eq!(odd.performance(), Performance::High, "an unknown level is the default");
+}

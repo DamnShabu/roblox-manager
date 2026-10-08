@@ -1,5 +1,5 @@
 //! Every account's Cordial profile, and the client that plays in it: where
-//! the profile lives, the session it is given, its low-power flags, starting
+//! the profile lives, the session it is given, its performance level, starting
 //! its client, which clients are up, and hiding their windows.
 
 use std::collections::{BTreeMap, HashSet};
@@ -12,6 +12,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use super::build::Build;
+use super::performance::Performance;
 use super::process::{ProcessView, Runner, last_line};
 use super::{CordialError, clients, engine, quality, session};
 use crate::keyring::{Attrs, Keyring};
@@ -31,9 +32,12 @@ pub const SECRET_KINDS: [&str; 2] = ["identity", "cookies"];
 pub struct ClientOpts {
     /// In a cage of its own, where macros can reach it.
     pub nested: bool,
-    /// Throttled, FIFO-paced, niced, frame-capped, at the game's lowest
-    /// graphics quality.
-    pub low_power: bool,
+    /// How much of the machine it may use.
+    pub performance: Performance,
+    /// The monitor's refresh rate, which High and Max run at. Read from the
+    /// desktop by the window: inside a cage the client would only see the
+    /// cage's.
+    pub display_hz: Option<u32>,
 }
 
 /// A running client's window.
@@ -160,11 +164,10 @@ impl CordialProfiles {
     ) -> Result<(), CordialError> {
         self.clear_legacy_low_power_flags(profile)?;
         let mut env = engine::env(&engine::load_settings(&self.paths.cordial_shell_json()));
-        if opts.low_power {
-            env = engine::with_low_power(env, opts.nested);
-            quality::lower(&self.path(profile))?;
-        } else {
-            quality::restore(&self.path(profile))?;
+        env = engine::with_performance(env, opts.performance, opts.display_hz);
+        match opts.performance.slider() {
+            Some(level) => quality::set(&self.path(profile), level)?,
+            None => quality::restore(&self.path(profile))?,
         }
         if opts.nested {
             env = engine::with_nested(env);
@@ -174,8 +177,8 @@ impl CordialProfiles {
             .map_err(|e| io(&format!("could not open {}", log_path.display()), e))?;
         let program = super::stacked::engine_program(&self.paths);
         let mut argv = engine::client_argv(&program, profile, url, build);
-        if opts.low_power {
-            argv.splice(0..0, ["nice", "-n", "10"].map(String::from));
+        if let Some(n) = opts.performance.nice() {
+            argv.splice(0..0, ["nice", "-n", n].map(String::from));
         }
         if opts.nested {
             self.hold_parent_display()?;

@@ -7,6 +7,7 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use super::build::Build;
+use super::performance::Performance;
 use crate::types::Profile;
 
 /// Cordial's settings from shell.json. Missing or unreadable is none set.
@@ -83,28 +84,30 @@ fn valid_fps_cap(cap: &u64) -> bool {
     (1..=1000).contains(cap)
 }
 
-/// A low-power client, for an account along for the ride: throttled when
-/// unfocused, FIFO-paced, no GameMode boost, 20 frames a second, a longer
-/// back-off in an idle poll loop (and niced by the launcher, with the game's
-/// own graphics quality at its lowest, see `quality.rs`). These replace
-/// whatever the settings chose. 20 rather than 10 for a macro-ready client:
-/// a macro's presses only reach the game a frame at a time, and at 10 a press
-/// lands up to a tenth of a second off -- enough for clients playing the
-/// same macro to drift apart. One no macro can reach gets
-/// [`UNREACHED_LOW_POWER_FPS_CAP`].
-pub const LOW_POWER_ENV: [(&str, &str); 5] = [
+/// A Low client, for an account along for the ride: throttled when
+/// unfocused, FIFO-paced, no GameMode boost and a longer back-off in an idle
+/// poll loop. At 10 frames against 20 with the default 250 us back-off, on
+/// Stacked 0.21.6's landing page, a client went from 4.3% to 2.8% of a core.
+/// A macro's presses reach the game a frame at a time, so at 10 frames a
+/// press can land up to a tenth of a second off.
+const LOW_ENV: [(&str, &str); 4] = [
     ("CORDIAL_THROTTLE", "unfocused"),
     ("CORDIAL_PRESENT_MODE", "fifo"),
     ("CORDIAL_GAMEMODE", "0"),
-    (FPS_CAP, "20"),
     ("CORDIAL_POLL_COALESCE_US", "2000"),
 ];
 
-/// The frame cap for a low-power client outside a macro-ready window, where
-/// no macro's timing depends on it. At 10 frames against 20 with the default
-/// 250 us back-off, on Stacked 0.21.6's landing page, a client went from
-/// 4.3% to 2.8% of a core.
-pub const UNREACHED_LOW_POWER_FPS_CAP: &str = "10";
+/// A Medium client keeps the present mode the settings chose, so its 60
+/// frames are not tied to the display's pace.
+const MEDIUM_ENV: [(&str, &str); 3] = [
+    ("CORDIAL_THROTTLE", "unfocused"),
+    ("CORDIAL_GAMEMODE", "0"),
+    ("CORDIAL_POLL_COALESCE_US", "2000"),
+];
+
+/// The graphics-quality preset Stacked turns into FastFlags beneath the
+/// profile's own flags.json (`graphics_quality.rs` in Stacked).
+const QUALITY: &str = "CORDIAL_QUALITY";
 
 /// What earlier versions wrote into the profile's flags.json, taken back out.
 /// The frame-rate target there would outrank one set anywhere else; the
@@ -125,11 +128,28 @@ pub fn without_legacy_low_power_flags(flags: &Map<String, Value>) -> Map<String,
     flags
 }
 
-/// `env` with the low-power values in place of any the settings gave, for a
-/// client in a macro-ready window or not.
-pub fn with_low_power(env: Vec<(String, String)>, nested: bool) -> Vec<(String, String)> {
-    let env = replaced(env, &LOW_POWER_ENV);
-    if nested { env } else { replaced(env, &[(FPS_CAP, UNREACHED_LOW_POWER_FPS_CAP)]) }
+/// `env` for a client at `level`, its values in place of any the settings
+/// gave. High and Max run at `display_hz`, the monitor's refresh rate; with
+/// none known the engine reads the display itself, which inside a cage is
+/// the cage's.
+pub fn with_performance(
+    env: Vec<(String, String)>,
+    level: Performance,
+    display_hz: Option<u32>,
+) -> Vec<(String, String)> {
+    let mut env = match level {
+        Performance::Low => replaced(env, &LOW_ENV),
+        Performance::Medium => replaced(env, &MEDIUM_ENV),
+        Performance::High | Performance::Max => env,
+    };
+    env.retain(|(k, _)| k != FPS_CAP && k != QUALITY);
+    if let Some(cap) = level.fps_cap(display_hz).filter(|c| valid_fps_cap(&u64::from(*c))) {
+        env.push((FPS_CAP.to_owned(), cap.to_string()));
+    }
+    if let Some(preset) = level.flag_preset() {
+        env.push((QUALITY.to_owned(), preset.to_owned()));
+    }
+    env
 }
 
 /// A macro-ready client's presents never wait on its display. Its cage is a
@@ -138,11 +158,11 @@ pub fn with_low_power(env: Vec<(String, String)>, nested: bool) -> Vec<(String, 
 /// out of view. A FIFO-paced engine waits for each of those frames before it
 /// runs on, so the game -- and the macro playing into it -- all but stopped
 /// whenever its window was out of sight. MAILBOX hands each frame over and
-/// carries on. A low-power client stays as light: its frame cap, which the
-/// engine keeps itself, is what holds it to 20 a second.
+/// carries on. A Low client stays as light: its frame cap, which the engine
+/// keeps itself, is what holds it to 10 a second.
 pub const NESTED_ENV: [(&str, &str); 1] = [("CORDIAL_PRESENT_MODE", "mailbox")];
 
-/// `env` for a client in a macro-ready window, after any low-power values.
+/// `env` for a client in a macro-ready window, after its performance level.
 pub fn with_nested(env: Vec<(String, String)>) -> Vec<(String, String)> {
     replaced(env, &NESTED_ENV)
 }
@@ -249,43 +269,56 @@ mod tests {
         assert_eq!(env(&defaults), pairs(&[("CORDIAL_SECRET_STORE", "keyring")]));
     }
 
+    fn value<'a>(env: &'a [(String, String)], key: &str) -> Vec<&'a str> {
+        env.iter().filter(|(k, _)| k == key).map(|(_, v)| v.as_str()).collect()
+    }
+
     #[test]
-    fn low_power_replaces_what_the_settings_chose() {
+    fn low_replaces_what_the_settings_chose() {
         let chosen = env(&map(json!({"throttle": "visible", "fps_cap": 144})));
         assert_eq!(
-            with_low_power(chosen.clone(), true),
+            with_performance(chosen, Performance::Low, Some(144)),
             pairs(&[
                 ("CORDIAL_SECRET_STORE", "keyring"),
                 ("CORDIAL_THROTTLE", "unfocused"),
                 ("CORDIAL_PRESENT_MODE", "fifo"),
                 ("CORDIAL_GAMEMODE", "0"),
-                ("CORDIAL_FPS_CAP", "20"),
                 ("CORDIAL_POLL_COALESCE_US", "2000"),
+                ("CORDIAL_FPS_CAP", "10"),
+                ("CORDIAL_QUALITY", "low"),
             ])
         );
-        let caps: Vec<String> = with_low_power(chosen, false)
-            .into_iter()
-            .filter(|(k, _)| k == "CORDIAL_FPS_CAP")
-            .map(|(_, v)| v)
-            .collect();
-        assert_eq!(caps, ["10"], "no macro reaches it, so no macro's timing holds it at 20");
     }
 
     #[test]
-    fn a_macro_ready_client_never_waits_on_its_display_even_low_power() {
+    fn each_level_has_its_frame_cap_and_graphics() {
+        let chosen = env(&map(json!({"present_mode": "mailbox", "fps_cap": 30})));
+        let at = |level| with_performance(chosen.clone(), level, Some(165));
+        let medium = at(Performance::Medium);
+        assert_eq!(value(&medium, "CORDIAL_FPS_CAP"), ["60"]);
+        assert_eq!(value(&medium, "CORDIAL_QUALITY"), ["medium"]);
+        assert_eq!(value(&medium, "CORDIAL_PRESENT_MODE"), ["mailbox"], "not tied to the display");
+        let high = at(Performance::High);
+        assert_eq!(value(&high, "CORDIAL_FPS_CAP"), ["165"], "the monitor's, over the setting");
+        assert!(value(&high, "CORDIAL_QUALITY").is_empty(), "the game's own graphics");
+        assert!(value(&high, "CORDIAL_THROTTLE").is_empty());
+        let max = at(Performance::Max);
+        assert_eq!(value(&max, "CORDIAL_FPS_CAP"), ["165"]);
+        assert_eq!(value(&max, "CORDIAL_QUALITY"), ["max"]);
+        let unknown = with_performance(chosen.clone(), Performance::High, None);
+        assert!(value(&unknown, "CORDIAL_FPS_CAP").is_empty(), "left to the engine to read");
+    }
+
+    #[test]
+    fn a_macro_ready_client_never_waits_on_its_display_even_low() {
         let fifo = env(&map(json!({"present_mode": "fifo"})));
         assert_eq!(
             with_nested(fifo),
             pairs(&[("CORDIAL_SECRET_STORE", "keyring"), ("CORDIAL_PRESENT_MODE", "mailbox")])
         );
-        let low = with_nested(with_low_power(env(&map(json!({}))), true));
-        let present: Vec<&str> = low
-            .iter()
-            .filter(|(k, _)| k == "CORDIAL_PRESENT_MODE")
-            .map(|(_, v)| v.as_str())
-            .collect();
-        assert_eq!(present, ["mailbox"]);
-        assert!(low.contains(&("CORDIAL_FPS_CAP".to_owned(), "20".to_owned())), "still capped");
+        let low = with_nested(with_performance(env(&map(json!({}))), Performance::Low, None));
+        assert_eq!(value(&low, "CORDIAL_PRESENT_MODE"), ["mailbox"]);
+        assert_eq!(value(&low, "CORDIAL_FPS_CAP"), ["10"], "still capped");
     }
 
     #[test]

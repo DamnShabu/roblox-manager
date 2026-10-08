@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Condvar, Mutex};
 
 use super::*;
+use crate::cordial::Performance;
 use crate::cordial::process::recording::Recording;
 use crate::keyring::MemorySecrets;
 use crate::paths::Paths;
@@ -353,7 +354,8 @@ fn no_build_is_an_error_and_nothing_starts() {
 fn a_started_client_gets_its_accounts_options() {
     let w = world(1, &[], &[]);
     let mut req = request(&[1], Mode::Each, Some("77"), None);
-    req.accounts[0].opts = ClientOpts { nested: true, low_power: true };
+    req.accounts[0].opts =
+        ClientOpts { nested: true, performance: Performance::Low, display_hz: None };
     w.launch(req);
     let argv = &w.runner.spawned()[0].0;
     assert_eq!(&argv[..2], ["cage", "--"]);

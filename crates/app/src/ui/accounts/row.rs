@@ -9,7 +9,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{Align, gdk, gio, glib};
 use rbxmgr_core::accounts::{Account, relative_time};
-use rbxmgr_core::cordial::Window as ClientWindow;
+use rbxmgr_core::cordial::{Performance, Window as ClientWindow};
 use rbxmgr_core::types::UserId;
 
 use crate::state::Chip;
@@ -74,10 +74,15 @@ pub fn account_row(w: &Window, acct: &Account) -> adw::ActionRow {
     if !note.is_empty() {
         row.add_suffix(&icon("text-x-generic-symbolic").css("dimmed").tip(note));
     }
-    if acct.low_power {
-        row.add_suffix(
-            &icon("power-profile-power-saver-symbolic").css("dimmed").tip("Low-power client"),
-        );
+    let tip = format!("Performance: {}", acct.performance().label());
+    match acct.performance() {
+        Performance::Low | Performance::Medium => {
+            row.add_suffix(&icon("power-profile-power-saver-symbolic").css("dimmed").tip(&tip));
+        }
+        Performance::High => {}
+        Performance::Max => {
+            row.add_suffix(&icon("power-profile-performance-symbolic").css("dimmed").tip(&tip));
+        }
     }
     let failure = Btn::new("flat circular error")
         .icon("dialog-warning-symbolic")
