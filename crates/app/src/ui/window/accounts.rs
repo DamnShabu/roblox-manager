@@ -416,9 +416,19 @@ impl Window {
                 ];
                 steps.into_iter().filter_map(Result::err).collect::<Vec<_>>()
             },
-            move |w, errors| {
-                for e in errors {
+            move |w, errors: Vec<String>| {
+                for e in &errors {
                     w.log(&format!("{label}: could not finish removing it: {e}"));
+                }
+                // Removing promised its session leaves the keyring: a part
+                // that did not happen is said where it is seen, not only
+                // in the log.
+                if !errors.is_empty() {
+                    w.toast_with(
+                        &format!("{label} was removed, but not everything of it went"),
+                        "Details",
+                        crate::ui::activity::open_log,
+                    );
                 }
             },
         );
