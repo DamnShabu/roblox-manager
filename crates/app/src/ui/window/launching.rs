@@ -259,7 +259,7 @@ impl Window {
             LaunchRequest { accounts, mode, place: place.clone(), server, stop: stop.clone() };
         let (launcher, log) = (self.services().launcher.clone(), self.logger());
         self.run_task(
-            move || launcher.launch(request, &|l| log.line(l)),
+            crate::worker::catching(move || launcher.launch(request, &|l| log.line(l))),
             move |w, result| {
                 {
                     let mut s = w.state_mut();
@@ -268,7 +268,7 @@ impl Window {
                         s.launching.remove(id);
                     }
                     s.joining.retain(|id| !joining.contains(id));
-                    if let Ok(report) = &result {
+                    if let Ok(Ok(report)) = &result {
                         let now = chrono::Utc::now();
                         for id in &report.expired {
                             s.accounts.end_check(*id, Some(false), now);
@@ -288,8 +288,13 @@ impl Window {
                     }
                 }
                 match result {
-                    Ok(report) => w.tell_report(&report),
-                    Err(e) => {
+                    Ok(Ok(report)) => w.tell_report(&report),
+                    Err(crashed) => {
+                        w.surface();
+                        w.log(&format!("Launch failed: {crashed}"));
+                        w.toast_with("The launch stopped short", "Details", activity::open_log);
+                    }
+                    Ok(Err(e)) => {
                         w.surface();
                         w.log(&format!("Launch failed: {e}"));
                         w.toast_with(

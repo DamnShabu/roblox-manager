@@ -284,8 +284,9 @@ impl Window {
         let mine = stop.clone();
         let progress = self.show_progress(id, &stop);
         let weak = self.weak();
+        let run_name = format!("{label}: {name}");
         worker::run(
-            move || {
+            worker::catching(move || {
                 // Only a client seen gone ends the run. Not being able to
                 // list the clients -- pgrep slow with thirty of them up -- is
                 // no sign this one went, and its display says if it did.
@@ -338,9 +339,12 @@ impl Window {
                         Some(why)
                     }
                 }
-            },
-            move |failed: Option<String>| {
+            }),
+            move |failed: Result<Option<String>, worker::Crashed>| {
                 let Some(w) = weak.upgrade() else { return };
+                // A crashed run is over as surely as a failed one.
+                let failed = failed
+                    .unwrap_or_else(|crashed| Some(format!("{run_name} stopped -- {crashed}")));
                 let mut s = w.state_mut();
                 // Only this run's entry: a newer run may have replaced it.
                 if s.macro_runs.get(&id).is_some_and(|(flag, _)| flag.same_as(&mine)) {
