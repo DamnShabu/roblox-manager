@@ -155,12 +155,7 @@ impl Window {
             let a = &s.accounts;
             a.groups().iter().find(|g| g.id == gid).and_then(|g| {
                 let place = g.place_id.clone()?;
-                let ids: Vec<UserId> = a
-                    .visual_order()
-                    .iter()
-                    .filter(|x| a.group_of(x) == Some(gid))
-                    .map(|x| x.user_id)
-                    .collect();
+                let ids: Vec<UserId> = a.group_members(gid).iter().map(|x| x.user_id).collect();
                 let name = if g.name.is_empty() { "group".to_owned() } else { g.name.clone() };
                 let game = g.game.clone().unwrap_or_else(|| place.to_string());
                 Some((ids, place, name, game))
@@ -354,24 +349,18 @@ impl Window {
 
     /// A group header's Shut down: every member's client at once.
     pub fn stop_group(&self, gid: &str) {
-        let found = {
+        // Its members as drawn: the leader keeps its group but is not one of
+        // them, and stopping the group must not stop the leader.
+        let (found, ids) = {
             let s = self.state();
             let a = &s.accounts;
-            a.groups().iter().find(|g| g.id == gid).map(|g| {
+            let ids: Vec<UserId> = a.group_members(gid).iter().map(|x| x.user_id).collect();
+            let found = a.groups().iter().find(|g| g.id == gid).map(|g| {
                 let name = if g.name.is_empty() { "group".to_owned() } else { g.name.clone() };
-                let members: HashSet<Profile> = a
-                    .accounts()
-                    .iter()
-                    .filter(|x| a.group_of(x) == Some(gid))
-                    .map(|x| Profile::of(x.user_id))
-                    .collect();
+                let members: HashSet<Profile> = ids.iter().map(|id| Profile::of(*id)).collect();
                 (name, members)
-            })
-        };
-        let ids: Vec<UserId> = {
-            let s = self.state();
-            let a = &s.accounts;
-            a.accounts().iter().filter(|x| a.group_of(x) == Some(gid)).map(|x| x.user_id).collect()
+            });
+            (found, ids)
         };
         if self.state().stop_launches(Some(&ids)) > 0 {
             self.log("Stopping the launch under way");

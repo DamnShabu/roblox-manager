@@ -205,7 +205,7 @@ impl Window {
             let s = self.state();
             let a = &s.accounts;
             a.groups().iter().find(|g| g.id == gid).map(|g| {
-                let n = a.accounts().iter().filter(|x| a.group_of(x) == Some(gid)).count();
+                let n = a.group_members(gid).len();
                 (if g.name.is_empty() { "Untitled group".to_owned() } else { g.name.clone() }, n)
             })
         }) else {
