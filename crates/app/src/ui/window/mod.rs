@@ -346,7 +346,7 @@ impl Window {
         let profiles = self.0.services.profiles.clone();
         let weak = self.weak();
         worker::run(
-            move || {
+            worker::catching(move || {
                 let live = profiles.running().map_err(|e| e.to_string())?;
                 let running: HashSet<UserId> =
                     ids.into_iter().filter(|id| live.contains(&Profile::of(*id))).collect();
@@ -357,10 +357,12 @@ impl Window {
                     .filter_map(|id| Some((*id, profiles.window(&Profile::of(*id)).ok()??)))
                     .collect();
                 Ok((running, windows))
-            },
-            move |found: Result<_, String>| {
+            }),
+            move |found: Result<Result<_, String>, worker::Crashed>| {
                 let Some(w) = weak.upgrade() else { return };
+                // Back on even after a crash, or no row would update again.
                 w.0.polling.set(false);
+                let found = found.unwrap_or_else(|crashed| Err(crashed.to_string()));
                 // Said once when it starts failing and once when it is back,
                 // not every two seconds: a pgrep that cannot run otherwise
                 // leaves every row looking stopped with no hint why.

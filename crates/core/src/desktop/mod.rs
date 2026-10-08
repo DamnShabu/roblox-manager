@@ -177,14 +177,15 @@ fn exec_arg(path: &str) -> String {
     arg.replace('\\', "\\\\").replace('%', "%%")
 }
 
+/// [`crate::json_file::write_bytes`]: synced, so a power cut after Claim
+/// cannot leave an empty `mimeapps.list` that loses every default app the
+/// user set, not only Roblox's. A symlinked file (home-manager, stow) is
+/// written through to what it points at, rather than replaced by a copy
+/// that the tool owning the link then refuses to overwrite.
 fn write_atomically(path: &Path, text: &str) -> io::Result<()> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    fs::write(&tmp, text)?;
-    fs::rename(&tmp, path)
+    let linked = fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink());
+    let target = if linked { fs::canonicalize(path)? } else { path.to_owned() };
+    crate::json_file::write_bytes(&target, text.as_bytes())
 }
 
 #[cfg(test)]

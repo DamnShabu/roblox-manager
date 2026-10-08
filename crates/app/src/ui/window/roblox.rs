@@ -42,12 +42,13 @@ impl Window {
                     Err(e) => log.line(format!("Could not load account pictures: {e}")),
                 }
                 let mut fresh: Vec<(UserId, Vec<Game>)> = Vec::new();
-                for (id, label) in accounts {
-                    let got = keyring.cookie(&label).map_err(|e| e.to_string()).and_then(|c| {
-                        roblox.favorites(&c, id, FAVORITES_SHOWN).map_err(|e| e.to_string())
+                let cookies = keyring.cookies(accounts.iter().map(|(_, label)| label));
+                for ((id, label), cookie) in accounts.iter().zip(cookies) {
+                    let got = cookie.map_err(|e| e.to_string()).and_then(|c| {
+                        roblox.favorites(&c, *id, FAVORITES_SHOWN).map_err(|e| e.to_string())
                     });
                     match got {
-                        Ok(games) => fresh.push((id, games)),
+                        Ok(games) => fresh.push((*id, games)),
                         // One account failing must not blank the bar: its
                         // last-known favourites stay in the merge.
                         Err(e) => log.line(format!("Could not load {label}'s favourites: {e}")),
@@ -108,14 +109,12 @@ impl Window {
             (self.services().keyring.clone(), self.services().roblox.clone(), self.logger());
         self.run_task(
             move || {
+                let cookies = keyring.cookies(accounts.iter().map(|(_, label)| label));
                 accounts
-                    .into_iter()
-                    .map(|(id, label)| {
-                        let verdict = match keyring
-                            .cookie(&label)
-                            .map_err(|e| e.to_string())
-                            .map(|c| roblox.whoami(&c))
-                        {
+                    .iter()
+                    .zip(cookies)
+                    .map(|(&(id, ref label), cookie)| {
+                        let verdict = match cookie.map(|c| roblox.whoami(&c)) {
                             Ok(Ok(_)) => Some(true),
                             Ok(Err(RobloxError::Expired)) => {
                                 log.line(format!("{label}: session expired -- sign in again"));

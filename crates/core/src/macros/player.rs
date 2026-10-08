@@ -70,6 +70,10 @@ pub struct Held<'a> {
     /// presses nor lets go of them: they stay down through it, as its
     /// help says, rather than being let go of by its first tap of one.
     outer: Vec<u16>,
+    /// Keys a hold, tap, type or click has down through its wait. Not
+    /// `down`: the step lets go of them itself when the wait ends. Kept
+    /// here so a `when` that plays in that wait leaves them down too.
+    holding: Vec<u16>,
 }
 
 impl Held<'_> {
@@ -166,10 +170,16 @@ impl Held<'_> {
         self.release_all(input)
     }
 
-    /// Whether `code` is already down, by a Press or by the steps a `when`
-    /// broke into.
+    /// Whether `code` is already down, by a Press, by the step waiting
+    /// now, or by the steps a `when` broke into.
     fn holds(&self, code: u16) -> bool {
-        self.down.contains(&code) || self.outer.contains(&code)
+        self.down.contains(&code) || self.holding.contains(&code) || self.outer.contains(&code)
+    }
+
+    /// Every key down for any reason: what a `when` that breaks in now
+    /// must leave alone.
+    fn all_down(&self) -> Vec<u16> {
+        self.down.iter().chain(&self.holding).chain(&self.outer).copied().collect()
     }
 
     fn press(&mut self, input: &mut dyn Input, codes: &[u16]) -> io::Result<()> {
@@ -472,7 +482,10 @@ fn glide(
     };
     let ticks = (secs / GLIDE_TICK).round().max(1.0) as u32;
     let start = held.on_time();
-    let along = |a: i32, b: i32, t: f64| (f64::from(a) + f64::from(b - a) * t).round() as i32;
+    // In f64: relative moves can leave the last point anywhere in i32,
+    // where `b - a` overflows.
+    let along =
+        |a: i32, b: i32, t: f64| (f64::from(a) + (f64::from(b) - f64::from(a)) * t).round() as i32;
     for tick in 1..=ticks {
         let t = f64::from(tick) / f64::from(ticks);
         let due = start + Duration::from_secs_f64(secs * t);
@@ -517,7 +530,10 @@ fn press(
         }
     }
     if result.is_ok() {
+        let mark = held.holding.len();
+        held.holding.extend_from_slice(&down);
         result = held.idle(input, secs, stop, pick).map(|_| ());
+        held.holding.truncate(mark);
     }
     for &code in down.iter().rev() {
         let released = send(input, code, false);

@@ -22,6 +22,35 @@ pub fn run<T: Send + 'static>(
     });
 }
 
+/// Work that panicked instead of returning, and what the panic said.
+#[derive(Debug)]
+pub struct Crashed(String);
+
+impl std::fmt::Display for Crashed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "it crashed ({})", self.0)
+    }
+}
+
+/// `work` with a panic caught and handed back as [`Crashed`]. For work
+/// whose completion undoes state the UI set up for it: a panic otherwise
+/// drops the completion unrun, and leaves a launch's rows on "Starting…"
+/// or the running-clients poll switched off for good.
+pub fn catching<T>(work: impl FnOnce() -> T + Send) -> impl FnOnce() -> Result<T, Crashed> + Send {
+    move || {
+        // Nothing the work shares with the main loop is left half-changed:
+        // it hands its result back, and a crash hands back none.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(work)).map_err(|panic| {
+            let said = panic
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_owned())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "no message".to_owned());
+            Crashed(said)
+        })
+    }
+}
+
 /// Activity lines from any thread, shown by the main loop in order.
 #[derive(Clone)]
 pub struct Logger(async_channel::Sender<String>);
@@ -64,12 +93,20 @@ mod tests {
     }
 
     #[test]
-    fn a_result_comes_back_on_the_main_loop() {
+    fn a_result_or_a_crash_comes_back_on_the_main_loop() {
         let ctx = glib::MainContext::default();
         let _owner = ctx.acquire().unwrap();
         let got = Rc::new(Cell::new(0));
         let seen = got.clone();
         run(|| 41 + 1, move |n| seen.set(n));
         assert!(until(|| got.get() == 42), "never delivered");
+        // One test owns the default main context: a second would race it.
+        let crashed = Rc::new(std::cell::RefCell::new(None));
+        let seen = crashed.clone();
+        run(catching(|| -> u32 { panic!("boom") }), move |r: Result<u32, Crashed>| {
+            *seen.borrow_mut() = Some(r.map_err(|e| e.to_string()));
+        });
+        assert!(until(|| crashed.borrow().is_some()), "a crash never delivered");
+        assert_eq!(*crashed.borrow(), Some(Err("it crashed (boom)".into())));
     }
 }

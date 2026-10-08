@@ -205,7 +205,7 @@ impl Window {
             let s = self.state();
             let a = &s.accounts;
             a.groups().iter().find(|g| g.id == gid).map(|g| {
-                let n = a.accounts().iter().filter(|x| a.group_of(x) == Some(gid)).count();
+                let n = a.group_members(gid).len();
                 (if g.name.is_empty() { "Untitled group".to_owned() } else { g.name.clone() }, n)
             })
         }) else {
@@ -416,9 +416,19 @@ impl Window {
                 ];
                 steps.into_iter().filter_map(Result::err).collect::<Vec<_>>()
             },
-            move |w, errors| {
-                for e in errors {
+            move |w, errors: Vec<String>| {
+                for e in &errors {
                     w.log(&format!("{label}: could not finish removing it: {e}"));
+                }
+                // Removing promised its session leaves the keyring: a part
+                // that did not happen is said where it is seen, not only
+                // in the log.
+                if !errors.is_empty() {
+                    w.toast_with(
+                        &format!("{label} was removed, but not everything of it went"),
+                        "Details",
+                        crate::ui::activity::open_log,
+                    );
                 }
             },
         );

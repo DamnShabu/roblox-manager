@@ -42,9 +42,34 @@ impl Ord for Version {
                 (None, None) => Ordering::Equal,
                 (None, Some(_)) => Ordering::Greater,
                 (Some(_), None) => Ordering::Less,
-                (Some(a), Some(b)) => a.cmp(b),
+                (Some(a), Some(b)) => pre_release(a, b),
             }
         })
+    }
+}
+
+/// Two pre-releases, as semver orders them: identifier by identifier,
+/// numbers as numbers and before words, and a shorter list first when the
+/// rest are equal. As text `rc.10` came before `rc.9`.
+fn pre_release(a: &str, b: &str) -> Ordering {
+    let (mut a, mut b) = (a.split('.'), b.split('.'));
+    loop {
+        match (a.next(), b.next()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) => {
+                let order = match (x.parse::<u64>(), y.parse::<u64>()) {
+                    (Ok(x), Ok(y)) => x.cmp(&y),
+                    (Ok(_), Err(_)) => Ordering::Less,
+                    (Err(_), Ok(_)) => Ordering::Greater,
+                    (Err(_), Err(_)) => x.cmp(y),
+                };
+                if order.is_ne() {
+                    return order;
+                }
+            }
+        }
     }
 }
 
@@ -73,6 +98,10 @@ mod tests {
         assert!(!is_newer("0.3.0-rc.1", "0.3.0"));
         assert!(is_newer("0.3.0-rc.2", "0.3.0-rc.1"));
         assert!(is_newer("0.3.0-rc.1", "0.2.9"));
+        assert!(is_newer("0.3.0-rc.10", "0.3.0-rc.9"), "numbers as numbers");
+        assert!(is_newer("0.3.0-rc.1", "0.3.0-rc"), "a longer list after a shorter");
+        assert!(is_newer("0.3.0-rc", "0.3.0-1"), "words after numbers");
+        assert!(is_newer("0.3.0-beta", "0.3.0-alpha"));
     }
 
     #[test]

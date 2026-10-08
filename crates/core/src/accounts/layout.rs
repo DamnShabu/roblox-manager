@@ -69,6 +69,13 @@ impl AccountStore {
         self.groups.iter().find(|g| g.id == id).map(|g| g.id.as_str())
     }
 
+    /// A group's members as drawn under it, in list order. The leader keeps
+    /// its group (see [`AccountStore::make_leader`]) but is drawn, launched
+    /// and stopped as the leader, never as one of the group.
+    pub fn group_members(&self, gid: &str) -> Vec<&Account> {
+        self.accounts.iter().filter(|a| !a.leader && self.group_of(a) == Some(gid)).collect()
+    }
+
     /// Everyone but the leader, as drawn: group by group, then the
     /// ungrouped, each in list order.
     pub fn visual_order(&self) -> Vec<&Account> {
@@ -217,6 +224,19 @@ mod tests {
         assert_eq!(names(s.followers()), ["alt2", "alt4"]);
         s.migrate_layout();
         assert_eq!(names(s.followers()), ["alt2", "alt4"], "it only happens once");
+    }
+
+    #[test]
+    fn a_leader_keeps_its_group_but_is_not_one_of_its_members() {
+        let mut s = store(&[("a", true), ("b", true), ("c", true)], &[("g", "G")]);
+        for id in [1, 2] {
+            s.set_group(UserId(id), Some("g")).unwrap();
+        }
+        s.make_leader(UserId(1));
+        assert_eq!(s.get(UserId(1)).unwrap().group.as_deref(), Some("g"));
+        assert_eq!(names(s.group_members("g")), ["b"]);
+        s.make_leader(UserId(3));
+        assert_eq!(names(s.group_members("g")), ["a", "b"], "back in it once another leads");
     }
 
     #[test]

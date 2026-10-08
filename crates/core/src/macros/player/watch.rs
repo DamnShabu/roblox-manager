@@ -266,7 +266,8 @@ impl When<'_> {
             }
             let when = when::describe(&h.when);
             outer.repeats.let_go_now(input)?;
-            let mut held = Held { outer: outer.down.clone(), ..Held::default() };
+            // From where the steps left the pointer, so a glide glides.
+            let mut held = Held { outer: outer.all_down(), at: outer.at, ..Held::default() };
             let mut result = Ok(());
             for step in &h.steps {
                 if stop.is_set() || result.is_err() || held.exiting {
@@ -279,6 +280,8 @@ impl When<'_> {
                 };
             }
             let let_go = held.release_all(input);
+            // Where it left the pointer is where the steps carry on from.
+            outer.at = held.at;
             result.and(let_go)?;
             if held.exiting {
                 return Ok(true);

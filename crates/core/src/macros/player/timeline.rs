@@ -3,6 +3,7 @@
 //! timeline's start, and sent then -- all against one clock, so a step
 //! never waits on the one before it and nothing drifts.
 
+use std::collections::BTreeMap;
 use std::io;
 use std::time::Duration;
 
@@ -18,10 +19,16 @@ struct Due {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Send {
-    /// Let go first when due at the same moment as a press: a key held
-    /// again straight after is let go of and pressed, not the other way.
+    /// A hold's or click's end. Let go first when due at the same moment
+    /// as a press: a key held again straight after is let go of and
+    /// pressed, not the other way.
     Up(u16),
+    /// A hold or click starting.
     Down(u16),
+    /// A `release` step: lets go of the key, whoever pressed it.
+    Release(u16),
+    /// A `press` step: the key stays down after the timeline.
+    Press(u16),
     MoveTo(i32, i32),
     Motion(f64, f64),
     Scroll(bool, i32),
@@ -29,7 +36,7 @@ enum Send {
 
 impl Send {
     fn order(&self) -> u8 {
-        u8::from(!matches!(self, Send::Up(_)))
+        u8::from(!matches!(self, Send::Up(_) | Send::Release(_)))
     }
 }
 
@@ -47,13 +54,41 @@ pub(super) fn play(
     let start = held.on_time();
     let (dues, left_at) = schedule(items, held.at, pick);
     let end = dues.last().map_or(0.0, |d| d.t).max(secs);
+    // How many of this timeline's holds have each key down. A hold's end
+    // lets go only of what a hold here pressed, and only once the last
+    // one holding it ends: a key a `press` before the timeline holds stays
+    // down, as the same hold outside a timeline leaves it.
+    let mut holding: BTreeMap<u16, u32> = BTreeMap::new();
     for due in dues {
         if held.idle_until(input, start + after(due.t), stop, pick)? {
             return Ok(());
         }
         match due.what {
-            Send::Down(code) => held.press(input, &[code])?,
-            Send::Up(code) => held.release(input, &[code])?,
+            Send::Down(code) => match holding.get_mut(&code) {
+                Some(n) => *n += 1,
+                None if held.holds(code) => {}
+                None => {
+                    held.press(input, &[code])?;
+                    holding.insert(code, 1);
+                }
+            },
+            Send::Up(code) => {
+                if let Some(n) = holding.get_mut(&code) {
+                    *n -= 1;
+                    if *n == 0 {
+                        holding.remove(&code);
+                        held.release(input, &[code])?;
+                    }
+                }
+            }
+            Send::Press(code) => {
+                holding.remove(&code);
+                held.press(input, &[code])?;
+            }
+            Send::Release(code) => {
+                holding.remove(&code);
+                held.release(input, &[code])?;
+            }
             Send::MoveTo(x, y) => {
                 input.move_to(x, y)?;
                 held.at = Some((x, y));
@@ -91,8 +126,8 @@ fn schedule(
                 keys.iter().for_each(|&k| put(t, Send::Down(k)));
                 keys.iter().rev().for_each(|&k| put(end, Send::Up(k)));
             }
-            Step::Press(codes) => codes.iter().for_each(|&k| put(t, Send::Down(k))),
-            Step::Release(codes) => codes.iter().for_each(|&k| put(t, Send::Up(k))),
+            Step::Press(codes) => codes.iter().for_each(|&k| put(t, Send::Press(k))),
+            Step::Release(codes) => codes.iter().for_each(|&k| put(t, Send::Release(k))),
             Step::Click { button, at: point } => {
                 if let Some((x, y)) = *point {
                     put(t, Send::MoveTo(x, y));
@@ -148,7 +183,9 @@ fn glide(points: &[(f64, i32, i32)], t: f64, put: &mut impl FnMut(f64, Send)) {
         let ticks = ((tb - ta) / GLIDE_TICK).round().max(1.0) as u32;
         for tick in 1..=ticks {
             let f = f64::from(tick) / f64::from(ticks);
-            let along = |a: i32, b: i32| (f64::from(a) + f64::from(b - a) * f).round() as i32;
+            // In f64: `b - a` overflows i32 for a start far off the display.
+            let along =
+                |a: i32, b: i32| (f64::from(a) + (f64::from(b) - f64::from(a)) * f).round() as i32;
             let p = (along(xa, xb), along(ya, yb));
             if p != last {
                 put(t + ta + (tb - ta) * f, Send::MoveTo(p.0, p.1));
