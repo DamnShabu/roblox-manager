@@ -130,3 +130,18 @@ fn exec_paths_are_quoted_and_escaped_as_the_spec_asks() {
     assert_eq!(exec_arg("/a/$x"), "\"/a/\\\\$x\"");
     assert_eq!(exec_arg("/a/100%"), "/a/100%%");
 }
+
+#[test]
+fn a_symlinked_mimeapps_list_is_written_through_not_replaced() {
+    let w = world();
+    let real = w.root.join("dotfiles/mimeapps.list");
+    fs::create_dir_all(real.parent().unwrap()).unwrap();
+    fs::write(&real, "[Default Applications]\ntext/html=firefox.desktop\n").unwrap();
+    fs::create_dir_all(w.paths.mimeapps().parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&real, w.paths.mimeapps()).unwrap();
+    w.handler(Install::Flatpak).claim().unwrap();
+    assert!(fs::symlink_metadata(w.paths.mimeapps()).unwrap().file_type().is_symlink());
+    let text = fs::read_to_string(&real).unwrap();
+    assert!(text.contains("text/html=firefox.desktop"), "{text}");
+    assert!(text.contains("x-scheme-handler/roblox=io.github.mujo.RobloxManager.desktop;"));
+}
