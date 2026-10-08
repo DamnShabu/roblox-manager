@@ -482,7 +482,10 @@ fn glide(
     };
     let ticks = (secs / GLIDE_TICK).round().max(1.0) as u32;
     let start = held.on_time();
-    let along = |a: i32, b: i32, t: f64| (f64::from(a) + f64::from(b - a) * t).round() as i32;
+    // In f64: relative moves can leave the last point anywhere in i32,
+    // where `b - a` overflows.
+    let along =
+        |a: i32, b: i32, t: f64| (f64::from(a) + (f64::from(b) - f64::from(a)) * t).round() as i32;
     for tick in 1..=ticks {
         let t = f64::from(tick) / f64::from(ticks);
         let due = start + Duration::from_secs_f64(secs * t);

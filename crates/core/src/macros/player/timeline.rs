@@ -183,7 +183,9 @@ fn glide(points: &[(f64, i32, i32)], t: f64, put: &mut impl FnMut(f64, Send)) {
         let ticks = ((tb - ta) / GLIDE_TICK).round().max(1.0) as u32;
         for tick in 1..=ticks {
             let f = f64::from(tick) / f64::from(ticks);
-            let along = |a: i32, b: i32| (f64::from(a) + f64::from(b - a) * f).round() as i32;
+            // In f64: `b - a` overflows i32 for a start far off the display.
+            let along =
+                |a: i32, b: i32| (f64::from(a) + (f64::from(b) - f64::from(a)) * f).round() as i32;
             let p = (along(xa, xb), along(ya, yb));
             if p != last {
                 put(t + ta + (tb - ta) * f, Send::MoveTo(p.0, p.1));
