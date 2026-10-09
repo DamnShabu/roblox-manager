@@ -23,6 +23,8 @@ in
         ./packaging/flatpak/io.github.mujo.RobloxManager.yml
         ./.github/workflows/release.yml
         ./packaging/linux/build.sh
+        # The app's mark, built into it (crates/app/src/ui/icons.rs).
+        ./packaging/icons/roblox-manager.svg
       ];
     };
     cargoLock.lockFile = ./Cargo.lock;
