@@ -6,35 +6,24 @@ use rbxmgr_core::accounts::Account;
 use rbxmgr_core::types::{Label, PlaceId, Profile, User, UserId};
 
 use super::Window;
-use crate::ui::accounts::group::group_section;
 use crate::ui::accounts::group_settings::GroupSettings;
-use crate::ui::accounts::leader::{leader_section, placeholder};
-use crate::ui::accounts::row::account_row;
 use crate::ui::confirm;
+use crate::ui::ds;
 use crate::ui::login::AddAccountDialog;
-use crate::ui::widgets::{boxed_list, clear, plural, section_header, sentence};
+use crate::ui::table::band::group_band;
+use crate::ui::table::chain::launch_order;
+use crate::ui::table::row::account_row;
+use crate::ui::widgets::{Fluent, LabelFluent, clear, lbl, sentence};
 
 impl Window {
     pub fn refresh_accounts(&self) {
         self.0.rows.borrow_mut().clear();
         let ui = &self.0.ui;
-        clear(&ui.accounts_box);
-        let (leader, followers, groups, sections) = {
+        clear(&ui.table);
+        let (leader, followers, groups, sections, move_to) = {
             let s = self.state();
             let store = &s.accounts;
-            let group_name = |a: &Account| {
-                store
-                    .group_of(a)
-                    .and_then(|gid| store.groups().iter().find(|g| g.id == gid))
-                    .map_or_else(
-                        || "Ungrouped".to_owned(),
-                        |g| {
-                            if g.name.is_empty() { "Untitled group".into() } else { g.name.clone() }
-                        },
-                    )
-            };
-            let followers: Vec<(Account, String)> =
-                store.followers().into_iter().map(|a| (a.clone(), group_name(a))).collect();
+            let followers: Vec<Account> = store.followers().into_iter().cloned().collect();
             let visual = store.visual_order();
             let sections: Vec<Vec<Account>> = store
                 .groups()
@@ -42,46 +31,63 @@ impl Window {
                 .map(|g| Some(g.id.as_str()))
                 .chain([None])
                 .map(|gid| {
-                    visual
-                        .iter()
-                        .filter(|a| store.group_of(a) == gid)
-                        .map(|a| (*a).clone())
+                    // The leader heads its own group's rows.
+                    store
+                        .leader()
+                        .filter(|l| store.group_of(l) == gid)
+                        .into_iter()
+                        .chain(visual.iter().copied().filter(|a| store.group_of(a) == gid))
+                        .cloned()
                         .collect()
                 })
                 .collect();
             let empty = store.accounts().is_empty();
+            let move_to: Vec<(String, String)> = store
+                .groups()
+                .iter()
+                .map(|g| {
+                    let name =
+                        if g.name.is_empty() { "Untitled group".into() } else { g.name.clone() };
+                    (g.id.clone(), name)
+                })
+                .chain([(String::new(), "Ungrouped".to_owned())])
+                .collect();
             (
                 if empty { None } else { Some(store.leader().cloned()) },
                 followers,
                 store.groups().to_vec(),
                 sections,
+                move_to,
             )
         };
         let Some(leader) = leader else {
             ui.pages.set_visible_child_name("welcome");
-            ui.launch_bar.set_visible(false);
             self.refresh_launch_state();
+            // The one thing to do first: the sign-in is ready beside it.
+            if self.0.ui.panel.borrow().is_none() && self.seen() {
+                AddAccountDialog::open(self, None);
+            }
             return;
         };
         ui.pages.set_visible_child_name("accounts");
-        ui.launch_bar.set_visible(true);
+        ui.cmd.set_groups(&move_to, self.state().accounts.selected().len());
         if !self.state().filter.is_empty() {
-            ui.accounts_box.append(&self.search_results());
+            self.search_results();
             self.refresh_launch_state();
             return;
         }
-        ui.accounts_box.append(&leader_section(self, leader.as_ref(), &followers));
+        ui.table.append(&launch_order(self, leader.as_ref(), &followers));
         for (i, members) in sections.iter().enumerate() {
             let group = groups.get(i);
             if group.is_none() && members.is_empty() {
                 continue;
             }
-            ui.accounts_box.append(&group_section(self, group, members));
+            ui.table.append(&group_band(self, group, members));
         }
         self.refresh_launch_state();
     }
 
-    /// Search the accounts: `query` narrows the page to the ones it finds.
+    /// Search the accounts: `query` narrows the table to the ones it finds.
     pub fn set_filter(&self, query: &str) {
         let query = query.trim().to_lowercase();
         if self.state().filter == query {
@@ -91,26 +97,35 @@ impl Window {
         self.refresh_accounts();
     }
 
-    /// Open the search bar, or focus it when it is open.
+    /// Focus the search.
     pub fn start_search(&self) {
-        self.0.ui.search_bar.set_search_mode(true);
-        self.0.ui.search.grab_focus();
+        self.0.ui.top.search.grab_focus();
     }
 
-    /// The accounts the search finds, as one list.
-    fn search_results(&self) -> gtk::Box {
+    /// The accounts the search finds, as plain rows.
+    fn search_results(&self) {
         let found: Vec<Account> = {
             let s = self.state();
             s.matching().into_iter().filter_map(|id| s.accounts.get(id).cloned()).collect()
         };
-        let list = boxed_list();
+        let table = &self.0.ui.table;
         for a in &found {
-            list.append(&account_row(self, a));
+            table.append(&account_row(self, a));
         }
         if found.is_empty() {
-            list.append(&placeholder("system-search-symbolic", "No account matches that search."));
+            let empty = gtk::Box::new(gtk::Orientation::Vertical, 8).css("cx-empty");
+            empty.append(&lbl("No account matches that search", "cx-empty-t").xalign(0.5));
+            empty.append(
+                &lbl("Search looks at each account's name, Roblox user and note.", "").xalign(0.5),
+            );
+            let clear_it = ds::Button::new("Clear search", ds::Variant::Secondary, true)
+                .on(self.act(|w| {
+                    w.0.ui.top.search.set_text("");
+                }));
+            clear_it.button.set_halign(gtk::Align::Center);
+            empty.append(&clear_it.button);
+            table.append(&empty);
         }
-        vbox!(8, "", section_header(&plural(found.len(), "match", "matches"), None, &[]), list)
     }
 
     /// Save accounts.json and groups.json; a failure is shown, not lost.
@@ -178,6 +193,32 @@ impl Window {
         self.refresh_launch_state();
     }
 
+    /// Select every account, or none.
+    pub fn select_every(&self, on: bool) {
+        let ids: Vec<UserId> = self.state().accounts.accounts().iter().map(|a| a.user_id).collect();
+        self.select_accounts(&ids, on);
+    }
+
+    /// Select every account in a group.
+    pub fn select_group(&self, gid: &str) {
+        let ids: Vec<UserId> =
+            self.state().accounts.group_members(gid).iter().map(|a| a.user_id).collect();
+        self.select_accounts(&ids, true);
+    }
+
+    /// Move every selected account to a group ("" is Ungrouped).
+    pub fn move_selected(&self, gid: &str) {
+        let ids: Vec<UserId> = self.state().accounts.selected().iter().map(|a| a.user_id).collect();
+        for id in ids {
+            let refused =
+                self.state_mut().accounts.set_group(id, Some(gid).filter(|g| !g.is_empty()));
+            if let Err(e) = refused {
+                self.toast(&sentence(&e.to_string()));
+            }
+        }
+        self.changed();
+    }
+
     pub fn on_select_all(&self) {
         let (ids, every): (Vec<UserId>, bool) = {
             let s = self.state();
@@ -195,8 +236,12 @@ impl Window {
         GroupSettings::open(self, &gid);
     }
 
+    /// Delete group…: the confirmation under its band, or a dialog when
+    /// the band is not drawn.
     pub fn confirm_delete_group(&self, gid: &str) {
-        self.confirm_delete_group_then(gid, || {});
+        if !self.open_group_confirm(gid) {
+            self.confirm_delete_group_then(gid, || {});
+        }
     }
 
     /// Ask, then delete the group and run `after`.
@@ -360,8 +405,12 @@ impl Window {
         );
     }
 
+    /// Remove…: the confirmation under its row, or a dialog when the row
+    /// is not drawn.
     pub fn confirm_remove(&self, id: UserId) {
-        self.confirm_remove_then(id, || {});
+        if !self.open_confirm(id) {
+            self.confirm_remove_then(id, || {});
+        }
     }
 
     /// Ask, then remove the account and run `after`.

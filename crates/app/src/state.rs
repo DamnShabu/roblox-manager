@@ -65,6 +65,16 @@ impl Chip {
     }
 }
 
+/// What the inspector's Details tab is about, drawn current in the table.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Inspected {
+    Account(UserId),
+    Group(String),
+}
+
+/// How many recent targets the top bar offers.
+pub const RECENTS_SHOWN: usize = 4;
+
 /// One line of the activity log.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Activity {
@@ -121,6 +131,10 @@ pub struct AppState {
     pub restart_to: Option<String>,
     /// How many tasks are running; the window spins while any are.
     pub busy: u32,
+    /// What the inspector shows, when it is an account or a group.
+    pub inspected: Option<Inspected>,
+    /// The games picked this run, the latest first.
+    pub recent_places: Vec<PlaceId>,
 }
 
 /// What a macro's Run does, given what plays where.
@@ -160,6 +174,8 @@ impl AppState {
             available: Available::default(),
             restart_to: None,
             busy: 0,
+            inspected: None,
+            recent_places: Vec::new(),
         }
     }
 
@@ -304,6 +320,32 @@ impl AppState {
         Some(format!("Closing Roblox Manager stops {what}. Clients already running keep running."))
     }
 
+    /// The top bar's recent targets: the games picked this run, latest
+    /// first, then the favourites in their order, up to [`RECENTS_SHOWN`].
+    pub fn recents(&self) -> Vec<&Tile> {
+        let mut out: Vec<&Tile> = Vec::new();
+        let picked = self
+            .recent_places
+            .iter()
+            .filter_map(|p| self.game_list.iter().find(|t| &t.game.place_id == p));
+        for t in picked.chain(self.game_list.iter()) {
+            if out.len() == RECENTS_SHOWN {
+                break;
+            }
+            if !out.iter().any(|o| o.game.place_id == t.game.place_id) {
+                out.push(t);
+            }
+        }
+        out
+    }
+
+    /// Remember a game picked, for the recent targets.
+    pub fn picked(&mut self, place: &PlaceId) {
+        self.recent_places.retain(|p| p != place);
+        self.recent_places.insert(0, place.clone());
+        self.recent_places.truncate(RECENTS_SHOWN);
+    }
+
     /// Add an activity line; the log keeps the latest [`ACTIVITY_KEPT`].
     pub fn log(&mut self, time: String, line: String) {
         self.activity.insert(0, Activity { time, line });
@@ -439,6 +481,26 @@ mod tests {
         assert_eq!(s.macro_run("m"), MacroRun::Start(vec![UserId(2)]), "playing another macro");
         s.accounts.set_selected(&[UserId(1), UserId(2)], false);
         assert_eq!(s.macro_run("m"), MacroRun::Stop, "none selected: it can still be stopped");
+    }
+
+    #[test]
+    fn recent_targets_put_the_latest_pick_first_then_the_favourites() {
+        let (_d, mut s) = state();
+        let tile = |id: &str| Tile {
+            game: Game {
+                universe_id: id.into(),
+                place_id: PlaceId::parse(id).unwrap(),
+                name: id.into(),
+            },
+            icon: None,
+        };
+        s.game_list = ["1", "2", "3", "4", "5"].map(tile).to_vec();
+        let ids =
+            |s: &AppState| s.recents().iter().map(|t| t.game.name.clone()).collect::<Vec<_>>();
+        assert_eq!(ids(&s), ["1", "2", "3", "4"]);
+        s.picked(&PlaceId::parse("5").unwrap());
+        s.picked(&PlaceId::parse("3").unwrap());
+        assert_eq!(ids(&s), ["3", "5", "1", "2"]);
     }
 
     #[test]

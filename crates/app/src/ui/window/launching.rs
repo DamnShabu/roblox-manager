@@ -3,6 +3,8 @@
 
 use std::collections::HashSet;
 
+use adw::prelude::*;
+
 use rbxmgr_core::launch::{LaunchAccount, LaunchReport, LaunchRequest, Mode};
 use rbxmgr_core::roblox::FAVORITES_SHOWN;
 use rbxmgr_core::stop::StopFlag;
@@ -11,7 +13,6 @@ use rbxmgr_core::types::{PlaceId, Profile, ServerId, UserId};
 use super::Window;
 use crate::state::{Chip, FriendTarget, Tile};
 use crate::ui::activity;
-use crate::ui::friends::FriendsDialog;
 use crate::ui::widgets::plural;
 
 impl Window {
@@ -35,47 +36,54 @@ impl Window {
             let pick = s.place.clone().or_else(|| s.accounts.last_place().cloned());
             s.place = pick.filter(|p| s.game_list.iter().any(|t| &t.game.place_id == p));
         }
-        self.0.ui.games.draw(&self.state());
+        self.draw_target();
         self.refresh_launch_state();
+    }
+
+    /// The top bar's target and recent targets, and the popover's list.
+    pub fn draw_target(&self) {
+        let top = &self.0.ui.top;
+        crate::ui::target::draw_bar(self, &top.target_art, &top.target_name, &top.recents);
+        self.0.ui.target_pop.draw(&self.state());
     }
 
     pub fn pick_game(&self, place: Option<PlaceId>) {
         {
             let mut s = self.state_mut();
             s.friend = None;
+            if let Some(p) = &place {
+                s.picked(p);
+            }
             s.place = place;
         }
-        self.0.ui.games.draw(&self.state());
+        self.draw_target();
         self.refresh_launch_state();
     }
 
+    /// The target popover, on its Friends tab.
     pub fn on_friends(&self) {
-        let of = {
-            let s = self.state();
-            let accounts = &s.accounts;
-            accounts
-                .leader()
-                .or_else(|| accounts.selected().into_iter().next())
-                .or_else(|| accounts.accounts().first())
-                .map(|a| a.user_id)
-        };
-        match of {
-            Some(id) => FriendsDialog::open(self, id),
-            None => self.toast("Add an account first: friends come from your accounts"),
+        if self.state().accounts.accounts().is_empty() {
+            return self.toast("Add an account first: friends come from your accounts");
         }
+        self.0.ui.target_pop.show_friends();
+    }
+
+    /// The target popover, on whichever tab it was.
+    pub fn pick_target(&self) {
+        self.0.ui.top.target.popup();
     }
 
     pub fn join_friend(&self, friend: FriendTarget) {
         let display = friend.display.clone();
         self.state_mut().friend = Some(friend);
-        self.0.ui.games.draw(&self.state());
+        self.draw_target();
         self.refresh_launch_state();
         self.log(&format!("Target: join {display}"));
     }
 
-    /// The launch bar, the accounts' heading and select-all, as the state is.
+    /// The command bar, as the state is.
     pub fn refresh_launch_state(&self) {
-        let (n, total, leader, followers, target) = {
+        let (n, total, leader, followers, any_running) = {
             let s = self.state();
             let a = &s.accounts;
             (
@@ -83,36 +91,32 @@ impl Window {
                 a.accounts().len(),
                 a.leader().map(|l| l.name.to_string()),
                 a.followers().len(),
-                s.target_label(),
+                !s.running.is_empty(),
             )
         };
-        let ui = &self.0.ui;
+        let cmd = &self.0.ui.cmd;
         self.set_action_enabled("refresh", total > 0);
         self.set_action_enabled("reload-games", total > 0);
         self.set_action_enabled("launch-selected", n >= 1);
         self.set_action_enabled("launch-group", leader.is_some());
-        ui.btn_each.set_text(&if n == 0 {
-            "Launch Selected".to_owned()
-        } else {
-            format!("Launch {n} Selected")
+        cmd.move_to.set_sensitive(n >= 1);
+        cmd.each.set_text(&if n == 0 { "Launch".to_owned() } else { format!("Launch {n}") });
+        cmd.count.set_label(&match (total, n) {
+            (0, _) => "No accounts".to_owned(),
+            (t, 0) => plural(t, "account", "accounts"),
+            (t, n) => format!("{n} of {t} selected"),
         });
-        ui.summary.set_label(&leader.map_or_else(
-            || "No leader yet".to_owned(),
-            |l| match followers {
-                0 => format!("{l} leads"),
-                n => format!("{l} leads · {} follow", plural(n, "account", "accounts")),
-            },
-        ));
-        ui.target_text.set_label(&format!("Into {target}"));
-        ui.accounts_meta
-            .set_label(&format!("{} · {n} selected", plural(total, "account", "accounts")));
-        let every = total > 0 && n == total;
-        ui.select_all.set_text(if every { "Select None" } else { "Select All" });
-        ui.select_all.set_icon(if every {
-            "edit-clear-all-symbolic"
-        } else {
-            "edit-select-all-symbolic"
+        cmd.quiet.set(true);
+        cmd.select_all.set_active(total > 0 && n == total);
+        cmd.select_all.set_inconsistent(n > 0 && n < total);
+        cmd.select_all.set_sensitive(total > 0);
+        cmd.quiet.set(false);
+        cmd.chain.set_text(&match (&leader, followers) {
+            (None, _) => "Launch as group".to_owned(),
+            (Some(l), 0) => format!("Launch {l}"),
+            (Some(l), f) => format!("Launch {l} + {f}"),
         });
+        cmd.stop_all.button.set_visible(any_running || total > 0);
         self.refresh_states();
     }
 
@@ -349,6 +353,22 @@ impl Window {
     pub fn stop_account(&self, id: UserId) {
         let Some(label) = self.state().accounts.get(id).map(|a| a.name.clone()) else { return };
         self.stop_profiles(label.to_string(), [Profile::of(id)].into_iter().collect());
+    }
+
+    /// The command bar's Stop: every selected account's client at once.
+    pub fn stop_selected(&self) {
+        let which: HashSet<Profile> = {
+            let s = self.state();
+            s.accounts
+                .selected()
+                .iter()
+                .filter(|a| s.running.contains(&a.user_id) || s.launching.contains(&a.user_id))
+                .map(|a| Profile::of(a.user_id))
+                .collect()
+        };
+        if !which.is_empty() {
+            self.stop_profiles("the selected accounts".to_owned(), which);
+        }
     }
 
     /// A group header's Shut down: every member's client at once.

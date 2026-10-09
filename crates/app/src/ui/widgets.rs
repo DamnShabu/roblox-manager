@@ -111,6 +111,7 @@ pub trait LabelFluent {
     fn chars(self, n: i32) -> Self;
     fn xalign(self, x: f32) -> Self;
     fn selectable(self) -> Self;
+    fn justify(self) -> Self;
 }
 
 impl LabelFluent for Label {
@@ -135,6 +136,11 @@ impl LabelFluent for Label {
         self.set_selectable(true);
         self
     }
+    /// Centre each wrapped line.
+    fn justify(self) -> Self {
+        self.set_justify(gtk::Justification::Center);
+        self
+    }
 }
 
 /// A symbolic icon from the icon theme, at the theme's 16 px.
@@ -151,42 +157,11 @@ pub struct IconButton {
 }
 
 impl IconButton {
-    pub fn set_icon(&self, name: &str) {
-        match &self.content {
-            Some(c) => c.set_icon_name(name),
-            None => self.button.set_icon_name(name),
-        }
-    }
-
     pub fn set_text(&self, text: &str) {
         match &self.content {
             Some(c) => c.set_label(text),
             None => self.button.set_label(text),
         }
-    }
-
-    /// A handle that does not keep the button alive.
-    pub fn downgrade(&self) -> WeakIconButton {
-        WeakIconButton {
-            button: self.button.downgrade(),
-            content: self.content.as_ref().map(ObjectExt::downgrade),
-        }
-    }
-}
-
-/// An [`IconButton`] held for a redraw that must not outlive it.
-pub struct WeakIconButton {
-    button: gtk::glib::WeakRef<gtk::Button>,
-    content: Option<gtk::glib::WeakRef<adw::ButtonContent>>,
-}
-
-impl WeakIconButton {
-    pub fn upgrade(&self) -> Option<IconButton> {
-        let content = match &self.content {
-            Some(c) => Some(c.upgrade()?),
-            None => None,
-        };
-        Some(IconButton { button: self.button.upgrade()?, content })
     }
 }
 
@@ -277,14 +252,6 @@ pub fn wrap(spacing: i32, children: &[gtk::Widget]) -> adw::WrapBox {
     b
 }
 
-/// A state in a pill: a dot and a word, coloured by `kind` (running,
-/// starting, joining, expired, failed, idle). A live state's dot pulses.
-pub fn status(kind: &str, text: &str, live: bool) -> gtk::Box {
-    let dot = new_box(Orientation::Horizontal, 0, if live { "dot live" } else { "dot" });
-    dot.set_valign(Align::Center);
-    hbox!(6, &format!("status {kind}"), dot, lbl(text, "")).centered()
-}
-
 /// A hotkey as keycaps: "Ctrl" "F7".
 pub fn keycaps(accel: &str) -> gtk::Box {
     let b = hbox!(3, "").centered();
@@ -292,28 +259,6 @@ pub fn keycaps(accel: &str) -> gtk::Box {
         b.append(&lbl(key, "keycap").xalign(0.5));
     }
     b
-}
-
-/// A heading over a list: a title, a dimmed line under it, then `suffix`.
-pub fn section_header(title: &str, sub: Option<&str>, suffix: &[gtk::Widget]) -> gtk::Box {
-    heading("title", title, sub, suffix)
-}
-
-/// A heading over a part of the page, above its sections.
-pub fn page_header(title: &str, sub: Option<&str>, suffix: &[gtk::Widget]) -> gtk::Box {
-    heading("title-4", title, sub, suffix)
-}
-
-fn heading(css: &str, title: &str, sub: Option<&str>, suffix: &[gtk::Widget]) -> gtk::Box {
-    let text = vbox!(2, "", lbl(title, css));
-    if let Some(sub) = sub {
-        text.append(&lbl(sub, "caption dimmed").wrapped());
-    }
-    let head = hbox!(8, "section-header", text.hexpand().centered());
-    for w in suffix {
-        head.append(w);
-    }
-    head
 }
 
 /// A list drawn as Adwaita's rounded card of rows.
