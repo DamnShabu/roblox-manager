@@ -18,6 +18,7 @@ use rbxmgr_core::types::{Cookie, User};
 
 use super::widgets::{Btn, Fluent, IconButton, LabelFluent, lbl, sentence, toggle_class};
 use super::window::{WeakWindow, Window};
+use crate::ui::panel::Panel;
 use crate::worker::Logger;
 
 /// What the login worker tells the dialog, for the code it was started for.
@@ -28,7 +29,7 @@ enum Event {
 
 pub struct AddAccountDialog {
     window: WeakWindow,
-    dialog: adw::Dialog,
+    dialog: Panel,
     /// The account being signed in again, if any.
     relogin: Option<Account>,
     /// Which code is current; older workers stop at their next poll.
@@ -51,10 +52,7 @@ pub struct AddAccountDialog {
 
 impl AddAccountDialog {
     pub fn open(w: &Window, relogin: Option<Account>) {
-        let dialog = adw::Dialog::builder()
-            .title(if relogin.is_some() { "Sign In Again" } else { "Add Account" })
-            .content_width(500)
-            .build();
+        let dialog = Panel::new(if relogin.is_some() { "Sign In Again" } else { "Add Account" });
         let (tx, rx) = async_channel::unbounded();
         let d = Rc::new_cyclic(|me: &std::rc::Weak<AddAccountDialog>| {
             let me = me.clone();
@@ -111,7 +109,7 @@ impl AddAccountDialog {
             held.take();
         });
         d.request_code();
-        d.dialog.present(Some(w.gtk_window()));
+        d.dialog.present(w);
     }
 
     fn assemble(self: &Rc<Self>) {
@@ -190,8 +188,14 @@ impl AddAccountDialog {
         let body = vbox!(22, "", lbl(&intro, "dimmed").wrapped(), step1, step2, step3).margins(24);
         body.set_margin_top(6);
         let view = adw::ToolbarView::new();
-        view.add_top_bar(&adw::HeaderBar::new());
-        view.set_content(Some(&body));
+        view.add_top_bar(&self.dialog.header());
+        view.set_content(Some(
+            &gtk::ScrolledWindow::builder()
+                .child(&body)
+                .hscrollbar_policy(gtk::PolicyType::Never)
+                .vexpand(true)
+                .build(),
+        ));
         self.dialog.set_child(Some(&view));
     }
 

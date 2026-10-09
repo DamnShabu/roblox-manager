@@ -1,41 +1,67 @@
-/* Roblox Manager on libadwaita. Adwaita draws the widgets, follows the
-   system's light or dark style and does the typography; this sheet adds the
-   app's own amber as the accent, a warm cast on the neutral surfaces, and
-   the few pieces Adwaita has no class for. Colours come from Adwaita's
-   variables, so both styles hold together; style-dark.css swaps in the dark
-   surfaces while the dark style is on.
+/* Roblox Manager on libadwaita, dark only. Adwaita draws the widgets and
+   does the typography; this sheet gives them the app's near-black surfaces,
+   its red as the accent, tighter spacing so the accounts, the inspector and
+   the activity fit one window, and the few pieces Adwaita has no class for.
 
-   Every surface given a background here is given its text colour too. Left
-   to the desktop, the text comes from whatever palette its theme defines --
-   on a dark desktop, pale text -- and lands on these light surfaces with
-   next to no contrast. */
+   Every surface given a background here is given its text colour too, so the
+   desktop's own palette never lands on these surfaces. */
 
 :root {
-  --accent-bg-color: #e3a84a;
-  --accent-fg-color: rgb(0 0 0 / 82%);
-  --accent-color: #8a5a12;
-  --dim-opacity: 70%;
-  --window-fg-color: #2b241e;
-  --view-fg-color: #2b241e;
-  --headerbar-fg-color: #2b241e;
-  --headerbar-border-color: #2b241e;
-  --sidebar-fg-color: #2b241e;
-  --secondary-sidebar-fg-color: #2b241e;
-  --dialog-fg-color: #2b241e;
-  --popover-fg-color: #2b241e;
-  --card-fg-color: #2b241e;
-  --thumbnail-fg-color: #2b241e;
-  --window-bg-color: #faf8f5;
-  --view-bg-color: #fffefc;
-  --headerbar-bg-color: #f3efe9;
-  --headerbar-backdrop-color: #f8f5f1;
-  --sidebar-bg-color: #f1ece6;
-  --sidebar-backdrop-color: #f5f1ec;
-  --secondary-sidebar-bg-color: #f4f0ea;
-  --dialog-bg-color: #fbf9f6;
-  --popover-bg-color: #fffdfa;
-  --card-bg-color: #fffefc;
+  --accent-bg-color: #ff3d2e;
+  --accent-fg-color: #ffffff;
+  --accent-color: #ff6a5c;
+  --destructive-bg-color: #c01c28;
+  --dim-opacity: 62%;
+  --window-fg-color: #ecedf1;
+  --view-fg-color: #ecedf1;
+  --headerbar-fg-color: #ecedf1;
+  --headerbar-border-color: #2a2c34;
+  --sidebar-fg-color: #ecedf1;
+  --secondary-sidebar-fg-color: #ecedf1;
+  --dialog-fg-color: #ecedf1;
+  --popover-fg-color: #ecedf1;
+  --card-fg-color: #ecedf1;
+  --thumbnail-fg-color: #ecedf1;
+  --window-bg-color: #101115;
+  --view-bg-color: #0c0d10;
+  --headerbar-bg-color: #17181d;
+  --headerbar-backdrop-color: #121317;
+  --headerbar-shade-color: #000000;
+  --sidebar-bg-color: #141519;
+  --sidebar-backdrop-color: #121317;
+  --secondary-sidebar-bg-color: #17181d;
+  --dialog-bg-color: #17181d;
+  --popover-bg-color: #1f2128;
+  --card-bg-color: #17181d;
+  --card-shade-color: rgb(0 0 0 / 40%);
+  --thumbnail-bg-color: #1f2128;
+  --border-color: #2a2c34;
 }
+
+/* -- compact: denser rows, lists and bars, so more fits without scrolling -- */
+list.boxed-list > row,
+row.action-row,
+row.entry-row,
+row.spin-row,
+row.combo-row,
+row.switch-row { min-height: 44px; }
+row.action-row > box.header { padding-top: 4px; padding-bottom: 4px; }
+list.boxed-list { border-radius: 10px; box-shadow: 0 0 0 1px var(--border-color); }
+preferencespage > scrolledwindow > viewport > clamp > box { margin: 14px 12px; border-spacing: 18px; }
+preferencesgroup > box { border-spacing: 8px; }
+headerbar { min-height: 42px; }
+button { border-radius: 8px; }
+button.pill { border-radius: 999px; }
+button:focus-visible,
+row:focus-visible { outline-color: color-mix(in srgb, var(--accent-bg-color) 70%, transparent); }
+
+/* -- the inspector: the side pane that shows an account, a group, a sign-in,
+   a macro or the log beside the accounts, one at a time -- */
+stack.inspector {
+  background: var(--secondary-sidebar-bg-color);
+  border-left: 1px solid var(--border-color);
+}
+stack.inspector headerbar { background: var(--secondary-sidebar-bg-color); box-shadow: inset 0 -1px var(--border-color); }
 
 /* -- status: a coloured dot and word, for a client's or a session's state -- */
 .status {
@@ -78,7 +104,7 @@
 }
 
 /* -- the game strip -------------------------------------------------------- */
-.game-strip { padding: 2px 2px 8px; }
+.game-strip { padding: 0 2px 4px; }
 button.game-tile { padding: 6px; border-radius: 14px; outline: none; }
 button.game-tile .tile-art {
   border-radius: 12px;
@@ -127,16 +153,16 @@ row.follower { padding: 6px 8px 6px 14px; }
   color: var(--accent-color);
   background: color-mix(in srgb, var(--accent-bg-color) 14%, transparent);
 }
-row.subheader { padding: 10px 14px 4px; }
-row.placeholder { padding: 14px; }
+row.subheader { padding: 8px 12px 2px; }
+row.placeholder { padding: 12px; }
 .account-count { font-feature-settings: "tnum"; }
 
 /* -- the launch bar ---------------------------------------------------------- */
-.launch-bar { padding: 10px 14px; }
+.launch-bar { padding: 6px 12px; }
 .launch-bar .summary { font-weight: 700; }
 
 /* -- macros and activity ------------------------------------------------------- */
-.sidebar-pane .pane { padding: 18px 16px 18px 16px; }
+.sidebar-pane .pane { padding: 12px 12px 14px 12px; }
 list.boxed-list.macro.running { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-bg-color) 70%, transparent); }
 .macro-steps { padding: 4px 12px 12px 12px; }
 .macro-step .kind { font-weight: 600; }

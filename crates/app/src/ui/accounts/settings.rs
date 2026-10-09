@@ -8,6 +8,7 @@ use rbxmgr_core::cordial::Performance;
 use rbxmgr_core::types::{Profile, UserId};
 
 use crate::ui::login::AddAccountDialog;
+use crate::ui::panel::Panel;
 use crate::ui::widgets::{Btn, Fluent, LabelFluent, avatar, icon, lbl, toggle_class};
 use crate::ui::window::Window;
 
@@ -16,19 +17,15 @@ pub struct AccountSettings;
 impl AccountSettings {
     pub fn open(w: &Window, id: UserId) {
         let Some(acct) = w.state().accounts.get(id).cloned() else { return };
-        let dialog = adw::PreferencesDialog::builder()
-            .title("Account Settings")
-            .content_width(560)
-            .content_height(720)
-            .build();
-        dialog.add(&page(w, &dialog, &acct));
-        dialog.present(Some(w.gtk_window()));
+        let panel = Panel::new("Account Settings");
+        panel.set_page(&page(w, &panel, &acct));
+        panel.present(w);
     }
 }
 
 /// Everything about one account. Rebuilt in place when the account changes
 /// shape (made leader), so its rows are always the ones that apply.
-fn page(w: &Window, dialog: &adw::PreferencesDialog, acct: &Account) -> adw::PreferencesPage {
+fn page(w: &Window, dialog: &Panel, acct: &Account) -> adw::PreferencesPage {
     let id = acct.user_id;
     let page = adw::PreferencesPage::new();
     page.add(&identity(w, acct));
@@ -146,7 +143,7 @@ fn label_and_note(w: &Window, acct: &Account) -> adw::PreferencesGroup {
 /// Leader, group, auto-join, and how its client runs.
 fn launching(
     w: &Window,
-    dialog: &adw::PreferencesDialog,
+    dialog: &Panel,
     page: &adw::PreferencesPage,
     acct: &Account,
 ) -> adw::PreferencesGroup {
@@ -179,9 +176,9 @@ fn launching(
             };
             w.set_leader(id);
             // Its group and auto-join rows no longer apply: draw them again.
+            let _ = page;
             if let Some(acct) = w.state().accounts.get(id).cloned() {
-                dialog.remove(&page);
-                dialog.add(&self::page(&w, &dialog, &acct));
+                dialog.set_page(&self::page(&w, &dialog, &acct));
             }
         });
         make.button.set_valign(Align::Center);

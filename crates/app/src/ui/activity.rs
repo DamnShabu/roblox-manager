@@ -7,6 +7,7 @@ use gtk::{Align, PolicyType};
 use super::widgets::{Btn, Fluent, LabelFluent, boxed_list, icon, lbl};
 use super::window::Window;
 use crate::state::Activity;
+use crate::ui::panel::Panel;
 
 /// A line's kind, worked out from its words: log lines have dozens of
 /// callers, most in the core, so none of them passes one.
@@ -92,7 +93,8 @@ pub fn open_log(w: &Window) {
                 w.toast("Log copied");
             }
         });
-    let header = adw::HeaderBar::new();
+    let panel = Panel::new("Activity Log");
+    let header = panel.header();
     header.pack_start(&copy.button);
     let page = vbox!(
         12,
@@ -113,15 +115,11 @@ pub fn open_log(w: &Window) {
         &gtk::ScrolledWindow::builder()
             .child(&adw::Clamp::builder().maximum_size(720).child(&page).build())
             .hscrollbar_policy(PolicyType::Never)
+            .vexpand(true)
             .build(),
     ));
-    adw::Dialog::builder()
-        .title("Activity Log")
-        .child(&view)
-        .content_width(640)
-        .content_height(640)
-        .build()
-        .present(Some(w.gtk_window()));
+    panel.set_child(Some(&view));
+    panel.present(w);
 }
 
 #[cfg(test)]

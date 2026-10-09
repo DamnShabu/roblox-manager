@@ -13,6 +13,7 @@ use rbxmgr_core::types::{Label, UserId};
 use super::widgets::{Btn, Fluent, boxed_list, lbl, sentence};
 use super::window::{WeakWindow, Window};
 use crate::state::FriendTarget;
+use crate::ui::panel::Panel;
 use crate::worker;
 
 /// What a friend's row says under their name.
@@ -37,7 +38,7 @@ fn state_class(s: FriendState) -> &'static str {
 
 pub struct FriendsDialog {
     window: WeakWindow,
-    dialog: adw::Dialog,
+    dialog: Panel,
     /// Each account's friends, once loaded (or why they did not load).
     cache: RefCell<HashMap<UserId, Result<Vec<Friend>, String>>>,
     of: Cell<UserId>,
@@ -55,11 +56,7 @@ impl FriendsDialog {
             w.state().accounts.accounts().iter().map(|a| (a.user_id, a.name.clone())).collect();
         let d = Rc::new(FriendsDialog {
             window: w.weak(),
-            dialog: adw::Dialog::builder()
-                .title("Join a Friend")
-                .content_width(520)
-                .content_height(620)
-                .build(),
+            dialog: Panel::new("Join a Friend"),
             cache: RefCell::default(),
             of: Cell::new(of),
             accounts,
@@ -75,7 +72,7 @@ impl FriendsDialog {
         d.dialog.connect_closed(move |_| {
             held.take();
         });
-        d.dialog.present(Some(w.gtk_window()));
+        d.dialog.present(w);
     }
 
     fn assemble(self: &Rc<Self>) {
@@ -128,7 +125,7 @@ impl FriendsDialog {
             Some("list"),
         );
 
-        let header = adw::HeaderBar::new();
+        let header = self.dialog.header();
         header.set_title_widget(Some(&self.title));
         let view = adw::ToolbarView::new();
         view.add_top_bar(&header);
