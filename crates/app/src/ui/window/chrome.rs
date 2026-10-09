@@ -2,11 +2,14 @@
 //! menu, the accounts page (or the welcome when there are none), the macros
 //! pane beside it, and the launch bar.
 
+use std::cell::RefCell;
+
 use adw::prelude::*;
-use gtk::{Align, Label, PolicyType, gio};
+use gtk::{Align, Label, PolicyType, gio, glib};
 
 use super::WeakWindow;
 use crate::ui::games::GameBar;
+use crate::ui::panel::Panel;
 use crate::ui::widgets::{Btn, Fluent, IconButton, LabelFluent, lbl, name, page_header};
 
 pub struct Chrome {
@@ -35,6 +38,9 @@ pub struct Chrome {
     pub split: adw::OverlaySplitView,
     pub search_bar: gtk::SearchBar,
     pub search: gtk::SearchEntry,
+    /// The side pane: macros and activity, or the panel open in their place.
+    pub inspector: gtk::Stack,
+    pub panel: RefCell<Option<Panel>>,
 }
 
 impl Chrome {
@@ -240,15 +246,42 @@ impl Chrome {
             .vexpand(true)
             .build();
 
+        // The inspector: macros and activity at home, and in their place the
+        // panel open now (an account's settings, a sign-in, a macro, the log).
+        let inspector = gtk::Stack::builder()
+            .transition_type(gtk::StackTransitionType::Crossfade)
+            .transition_duration(150)
+            .hhomogeneous(false)
+            .vhomogeneous(false)
+            .build();
+        inspector.add_css_class("inspector");
+        inspector.add_named(&pane_scroller, Some("home"));
+        {
+            // Esc closes the open panel, once whatever has focus in it (a
+            // hotkey being captured) has had the key.
+            let keys = gtk::EventControllerKey::new();
+            let w = w.clone();
+            keys.connect_key_pressed(move |_, key, _, _| {
+                if key == gtk::gdk::Key::Escape
+                    && let Some(w) = w.upgrade()
+                    && w.close_panel()
+                {
+                    return glib::Propagation::Stop;
+                }
+                glib::Propagation::Proceed
+            });
+            inspector.add_controller(keys);
+        }
+
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&pages));
         let split = adw::OverlaySplitView::builder()
             .content(&toasts)
-            .sidebar(&pane_scroller)
+            .sidebar(&inspector)
             .sidebar_position(gtk::PackType::End)
-            .min_sidebar_width(300.0)
-            .max_sidebar_width(380.0)
-            .sidebar_width_fraction(0.3)
+            .min_sidebar_width(340.0)
+            .max_sidebar_width(520.0)
+            .sidebar_width_fraction(0.38)
             .show_sidebar(sidebar)
             .build();
         sidebar_toggle.bind_property("active", &split, "show-sidebar").bidirectional().build();
@@ -336,6 +369,8 @@ impl Chrome {
             split,
             search_bar,
             search,
+            inspector,
+            panel: RefCell::default(),
         }
     }
 }
@@ -363,13 +398,6 @@ fn main_menu() -> gio::Menu {
     windows.append(Some("_Hide All Windows"), Some("win.hide-all"));
     windows.append(Some("_Show All Windows"), Some("win.show-all"));
     menu.append_section(None, &windows);
-    let style = gio::Menu::new();
-    for (label, name) in [("Follow System", "system"), ("Light", "light"), ("Dark", "dark")] {
-        let item = gio::MenuItem::new(Some(label), None);
-        item.set_action_and_target_value(Some("win.style"), Some(&name.to_variant()));
-        style.append_item(&item);
-    }
-    menu.append_section(Some("Style"), &style);
     let help = gio::Menu::new();
     help.append(Some("Activity _Log"), Some("win.activity-log"));
     help.append(Some("How _Macros Work"), Some("win.macro-help"));

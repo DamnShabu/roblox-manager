@@ -5,6 +5,7 @@ mod accounts;
 mod actions;
 mod chrome;
 mod hiding;
+mod inspector;
 mod launching;
 mod links;
 mod macros;

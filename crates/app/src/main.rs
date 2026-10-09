@@ -126,9 +126,10 @@ fn cannot_start(app: &adw::Application, why: &str) {
     dialog.present(None::<&gtk::Widget>);
 }
 
-/// The app's stylesheet, and its dark surfaces while the style is dark --
-/// the split libadwaita itself makes between style.css and style-dark.css.
+/// The app's stylesheet. The app is dark only, so there is no light sheet to
+/// switch between.
 fn load_style() {
+    adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
     let Some(display) = gdk::Display::default() else { return };
     let base = gtk::CssProvider::new();
     base.load_from_string(include_str!("../resources/style.css"));
@@ -137,20 +138,4 @@ fn load_style() {
         &base,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
-    let dark = gtk::CssProvider::new();
-    dark.load_from_string(include_str!("../resources/style-dark.css"));
-    let follow = move |style: &adw::StyleManager| {
-        if style.is_dark() {
-            gtk::style_context_add_provider_for_display(
-                &display,
-                &dark,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-            );
-        } else {
-            gtk::style_context_remove_provider_for_display(&display, &dark);
-        }
-    };
-    let style = adw::StyleManager::default();
-    follow(&style);
-    style.connect_dark_notify(follow);
 }

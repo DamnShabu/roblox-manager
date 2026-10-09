@@ -77,7 +77,7 @@ impl Window {
         self.install_item_actions();
     }
 
-    /// Light or dark: the style menu's radio items, and the style now.
+    /// The saved style, kept for the window-state file; the app is dark only.
     pub(super) fn install_style(&self, style: Style) {
         apply_style(style);
         let action = gio::SimpleAction::new_stateful(
@@ -184,12 +184,10 @@ impl Window {
     }
 }
 
-fn apply_style(style: Style) {
-    adw::StyleManager::default().set_color_scheme(match style {
-        Style::System => adw::ColorScheme::Default,
-        Style::Light => adw::ColorScheme::ForceLight,
-        Style::Dark => adw::ColorScheme::ForceDark,
-    });
+/// The app is dark whatever the saved style says; the style is still kept,
+/// so the file it is saved in reads the same to earlier versions.
+fn apply_style(_style: Style) {
+    adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
 }
 
 /// Set every shortcut in [`SHORTCUTS`] on the application.

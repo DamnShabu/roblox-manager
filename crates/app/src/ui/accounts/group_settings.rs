@@ -5,6 +5,7 @@ use gtk::Align;
 use rbxmgr_core::types::PlaceId;
 
 use crate::state::Tile;
+use crate::ui::panel::Panel;
 use crate::ui::widgets::thumb;
 use crate::ui::window::Window;
 
@@ -24,11 +25,7 @@ impl GroupSettings {
             return;
         };
         let games: Vec<Tile> = w.state().game_list.clone();
-        let dialog = adw::PreferencesDialog::builder()
-            .title("Group Settings")
-            .content_width(520)
-            .content_height(640)
-            .build();
+        let dialog = Panel::new("Group Settings");
         let page = adw::PreferencesPage::new();
 
         let about = adw::PreferencesGroup::new();
@@ -108,7 +105,7 @@ impl GroupSettings {
         let danger = adw::PreferencesGroup::new();
         danger.add(&delete);
         page.add(&danger);
-        dialog.add(&page);
+        dialog.set_page(&page);
 
         // The header shows the name: drawn again once it is settled.
         let weak = w.weak();
@@ -118,7 +115,7 @@ impl GroupSettings {
                 w.show_games();
             }
         });
-        dialog.present(Some(w.gtk_window()));
+        dialog.present(w);
         if group.name == "New group" {
             name.grab_focus();
         }

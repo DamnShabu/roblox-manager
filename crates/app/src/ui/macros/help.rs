@@ -4,6 +4,7 @@
 use adw::prelude::*;
 use gtk::{Align, PolicyType};
 
+use crate::ui::panel::Panel;
 use crate::ui::widgets::{Fluent, LabelFluent, lbl};
 use crate::ui::window::Window;
 
@@ -173,22 +174,18 @@ pub fn show(w: &Window) {
         page.append(&draw(block));
     }
     let clamp = adw::Clamp::builder().maximum_size(620).child(&page).build();
+    let panel = Panel::new("How Macros Work");
     let view = adw::ToolbarView::new();
-    view.add_top_bar(&adw::HeaderBar::new());
+    view.add_top_bar(&panel.header());
     view.set_content(Some(
         &gtk::ScrolledWindow::builder()
             .child(&clamp)
             .hscrollbar_policy(PolicyType::Never)
-            .propagate_natural_height(true)
+            .vexpand(true)
             .build(),
     ));
-    adw::Dialog::builder()
-        .title("How Macros Work")
-        .child(&view)
-        .content_width(600)
-        .content_height(720)
-        .build()
-        .present(Some(w.gtk_window()));
+    panel.set_child(Some(&view));
+    panel.present(w);
 }
 
 fn draw(block: &Block) -> gtk::Widget {

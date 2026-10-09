@@ -10,12 +10,13 @@ use rbxmgr_core::macros::grammar::{self, Row};
 
 use super::record::Record;
 use crate::ui::confirm;
+use crate::ui::panel::Panel;
 use crate::ui::widgets::{Btn, Fluent, LabelFluent, hotkey_label, keycaps, lbl, sentence};
 use crate::ui::window::{WeakWindow, Window};
 
 pub struct MacroDialog {
     window: WeakWindow,
-    dialog: adw::Dialog,
+    dialog: Panel,
     old: Option<String>,
     rows: RefCell<Vec<Row>>,
     loops: Cell<u32>,
@@ -61,10 +62,7 @@ impl MacroDialog {
         };
         let (rows, loops) = grammar::rows(&text);
         let new = name.is_none();
-        let dialog = adw::Dialog::builder()
-            .title(if new { "New Macro" } else { "Edit Macro" })
-            .content_width(600)
-            .build();
+        let dialog = Panel::new(if new { "New Macro" } else { "Edit Macro" });
         let rounds = adw::SpinRow::with_range(2.0, 9999.0, 1.0);
         rounds.set_title("Rounds");
         rounds.set_value(if loops > 1 { f64::from(loops) } else { 10.0 });
@@ -106,7 +104,7 @@ impl MacroDialog {
         d.dialog.connect_closed(move |_| {
             held.take();
         });
-        d.dialog.present(Some(w.gtk_window()));
+        d.dialog.present(w);
     }
 
     fn assemble(self: &Rc<Self>, new: bool) {
@@ -114,6 +112,7 @@ impl MacroDialog {
         let header = adw::HeaderBar::builder()
             .show_end_title_buttons(false)
             .show_start_title_buttons(false)
+            .title_widget(&adw::WindowTitle::new(&self.dialog.title(), ""))
             .build();
         let cancel = {
             let dialog = self.dialog.downgrade();
@@ -225,7 +224,7 @@ impl MacroDialog {
         let scroller = gtk::ScrolledWindow::builder()
             .child(&clamp)
             .hscrollbar_policy(PolicyType::Never)
-            .propagate_natural_height(true)
+            .vexpand(true)
             .build();
         let view = adw::ToolbarView::new();
         view.add_top_bar(&header);
