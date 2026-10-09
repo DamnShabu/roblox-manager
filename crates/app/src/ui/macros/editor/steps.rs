@@ -11,7 +11,7 @@ use rbxmgr_core::macros::lanes;
 use super::MacroDialog;
 use crate::ui::macros::card::step_icon;
 use crate::ui::macros::{area, point};
-use crate::ui::widgets::{Btn, Fluent, LabelFluent, icon, lbl, plural, wrap};
+use crate::ui::widgets::{Btn, Fluent, LabelFluent, lbl, plural, wrap};
 
 const STEP_TYPES: [&str; 16] = [
     "Key", "Hold", "Press", "Release", "Repeat", "Type", "Click", "Move", "Scroll", "Wait",
@@ -47,14 +47,14 @@ fn hint(kind: &str) -> &'static str {
 impl MacroDialog {
     /// The Steps group: the rows or the text, and the buttons that add to
     /// them.
-    pub(super) fn steps_group(self: &Rc<Self>) -> adw::PreferencesGroup {
+    pub(super) fn steps_group(self: &Rc<Self>) -> gtk::Box {
         let mut adds: Vec<gtk::Widget> = ["Key", "Wait", "Click", "Type", "Hold", "Move", "Note"]
             .into_iter()
             .map(|kind| {
                 let me = Rc::downgrade(self);
-                Btn::new("")
+                Btn::new("ds ghost sm")
                     .text(kind)
-                    .icon("list-add-symbolic")
+                    .icon("rm-plus-symbolic")
                     .tip(&format!("Add a {} step", kind.to_lowercase()))
                     .build(move || {
                         if let Some(d) = me.upgrade() {
@@ -80,10 +80,12 @@ impl MacroDialog {
                 d.switch_view();
             }
         });
-        let steps_group = adw::PreferencesGroup::builder()
-            .title("Steps")
-            .header_suffix(&hbox!(12, "", self.count.clone().centered(), self.view.clone()))
-            .build();
+        self.view.add_css_class("cx-seg");
+        let steps_group = crate::ui::ds::sec(
+            "Steps",
+            Some(hbox!(12, "", self.count.clone().centered(), self.view.clone()).upcast_ref()),
+        );
+        self.list.add_css_class("cx-list");
         let add_box = wrap(6, &adds);
         add_box.set_margin_top(12);
         self.views.add_named(&vbox!(0, "", self.list.clone(), add_box), Some("steps"));
@@ -110,8 +112,8 @@ impl MacroDialog {
             ),
             Some("text"),
         );
-        steps_group.add(self.record.banner());
-        steps_group.add(&self.views);
+        steps_group.append(self.record.banner());
+        steps_group.append(&self.views);
         steps_group
     }
 
@@ -121,10 +123,13 @@ impl MacroDialog {
         let real = rows.iter().filter(|r| !matches!(r.kind.as_str(), "Note" | "Timeline")).count();
         self.count.set_label(&plural(real, "step", "steps"));
         if rows.is_empty() {
-            self.list.append(&crate::ui::accounts::leader::placeholder(
-                "list-add-symbolic",
+            let row = gtk::ListBoxRow::builder().activatable(false).selectable(false).build();
+            row.set_child(Some(&crate::ui::widgets::lbl(
                 "No steps yet. Add one below.",
-            ));
+                "t-body-sm muted",
+            )));
+            row.add_css_class("step-row");
+            self.list.append(&row);
         }
         let units = lanes::units(&rows);
         let count = units.len();
@@ -185,7 +190,7 @@ impl MacroDialog {
         });
         let button = |ic: &str, tip: &str, on: bool, act: fn(&Rc<Self>, usize)| {
             let me = Rc::downgrade(self);
-            let b = Btn::new("flat circular").icon(ic).tip(tip).build(move || {
+            let b = Btn::new("ib sm").icon(ic).tip(tip).build(move || {
                 if let Some(d) = me.upgrade() {
                     act(&d, i);
                 }
@@ -198,12 +203,12 @@ impl MacroDialog {
             8,
             "",
             lbl(number, "number dimmed").xalign(1.0),
-            icon(step_icon(&r.kind)).css("dimmed"),
+            crate::ui::ds::icon(step_icon(&r.kind)).css("muted s16"),
             kind,
             value,
-            button("go-up-symbolic", "Move up", up, |d, i| d.shift(i, true)),
-            button("go-down-symbolic", "Move down", down, |d, i| d.shift(i, false)),
-            button("user-trash-symbolic", "Remove step", true, |d, i| {
+            button("rm-chev-up-symbolic", "Move up", up, |d, i| d.shift(i, true)),
+            button("rm-chev-down-symbolic", "Move down", down, |d, i| d.shift(i, false)),
+            button("rm-trash-symbolic", "Remove step", true, |d, i| {
                 d.rows.borrow_mut().remove(i);
                 d.draw_steps();
             })
@@ -244,9 +249,9 @@ impl MacroDialog {
     /// that play the moment something shows in the client, out of turn.
     fn when_button(self: &Rc<Self>) -> gtk::Button {
         let me = Rc::downgrade(self);
-        Btn::new("")
+        Btn::new("ds ghost sm")
             .text("When")
-            .icon("list-add-symbolic")
+            .icon("rm-plus-symbolic")
             .tip("Add steps that play the moment something shows in the client")
             .build(move || {
                 if let Some(d) = me.upgrade() {
@@ -268,7 +273,11 @@ impl MacroDialog {
             .label("_Record")
             .use_underline(true)
             .build();
-        let button = gtk::Button::builder().child(&content).tooltip_text(TIP).build();
+        let button = gtk::Button::builder()
+            .child(&content)
+            .tooltip_text(TIP)
+            .css_classes(["ds", "ghost", "sm"])
+            .build();
         let me = Rc::downgrade(self);
         button.connect_clicked(move |anchor| {
             let Some(d) = me.upgrade() else { return };

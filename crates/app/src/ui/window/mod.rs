@@ -9,7 +9,10 @@ mod inspector;
 mod launching;
 mod links;
 mod macros;
+mod overview;
 mod roblox;
+mod strip;
+mod topbar;
 mod updates;
 
 pub use self::hiding::can_hide;
@@ -26,8 +29,9 @@ use rbxmgr_core::types::{Profile, UserId};
 use rbxmgr_core::window_state::WindowState;
 
 use self::chrome::Chrome;
-use super::activity;
-use super::widgets::clear;
+use self::overview::Need;
+use super::table::Columns;
+use super::widgets::toggle_class;
 use crate::services::Services;
 use crate::state::AppState;
 use crate::worker::{self, Logger};
@@ -38,9 +42,6 @@ pub type Redraw = Box<dyn Fn(&AppState)>;
 /// A redraw for a widget that may go away on its own (a dialog's): it says
 /// whether its widget is still there, and is dropped once it is not.
 pub type LiveRedraw = Box<dyn Fn(&AppState) -> bool>;
-
-/// How many activity lines the side pane shows; the log window has the rest.
-const ACTIVITY_SHOWN: usize = 6;
 
 /// A cheap handle on the window; widgets keep one to act on it.
 #[derive(Clone)]
@@ -58,8 +59,11 @@ pub struct Inner {
     cards: RefCell<Vec<Redraw>>,
     /// Redraw open dialogs' live parts.
     dialogs: RefCell<Vec<LiveRedraw>>,
-    /// The open activity log, which takes each new line as it comes.
-    log_view: RefCell<Option<glib::WeakRef<gtk::ListBox>>>,
+    /// The need the alert strip was dismissed on: hidden until another.
+    alert_dismissed: RefCell<Option<Need>>,
+    /// Each row's and band's confirmation, to open from their menus.
+    confirms: RefCell<HashMap<UserId, glib::WeakRef<gtk::Revealer>>>,
+    group_confirms: RefCell<HashMap<String, glib::WeakRef<gtk::Revealer>>>,
     /// The open join link popup.
     link_popup: RefCell<Option<glib::WeakRef<adw::Window>>>,
     /// Whether the window has been shown: one opened for a join link alone
@@ -102,7 +106,9 @@ impl Window {
                 rows: RefCell::default(),
                 cards: RefCell::default(),
                 dialogs: RefCell::default(),
-                log_view: RefCell::default(),
+                alert_dismissed: RefCell::default(),
+                confirms: RefCell::default(),
+                group_confirms: RefCell::default(),
                 link_popup: RefCell::default(),
                 seen: Cell::new(false),
                 polling: Cell::new(false),
@@ -153,8 +159,15 @@ impl Window {
     }
 
     pub fn present(&self) {
-        self.0.seen.set(true);
+        let first = !self.0.seen.replace(true);
         self.0.win.present();
+        // First run: the sign-in is ready beside the empty table.
+        if first
+            && self.state().accounts.accounts().is_empty()
+            && self.0.ui.panel.borrow().is_none()
+        {
+            crate::ui::login::AddAccountDialog::open(self, None);
+        }
     }
 
     /// Whether the window has been shown since it was made.
@@ -204,26 +217,56 @@ impl Window {
     fn show_log(&self, line: String) {
         let stamp = chrono::Local::now().format("%H:%M").to_string();
         self.state_mut().log(stamp, line);
-        let log_box = &self.0.ui.log_box;
-        clear(log_box);
         let s = self.state();
-        for entry in s.activity.iter().take(ACTIVITY_SHOWN) {
-            log_box.append(&activity::line(entry, false));
-        }
-        let open = self.0.log_view.borrow().as_ref().and_then(glib::WeakRef::upgrade);
-        if let (Some(list), Some(newest)) = (open, s.activity.first()) {
-            list.prepend(&activity::row(newest));
-            // The open log shows what is kept and no more: a macro reporting
-            // every step would otherwise grow it by thousands of rows an hour.
-            if let Some(oldest) = list.row_at_index(crate::state::ACTIVITY_KEPT as i32) {
-                list.remove(&oldest);
+        self.0.ui.strip.show(s.activity.first());
+        // The drawer shows what is kept and no more: a macro reporting every
+        // step would otherwise grow it by thousands of rows an hour.
+        self.0.ui.log.prepend(&s.activity);
+    }
+
+    /// Open or close the activity drawer.
+    pub fn toggle_drawer(&self) {
+        let t = &self.0.ui.strip.log_toggle;
+        t.set_active(!t.is_active());
+    }
+
+    /// The table's columns, which come and go with the window's width.
+    pub fn columns(&self) -> &Columns {
+        &self.0.ui.cols
+    }
+
+    /// The confirmation under an account's row, for Remove… to open.
+    pub fn register_confirm(&self, id: UserId, r: &gtk::Revealer) {
+        self.0.confirms.borrow_mut().insert(id, r.downgrade());
+    }
+
+    /// The confirmation under a group's band, for Delete group… to open.
+    pub fn register_group_confirm(&self, gid: &str, r: &gtk::Revealer) {
+        self.0.group_confirms.borrow_mut().insert(gid.to_owned(), r.downgrade());
+    }
+
+    /// Open the confirmation under an account's row; false when it has none
+    /// drawn (a search hides it, or its group is folded).
+    pub(super) fn open_confirm(&self, id: UserId) -> bool {
+        let r = self.0.confirms.borrow().get(&id).and_then(glib::WeakRef::upgrade);
+        match r.filter(|r| r.is_mapped()) {
+            Some(r) => {
+                r.set_reveal_child(true);
+                true
             }
+            None => false,
         }
     }
 
-    /// Let the open log window take new lines.
-    pub fn watch_log(&self, list: &gtk::ListBox) {
-        self.0.log_view.replace(Some(list.downgrade()));
+    pub(super) fn open_group_confirm(&self, gid: &str) -> bool {
+        let r = self.0.group_confirms.borrow().get(gid).and_then(glib::WeakRef::upgrade);
+        match r.filter(|r| r.is_mapped()) {
+            Some(r) => {
+                r.set_reveal_child(true);
+                true
+            }
+            None => false,
+        }
     }
 
     /// Plain text: messages carry labels the user typed and error text,
@@ -284,7 +327,12 @@ impl Window {
             s.busy = if on { s.busy + 1 } else { s.busy.saturating_sub(1) };
             s.busy > 0
         };
-        self.0.ui.spinner.set_visible(busy);
+        let bar = &self.0.ui.busy_bar;
+        if busy && !bar.is_visible() {
+            bar.set_visible(true);
+            self.0.ui.pulse();
+        }
+        bar.set_visible(busy);
     }
 
     // -- redraws ----------------------------------------------------------
@@ -309,12 +357,25 @@ impl Window {
         dialogs.retain(|redraw| redraw(&s));
         let mut added = self.0.dialogs.replace(dialogs);
         self.0.dialogs.borrow_mut().append(&mut added);
-        self.0.ui.title.set_subtitle(&s.status_line());
+        let ui = &self.0.ui;
+        let line = s.status_line();
+        ui.top.status.set_label(&line);
+        ui.strip.status.set_label(&line);
+        let dot = &ui.top.status_dot;
+        toggle_class(dot, "run", !s.running.is_empty() && s.launching.is_empty());
+        toggle_class(dot, "start", !s.launching.is_empty());
+        let playing = s.macro_runs.len();
+        ui.insp.macros_count.set_label(&playing.to_string());
+        ui.insp.macros_count.set_visible(playing > 0);
         let live = !s.running.is_empty() || !s.launching.is_empty() || !s.macro_runs.is_empty();
-        self.0.ui.stop_all.set_visible(s.running.len() >= 2);
+        let selected: Vec<UserId> = s.accounts.selected().iter().map(|a| a.user_id).collect();
+        let sel_live = selected.iter().any(|id| s.running.contains(id) || s.launching.contains(id));
         self.refresh_window_actions(&s);
         drop(s);
         self.set_action_enabled("stop-all", live);
+        self.set_action_enabled("stop-selected", sel_live);
+        self.set_action_enabled("hide-selected", sel_live);
+        self.draw_needs();
     }
 
     /// Keep `redraw` up to date with the accounts' state until they are next
@@ -478,4 +539,4 @@ pub fn current() -> Option<Window> {
     CURRENT.with_borrow(Clone::clone)
 }
 
-pub use actions::set_accels;
+pub use actions::{SHORTCUTS, set_accels};

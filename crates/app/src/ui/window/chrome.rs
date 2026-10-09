@@ -1,408 +1,250 @@
-//! The parts of the window that are built once: the header bar and its
-//! menu, the accounts page (or the welcome when there are none), the macros
-//! pane beside it, and the launch bar.
+//! The parts of the window that are built once, put together: the top bar,
+//! what needs you, the command bar over the accounts table, the inspector
+//! beside it, the status strip along the bottom and the activity drawer
+//! that rises over it.
 
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{Align, Label, PolicyType, gio, glib};
+use gtk::{Align, Orientation, PolicyType, glib};
 
 use super::WeakWindow;
-use crate::ui::games::GameBar;
+use super::inspector::{Inspector, NARROW};
+use super::overview::Alert;
+use super::strip::Strip;
+use super::topbar::TopBar;
+use crate::ui::activity::LogDrawer;
 use crate::ui::panel::Panel;
-use crate::ui::widgets::{Btn, Fluent, IconButton, LabelFluent, lbl, name, page_header};
+use crate::ui::table::cmd::CmdBar;
+use crate::ui::table::{Columns, header};
+use crate::ui::target::TargetPopover;
+use crate::ui::widgets::{Fluent, LabelFluent, lbl};
 
 pub struct Chrome {
-    pub title: adw::WindowTitle,
-    pub spinner: adw::Spinner,
+    pub top: TopBar,
+    pub target_pop: Rc<TargetPopover>,
+    pub busy_bar: gtk::ProgressBar,
     pub banner: adw::Banner,
-    /// Shown while a newer Roblox Manager or Stacked is out.
-    pub update_button: gtk::Button,
+    pub alert: Alert,
+    pub cmd: CmdBar,
     /// "welcome" with no accounts, else "accounts".
     pub pages: gtk::Stack,
-    pub accounts_box: gtk::Box,
-    pub accounts_meta: Label,
-    pub select_all: IconButton,
-    pub games: GameBar,
-    pub macros_box: gtk::Box,
-    pub log_box: gtk::Box,
-    pub summary: Label,
-    pub target_text: Label,
-    pub btn_each: IconButton,
-    /// Shown only while more than one client runs: one has its own row's
-    /// stop.
-    pub stop_all: gtk::Button,
-    pub launch_bar: gtk::Box,
+    /// The launch order and the groups' bands and rows.
+    pub table: gtk::Box,
+    pub cols: Columns,
+    pub insp: Inspector,
+    pub split: adw::OverlaySplitView,
+    pub strip: Strip,
+    pub log: LogDrawer,
     pub toasts: adw::ToastOverlay,
     pub shortcuts: gtk::ShortcutController,
-    pub split: adw::OverlaySplitView,
-    pub search_bar: gtk::SearchBar,
-    pub search: gtk::SearchEntry,
-    /// The side pane: macros and activity, or the panel open in their place.
-    pub inspector: gtk::Stack,
     pub panel: RefCell<Option<Panel>>,
 }
 
 impl Chrome {
     pub fn build(win: &adw::ApplicationWindow, w: &WeakWindow, sidebar: bool) -> Self {
-        // -- header bar -----------------------------------------------------
-        let title = adw::WindowTitle::new("Roblox Manager", "All idle");
-        let header = adw::HeaderBar::new();
-        header.set_title_widget(Some(&title));
-        header.pack_start(&action_button(
-            "list-add-symbolic",
-            "Add Account (Ctrl+N)",
-            "win.add-account",
-        ));
-        header.pack_start(&action_button(
-            "view-refresh-symbolic",
-            "Check Sessions and Reload Favourites (Ctrl+R)",
-            "win.refresh",
-        ));
-        let spinner = adw::Spinner::new();
-        spinner.set_visible(false);
-        spinner.set_tooltip_text(Some("Working…"));
-        header.pack_start(&spinner);
-        let menu = gtk::MenuButton::builder()
-            .icon_name("open-menu-symbolic")
-            .menu_model(&main_menu())
-            .primary(true)
-            .tooltip_text("Main Menu")
-            .build();
-        name(&menu, "Main Menu");
-        header.pack_end(&menu);
-        // Hidden until a check finds something newer; the menu's Update All
-        // is always there.
-        let update_button = gtk::Button::builder()
-            .child(
-                &adw::ButtonContent::builder()
-                    .icon_name("software-update-available-symbolic")
-                    .label("Update")
-                    .build(),
-            )
-            .action_name("win.update")
-            .css_classes(["suggested-action"])
-            .visible(false)
-            .build();
-        name(&update_button, "Update");
-        header.pack_end(&update_button);
-        let sidebar_toggle = gtk::ToggleButton::builder()
-            .icon_name("sidebar-show-right-symbolic")
-            .tooltip_text("Macros and Activity (F9)")
-            .active(sidebar)
-            .build();
-        name(&sidebar_toggle, "Macros and Activity");
-        header.pack_end(&sidebar_toggle);
-        let search_toggle = gtk::ToggleButton::builder()
-            .icon_name("system-search-symbolic")
-            .tooltip_text("Search Accounts (Ctrl+F)")
-            .build();
-        name(&search_toggle, "Search Accounts");
-        header.pack_end(&search_toggle);
-        let search = gtk::SearchEntry::builder()
-            .placeholder_text("Search accounts by name, Roblox user or note")
-            .hexpand(true)
-            .build();
-        let search_bar = gtk::SearchBar::builder()
-            .child(&adw::Clamp::builder().maximum_size(520).child(&search).build())
-            .show_close_button(false)
-            .build();
-        search_bar.connect_entry(&search);
-        search_toggle
-            .bind_property("active", &search_bar, "search-mode-enabled")
-            .bidirectional()
-            .build();
-        {
-            let w = w.clone();
-            search.connect_search_changed(move |e| {
-                if let Some(w) = w.upgrade() {
-                    w.set_filter(&e.text());
-                }
-            });
-        }
-        {
-            // Closed, the search is forgotten: the entry's words with it, so
-            // opening it again never shows words that filter nothing.
-            let entry = search.clone();
-            search_bar.connect_search_mode_enabled_notify(move |bar| {
-                if !bar.is_search_mode() {
-                    entry.set_text("");
-                }
-            });
-        }
-
+        let top = TopBar::build(w, sidebar);
+        let target_pop = TargetPopover::build(w);
+        top.target.set_popover(Some(&target_pop.popover));
+        let busy_bar = gtk::ProgressBar::builder().css_classes(["loadbar"]).visible(false).build();
+        busy_bar.set_valign(Align::Start);
+        busy_bar.set_pulse_step(0.08);
         let banner =
             adw::Banner::new("Installing the newest Roblox build — this can take a few minutes");
+        let alert = Alert::build(w);
 
-        // -- accounts page ----------------------------------------------------
-        let games = GameBar::new(w.clone());
-        let reload_games = action_button(
-            "view-refresh-symbolic",
-            "Reload Everyone's Favourites",
-            "win.reload-games",
-        )
-        .css("flat circular");
-        let games_section = vbox!(
-            8,
-            "",
-            page_header(
-                "Launch Into",
-                Some("A favourite game, Roblox's own games browser, or a friend's server"),
-                &[reload_games.centered().upcast()]
-            ),
-            games.root.clone()
-        );
-
-        let accounts_meta = lbl("", "caption dimmed account-count");
-        let select_all = Btn::new("flat")
-            .text("Select All")
-            .icon("edit-select-all-symbolic")
-            .build(w.act(|w| w.on_select_all()));
-        let new_group = Btn::new("flat")
-            .text("New Group")
-            .icon("folder-new-symbolic")
-            .tip("A named set of accounts with a game of its own")
-            .build(w.act(|w| w.add_group()));
-        let accounts_head = hbox!(
-            8,
-            "section-header",
-            vbox!(2, "", lbl("Accounts", "title-4"), accounts_meta.clone()).hexpand().centered(),
-            select_all.button.clone().centered(),
-            new_group.button.centered()
-        );
-        let accounts_box = vbox!(22, "");
-        let page = vbox!(32, "", games_section, vbox!(18, "", accounts_head, accounts_box.clone()))
-            .margins(24);
-        page.set_margin_top(18);
-        let clamp =
-            adw::Clamp::builder().maximum_size(1080).tightening_threshold(760).child(&page).build();
-        let accounts_page = gtk::ScrolledWindow::builder()
-            .child(&clamp)
-            .hscrollbar_policy(PolicyType::Never)
-            .vexpand(true)
-            .build();
-
-        let welcome = adw::StatusPage::builder()
-            .icon_name("io.github.mujo.RobloxManager")
-            .title("Add Your First Account")
-            .description(
-                "Accounts sign in with Roblox Quick Login: you approve the sign-in on a device \
-                 where you are already signed in, and no password is typed here. Sessions are \
-                 kept in your keyring.",
+        // -- the accounts: command bar, header, table ----------------------------
+        let cmd = CmdBar::build(w);
+        let cols = Columns::default();
+        let table = gtk::Box::new(Orientation::Vertical, 0);
+        let add_line = gtk::Box::new(Orientation::Horizontal, 8);
+        add_line.set_margin_start(12);
+        add_line.set_margin_top(8);
+        add_line.set_margin_bottom(8);
+        for (text, action, tip) in [
+            ("Add account", "win.add-account", "Sign in another account with Quick Login (Ctrl+N)"),
+            ("New group", "win.new-group", "A named set of accounts with a game of its own"),
+        ] {
+            let b = crate::ui::ds::Button::with_icons(
+                text,
+                crate::ui::ds::Variant::Ghost,
+                true,
+                Some("plus"),
+                None,
             )
-            .build();
-        welcome.set_child(Some(
-            &gtk::Button::builder()
-                .label("_Add Account")
-                .use_underline(true)
-                .halign(Align::Center)
-                .css_classes(["pill", "suggested-action"])
-                .action_name("win.add-account")
-                .build(),
-        ));
-        let pages =
-            gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).build();
-        pages.add_named(&welcome, Some("welcome"));
-        pages.add_named(&accounts_page, Some("accounts"));
-
-        // -- macros and activity pane -------------------------------------------
-        let macros_box = vbox!(10, "");
-        let log_box = vbox!(2, "");
-        let macros_head = page_header(
-            "Macros",
-            Some("Keys and clicks played into macro-ready clients"),
-            &[
-                action_button("help-about-symbolic", "How Macros Work (F1)", "win.macro-help")
-                    .css("flat circular")
-                    .centered()
-                    .upcast(),
-                action_button("list-add-symbolic", "New Macro", "win.new-macro")
-                    .css("flat circular")
-                    .centered()
-                    .upcast(),
-            ],
-        );
-        let log_head = page_header(
-            "Activity",
-            None,
-            &[gtk::Button::builder()
-                .label("Show All")
-                .css_classes(["flat"])
-                .action_name("win.activity-log")
-                .tooltip_text("The Whole Log (Ctrl+L)")
-                .valign(Align::Center)
-                .build()
-                .upcast()],
-        );
-        let pane = vbox!(
-            26,
-            "pane",
-            vbox!(12, "", macros_head, macros_box.clone()),
-            vbox!(8, "", log_head, log_box.clone())
-        );
-        let pane_scroller = gtk::ScrolledWindow::builder()
-            .child(&pane)
+            .tip(tip)
+            .action(action);
+            add_line.append(&b.button);
+        }
+        let rows = gtk::Box::new(Orientation::Vertical, 0);
+        rows.append(&table);
+        rows.append(&add_line);
+        let scroller = gtk::ScrolledWindow::builder()
+            .child(&rows)
             .hscrollbar_policy(PolicyType::Never)
+            .vexpand(true)
+            .css_classes(["mn-table"])
+            .build();
+        let columns = gtk::Box::new(Orientation::Vertical, 0);
+        columns.append(&header(&cols));
+        columns.append(&scroller);
+        // Narrower than its columns (beside a wide inspector), the table
+        // scrolls sideways rather than widening the window.
+        let accounts = gtk::ScrolledWindow::builder()
+            .child(&columns)
+            .vscrollbar_policy(PolicyType::Never)
             .vexpand(true)
             .build();
 
-        // The inspector: macros and activity at home, and in their place the
-        // panel open now (an account's settings, a sign-in, a macro, the log).
-        let inspector = gtk::Stack::builder()
+        let logo = gtk::Image::from_icon_name("rm-brand");
+        logo.set_pixel_size(72);
+        let welcome = gtk::Box::new(Orientation::Vertical, 16).css("mn-tempty");
+        welcome.set_valign(Align::Center);
+        welcome.set_vexpand(true);
+        welcome.append(&logo);
+        welcome.append(&lbl("Add your first account", "mn-tempty-t").xalign(0.5));
+        welcome.append(
+            &lbl(
+                "Accounts sign in with Roblox Quick Login: you approve the sign-in on a device \
+                 where you are already signed in, and no password is typed here. The code is \
+                 ready in the panel on the right.",
+                "mn-tempty-s",
+            )
+            .wrapped()
+            .chars(56)
+            .xalign(0.5)
+            .justify(),
+        );
+        welcome.set_halign(Align::Center);
+        let pages = gtk::Stack::builder()
             .transition_type(gtk::StackTransitionType::Crossfade)
-            .transition_duration(150)
-            .hhomogeneous(false)
-            .vhomogeneous(false)
+            .vexpand(true)
             .build();
-        inspector.add_css_class("inspector");
-        inspector.add_named(&pane_scroller, Some("home"));
-        {
-            // Esc closes the open panel, once whatever has focus in it (a
-            // hotkey being captured) has had the key.
-            let keys = gtk::EventControllerKey::new();
-            let w = w.clone();
-            keys.connect_key_pressed(move |_, key, _, _| {
-                if key == gtk::gdk::Key::Escape
-                    && let Some(w) = w.upgrade()
-                    && w.close_panel()
-                {
-                    return glib::Propagation::Stop;
-                }
-                glib::Propagation::Proceed
-            });
-            inspector.add_controller(keys);
-        }
+        pages.add_named(&welcome, Some("welcome"));
+        pages.add_named(&accounts, Some("accounts"));
+        let center = gtk::Box::new(Orientation::Vertical, 0);
+        center.append(&cmd.root);
+        center.append(&pages);
 
-        let toasts = adw::ToastOverlay::new();
-        toasts.set_child(Some(&pages));
+        // -- the inspector beside it ---------------------------------------------------
+        let insp = Inspector::build(w);
         let split = adw::OverlaySplitView::builder()
-            .content(&toasts)
-            .sidebar(&inspector)
+            .content(&center)
+            .sidebar(&insp.root)
             .sidebar_position(gtk::PackType::End)
-            .min_sidebar_width(340.0)
-            .max_sidebar_width(520.0)
-            .sidebar_width_fraction(0.38)
+            .min_sidebar_width(NARROW)
+            .max_sidebar_width(NARROW)
+            .sidebar_width_fraction(0.5)
             .show_sidebar(sidebar)
             .build();
-        sidebar_toggle.bind_property("active", &split, "show-sidebar").bidirectional().build();
+        top.insp_toggle.bind_property("active", &split, "show-sidebar").bidirectional().build();
 
-        // -- launch bar -----------------------------------------------------------
-        let summary = lbl("", "summary").ellipsize();
-        let target_text = lbl("", "caption dimmed").ellipsize();
-        let stop_all = Btn::new("")
-            .text("Stop All")
-            .tip("Close every account's client and stop every macro")
-            .build(|| {});
-        stop_all.button.set_action_name(Some("win.stop-all"));
-        stop_all.button.set_visible(false);
-        // The narrow layout hides the slot and the client count the button,
-        // so neither undoes the other.
-        let stop_slot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        stop_slot.append(&stop_all.button);
-        let btn_each = Btn::new("")
-            .text("Launch Selected")
-            .tip("Each selected account into the target (Ctrl+Shift+Enter)")
-            .build(|| {});
-        btn_each.button.set_action_name(Some("win.launch-selected"));
-        let btn_group = Btn::new("suggested-action")
-            .text("Launch as Group")
-            .icon("media-playback-start-symbolic")
-            .tip("The leader first, then the auto-join list into its server (Ctrl+Enter)")
-            .build(|| {});
-        btn_group.button.set_action_name(Some("win.launch-group"));
-        let summary_box = vbox!(2, "", summary.clone(), target_text.clone()).hexpand().centered();
-        let launch_bar = hbox!(
-            8,
-            "launch-bar",
-            summary_box.clone(),
-            stop_slot.clone().centered(),
-            btn_each.button.clone().centered(),
-            btn_group.button.clone().centered()
-        );
+        // -- the drawer over the bottom, the strip under it ------------------------------
+        let log = LogDrawer::build(w);
+        let drawer = gtk::Revealer::builder()
+            .child(&log.root)
+            .transition_type(gtk::RevealerTransitionType::SlideUp)
+            .valign(Align::End)
+            .build();
+        let strip = Strip::build();
+        strip.log_toggle.bind_property("active", &drawer, "reveal-child").bidirectional().build();
+        let body = gtk::Overlay::new();
+        body.set_child(Some(&split));
+        body.add_overlay(&drawer);
+        body.add_overlay(&busy_bar);
+        body.set_vexpand(true);
+        let toasts = adw::ToastOverlay::new();
+        toasts.set_child(Some(&body));
 
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&header);
-        toolbar.add_top_bar(&search_bar);
-        toolbar.add_top_bar(&banner);
-        toolbar.set_content(Some(&split));
-        toolbar.add_bottom_bar(&launch_bar);
-        toolbar.set_bottom_bar_style(adw::ToolbarStyle::RaisedBorder);
-        win.set_content(Some(&toolbar));
-
-        // Narrow: the macros pane slides over the accounts instead of beside
-        // them, and the launch bar keeps only its buttons.
-        if let Ok(cond) = adw::BreakpointCondition::parse("max-width: 880sp") {
-            let narrow = adw::Breakpoint::new(cond);
-            narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
-            win.add_breakpoint(narrow);
-        }
-        if let Ok(cond) = adw::BreakpointCondition::parse("max-width: 560sp") {
-            let tiny = adw::Breakpoint::new(cond);
-            tiny.add_setter(&split, "collapsed", Some(&true.to_value()));
-            tiny.add_setter(&summary_box, "visible", Some(&false.to_value()));
-            tiny.add_setter(&stop_slot, "visible", Some(&false.to_value()));
-            win.add_breakpoint(tiny);
-        }
+        let root = gtk::Box::new(Orientation::Vertical, 0);
+        root.append(&top.root);
+        root.append(&banner);
+        root.append(&alert.root);
+        root.append(&toasts);
+        root.append(&strip.root);
+        win.set_content(Some(&root));
+        win.add_css_class("rm");
 
         let shortcuts = gtk::ShortcutController::new();
         win.add_controller(shortcuts.clone());
 
-        Chrome {
-            title,
-            spinner,
+        let chrome = Chrome {
+            top,
+            target_pop,
+            busy_bar,
             banner,
-            update_button,
+            alert,
+            cmd,
             pages,
-            accounts_box,
-            accounts_meta,
-            select_all,
-            games,
-            macros_box,
-            log_box,
-            summary,
-            target_text,
-            btn_each,
-            stop_all: stop_all.button,
-            launch_bar,
+            table,
+            cols,
+            insp,
+            split,
+            strip,
+            log,
             toasts,
             shortcuts,
-            split,
-            search_bar,
-            search,
-            inspector,
             panel: RefCell::default(),
+        };
+        chrome.breakpoints(win, w);
+        chrome
+    }
+
+    /// Narrower windows: fewer columns, then the inspector over the table
+    /// rather than beside it, then the top bar's extras go.
+    fn breakpoints(&self, win: &adw::ApplicationWindow, w: &WeakWindow) {
+        let steps: [(&str, u8, bool, bool); 4] = [
+            ("max-width: 1280sp", 1, false, false),
+            ("max-width: 1100sp", 1, true, false),
+            ("max-width: 860sp", 2, true, false),
+            ("max-width: 720sp", 2, true, true),
+        ];
+        for (cond, level, overlay, phone) in steps {
+            let Ok(cond) = adw::BreakpointCondition::parse(cond) else { continue };
+            let bp = adw::Breakpoint::new(cond);
+            bp.add_setter(&self.top.recents, "visible", Some(&false.to_value()));
+            if overlay {
+                bp.add_setter(&self.split, "collapsed", Some(&true.to_value()));
+                bp.add_setter(&self.top.brand_text, "visible", Some(&false.to_value()));
+                bp.add_setter(&self.top.search, "width-request", Some(&160.to_value()));
+            }
+            if level >= 2 {
+                bp.add_setter(&self.cmd.extras, "visible", Some(&false.to_value()));
+                bp.add_setter(&self.cmd.count, "visible", Some(&false.to_value()));
+            }
+            if phone {
+                bp.add_setter(&self.top.vsep, "visible", Some(&false.to_value()));
+                bp.add_setter(&self.top.search, "visible", Some(&false.to_value()));
+                bp.add_setter(&self.strip.links, "visible", Some(&false.to_value()));
+            }
+            let weak = w.clone();
+            bp.connect_apply(move |_| {
+                if let Some(w) = weak.upgrade() {
+                    w.columns().set_level(level);
+                }
+            });
+            let weak = w.clone();
+            bp.connect_unapply(move |_| {
+                if let Some(w) = weak.upgrade() {
+                    w.columns().set_level(0);
+                }
+            });
+            win.add_breakpoint(bp);
         }
     }
-}
 
-/// An icon button that fires a window action.
-fn action_button(icon: &str, tip: &str, action: &str) -> gtk::Button {
-    let b = gtk::Button::builder().icon_name(icon).tooltip_text(tip).action_name(action).build();
-    name(&b, tip);
-    b
-}
-
-fn main_menu() -> gio::Menu {
-    let menu = gio::Menu::new();
-    let add = gio::Menu::new();
-    add.append(Some("_Add Account…"), Some("win.add-account"));
-    add.append(Some("New _Group"), Some("win.new-group"));
-    add.append(Some("New _Macro…"), Some("win.new-macro"));
-    menu.append_section(None, &add);
-    let roblox = gio::Menu::new();
-    roblox.append(Some("_Refresh Sessions and Favourites"), Some("win.refresh"));
-    roblox.append(Some("_Update All"), Some("win.update"));
-    roblox.append(Some("Open Roblox _Links Here"), Some("win.open-links-here"));
-    menu.append_section(None, &roblox);
-    let windows = gio::Menu::new();
-    windows.append(Some("_Hide All Windows"), Some("win.hide-all"));
-    windows.append(Some("_Show All Windows"), Some("win.show-all"));
-    menu.append_section(None, &windows);
-    let help = gio::Menu::new();
-    help.append(Some("Activity _Log"), Some("win.activity-log"));
-    help.append(Some("How _Macros Work"), Some("win.macro-help"));
-    help.append(Some("_Keyboard Shortcuts"), Some("win.shortcuts"));
-    help.append(Some("_About Roblox Manager"), Some("app.about"));
-    menu.append_section(None, &help);
-    menu
+    /// Pulse the busy bar while it shows.
+    pub fn pulse(&self) {
+        let bar = self.busy_bar.downgrade();
+        glib::timeout_add_local(std::time::Duration::from_millis(80), move || {
+            match bar.upgrade() {
+                Some(b) if b.is_visible() => {
+                    b.pulse();
+                    glib::ControlFlow::Continue
+                }
+                _ => glib::ControlFlow::Break,
+            }
+        });
+    }
 }

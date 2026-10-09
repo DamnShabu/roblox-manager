@@ -130,6 +130,12 @@ fn cannot_start(app: &adw::Application, why: &str) {
 /// switch between.
 fn load_style() {
     adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
+    // The design's icons; without them the theme's stand in, so a failure
+    // is said and the app goes on.
+    let icons = rbxmgr_core::Paths::from_env().cache().join("ui-icons");
+    if let Err(e) = ui::icons::install(&icons) {
+        eprintln!("roblox-manager: could not write the app's icons to {}: {e}", icons.display());
+    }
     let Some(display) = gdk::Display::default() else { return };
     let base = gtk::CssProvider::new();
     base.load_from_string(include_str!("../resources/style.css"));

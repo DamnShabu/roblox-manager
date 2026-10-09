@@ -174,7 +174,7 @@ pub fn show(w: &Window) {
         page.append(&draw(block));
     }
     let clamp = adw::Clamp::builder().maximum_size(620).child(&page).build();
-    let panel = Panel::new("How Macros Work");
+    let panel = Panel::new("How macros work").for_macros();
     let view = adw::ToolbarView::new();
     view.add_top_bar(&panel.header());
     view.set_content(Some(

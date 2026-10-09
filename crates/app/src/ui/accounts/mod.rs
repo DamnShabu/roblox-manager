@@ -1,8 +1,5 @@
-//! The accounts page: the leader's card, group sections, rows, and the
-//! settings dialogs behind them.
+//! The panels for one account or group, opened in the inspector.
 
-pub mod group;
 pub mod group_settings;
-pub mod leader;
-pub mod row;
 pub mod settings;
+pub mod settings_more;

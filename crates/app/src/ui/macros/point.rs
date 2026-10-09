@@ -32,10 +32,10 @@ pub fn button(window: &WeakWindow, value: &gtk::Entry, err: &gtk::Label) -> gtk:
     const TIP: &str = "Pick the point in a running client";
     // Not a Btn: the button is the anchor of its own menu.
     let button = gtk::Button::builder()
-        .icon_name("find-location-symbolic")
+        .icon_name("rm-crosshair-symbolic")
         .tooltip_text(TIP)
         .valign(Align::Center)
-        .css_classes(["flat", "circular"])
+        .css_classes(["ib", "sm"])
         .build();
     button.update_property(&[gtk::accessible::Property::Label(TIP)]);
     let (window, value, err) = (window.clone(), value.downgrade(), err.downgrade());

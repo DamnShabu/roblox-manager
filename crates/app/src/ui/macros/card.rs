@@ -1,15 +1,15 @@
-//! One macro in the side pane: its switch and Run, and unfolded, its steps.
+//! One macro in the Macros tab: unfold, its switch, Run and Edit, and
+//! unfolded, its steps.
 
 use adw::prelude::*;
-use gtk::Align;
 use rbxmgr_core::macros::grammar::{self, loop_label};
 use rbxmgr_core::macros::lanes;
 
 use super::editor::MacroDialog;
 use crate::state::MacroRun;
+use crate::ui::ds::{self, set_ib};
 use crate::ui::widgets::{
-    self, Btn, Fluent, LabelFluent, boxed_list, hotkey_label, icon, lbl, plural, switch,
-    toggle_class,
+    self, Fluent, LabelFluent, hotkey_label, lbl, plural, switch, toggle_class,
 };
 use crate::ui::window::Window;
 
@@ -20,22 +20,25 @@ const SHOWN_STEPS: usize = 12;
 /// The icon for an editor step type.
 pub fn step_icon(kind: &str) -> &'static str {
     match kind {
-        "Key" | "Hold" | "Press" | "Release" | "Repeat" => "input-keyboard-symbolic",
-        "Type" => "insert-text-symbolic",
-        "Click" | "Scroll" | "Path" | "Turn" => "input-mouse-symbolic",
-        "Move" => "go-jump-symbolic",
-        "Wait" => "appointment-soon-symbolic",
-        "Start" => "alarm-symbolic",
-        "Stagger" => "view-continuous-symbolic",
-        "Note" => "text-x-generic-symbolic",
-        "Timeline" | "At" => "document-open-recent-symbolic",
-        "When" | "Do" => "image-x-generic-symbolic",
-        "Exit" => "media-skip-forward-symbolic",
-        _ => "system-run-symbolic",
+        "Key" | "Press" | "Release" => "keyboard",
+        "Hold" => "hold",
+        "Repeat" => "repeat",
+        "Type" => "type",
+        "Click" | "Scroll" | "Path" | "Turn" => "mouse",
+        "Move" => "move",
+        "Wait" => "clock",
+        "Start" => "start",
+        "Stagger" => "users",
+        "Note" => "note",
+        "Timeline" | "At" => "timeline",
+        "When" => "image",
+        "Do" => "do-arrow",
+        "Exit" => "exit",
+        _ => "info",
     }
 }
 
-pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
+pub fn macro_card(w: &Window, name: &str) -> gtk::Box {
     let (text, enabled, hotkey, opened) = {
         let s = w.state();
         (
@@ -59,27 +62,10 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
     }
     let about = about.join(" · ");
 
-    let list = boxed_list();
-    list.add_css_class("macro");
-    let row = adw::ExpanderRow::builder()
-        .title(name)
-        .subtitle(&about)
-        .use_markup(false)
-        .expanded(opened)
-        .build();
-    let toggled = name.to_owned();
-    let weak = w.weak();
-    row.connect_expanded_notify(move |r| {
-        if let Some(w) = weak.upgrade() {
-            w.set_macro_open(&toggled, r.is_expanded());
-        }
-    });
-
-    let run_name = name.to_owned();
-    let run = Btn::new("flat circular")
-        .icon("media-playback-start-symbolic")
-        .build(w.act(move |w| w.run_macro_card(&run_name)));
-    run.button.set_valign(Align::Center);
+    // -- the row: unfold, switch, name, Run, Edit --------------------------------
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8).css("mc-row");
+    let fold = ds::ib("chev-right", if opened { "Fold" } else { "Show its steps" }, true);
+    row.append(&fold);
     let toggled = name.to_owned();
     let weak = w.weak();
     let sw = switch(enabled, Some("Switched on: it can run"), move |on| {
@@ -87,11 +73,38 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
             w.enable_macro(&toggled, on);
         }
     });
-    row.add_suffix(&run.button);
-    row.add_suffix(&sw);
+    row.append(&sw);
+    let sub = lbl(&about, "cx-row-s").ellipsize();
+    let text_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    text_box.append(&lbl(name, "cx-row-t").ellipsize());
+    text_box.append(&sub);
+    row.append(&text_box.hexpand().centered());
+    let run_name = name.to_owned();
+    let run = ds::ib("play-filled", "Run", true);
+    run.add_css_class("go");
+    run.connect_clicked({
+        let w = w.weak();
+        move |_| {
+            if let Some(w) = w.upgrade() {
+                w.run_macro_card(&run_name);
+            }
+        }
+    });
+    row.append(&run);
+    let edit_name = name.to_owned();
+    let edit = ds::ib("pencil", &format!("Edit {name}"), true);
+    edit.connect_clicked({
+        let w = w.weak();
+        move |_| {
+            if let Some(w) = w.upgrade() {
+                MacroDialog::open(&w, Some(&edit_name));
+            }
+        }
+    });
+    row.append(&edit);
 
-    // Unfolded: the steps, what is wrong with them, Edit and Run.
-    let body = vbox!(4, "macro-steps");
+    // -- unfolded: its steps and what is wrong with them ---------------------------
+    let body = gtk::Box::new(gtk::Orientation::Vertical, 4).css("mc-steps");
     let units = lanes::units(&rows);
     let listed: Vec<(usize, usize)> =
         units.iter().copied().filter(|(i, _)| rows[*i].kind != "Note").collect();
@@ -109,49 +122,61 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
         };
         body.append(&hbox!(
             10,
-            "macro-step",
-            icon(step_icon(&r.kind)),
-            lbl(&r.kind, "kind").width(64),
-            lbl(&shown, "monospace dimmed").ellipsize().hexpand()
+            "mc-step",
+            ds::icon(step_icon(&r.kind)),
+            lbl(&r.kind, "t-label-sm").width(56),
+            lbl(&shown, "t-code-sm muted").ellipsize().hexpand()
         ));
     }
     if listed.len() > SHOWN_STEPS {
         let more = plural(listed.len() - SHOWN_STEPS, "more step", "more steps");
-        body.append(&lbl(&format!("…and {more}"), "dimmed caption"));
+        body.append(&lbl(&format!("…and {more}"), "t-caption muted"));
     }
     if rows.iter().all(|r| r.kind == "Note") {
-        body.append(&lbl("No steps yet.", "dimmed"));
+        body.append(&lbl("No steps yet.", "t-caption muted"));
     }
     let broken = grammar::parse(&text).err();
     if let Some(e) = &broken {
-        body.append(&lbl(&e.to_string(), "error caption").wrapped());
+        body.append(&lbl(&e.to_string(), "t-caption danger-text").wrapped());
     }
-    let edit_name = name.to_owned();
-    let edit = Btn::new("")
-        .text("Edit…")
-        .icon("document-edit-symbolic")
-        .build(w.act(move |w| MacroDialog::open(w, Some(&edit_name))));
-    let run_name = name.to_owned();
-    let run_on =
-        Btn::new("suggested-action").text("Run").build(w.act(move |w| w.run_macro_card(&run_name)));
-    let buttons = hbox!(8, "", edit.button.hexpand(), run_on.button.clone().hexpand());
-    buttons.set_homogeneous(true);
-    buttons.set_margin_top(8);
-    body.append(&buttons);
-    let holder =
-        gtk::ListBoxRow::builder().activatable(false).selectable(false).child(&body).build();
-    row.add_row(&holder);
-    list.append(&row);
+    let unfold = gtk::Revealer::builder().child(&body).reveal_child(opened).build();
+    {
+        let (unfold, toggled, weak) = (unfold.clone(), name.to_owned(), w.weak());
+        fold.connect_clicked(move |b| {
+            let open = !unfold.reveals_child();
+            unfold.set_reveal_child(open);
+            set_ib(
+                b,
+                if open { "chev-down" } else { "chev-right" },
+                if open { "Fold" } else { "Show its steps" },
+            );
+            if let Some(w) = weak.upgrade() {
+                w.set_macro_open(&toggled, open);
+            }
+        });
+    }
+    if opened {
+        set_ib(&fold, "chev-down", "Fold");
+    }
+    let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    card.append(&row);
+    card.append(&unfold);
 
-    let (name, parses, card) = (name.to_owned(), broken.is_none(), list.clone());
+    let (name, parses, shown) = (name.to_owned(), broken.is_none(), row.clone());
     w.watch_macros(Box::new(move |s| {
-        let playing = s.macro_runs.values().filter(|(_, m)| *m == name).count();
+        let playing: Vec<&str> = s
+            .macro_runs
+            .iter()
+            .filter(|(_, (_, m))| *m == name)
+            .filter_map(|(id, _)| s.accounts.get(*id).map(|a| a.name.as_str()))
+            .collect();
         let can = parses && s.macros.enabled(&name);
-        toggle_class(&card, "running", playing > 0);
-        row.set_subtitle(&if playing > 0 {
-            format!("Playing on {}", plural(playing, "client", "clients"))
-        } else {
+        toggle_class(&shown, "playing", !playing.is_empty());
+        toggle_class(&shown, "off", !s.macros.enabled(&name));
+        sub.set_label(&if playing.is_empty() {
             about.clone()
+        } else {
+            format!("Playing on {}", playing.join(", "))
         });
         // Run starts it on the selected accounts not yet playing it; once
         // every selected one plays it, the same button stops it.
@@ -161,21 +186,6 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
             MacroRun::Stop => (true, 0),
             MacroRun::Nothing => (false, 0),
         };
-        for b in [&run, &run_on] {
-            b.set_icon(if stop {
-                "media-playback-stop-symbolic"
-            } else {
-                "media-playback-start-symbolic"
-            });
-            b.button.set_sensitive(stop || (can && n > 0));
-        }
-        run_on.set_text(&match (stop, playing) {
-            (true, _) => "Stop".to_owned(),
-            (false, 0) => format!("Run on {n} Selected"),
-            (false, _) => format!("Run on {n} More"),
-        });
-        toggle_class(&run_on.button, "suggested-action", !stop);
-        toggle_class(&run_on.button, "destructive-action", stop);
         let tip = if stop {
             "Stop it everywhere it plays".to_owned()
         } else if !s.macros.enabled(&name) {
@@ -184,20 +194,15 @@ pub fn macro_card(w: &Window, name: &str) -> gtk::ListBox {
             "Fix its steps to run it".to_owned()
         } else if n == 0 {
             "Select the accounts to run it on".to_owned()
-        } else if playing > 0 {
-            format!(
-                "Start it from the top on {}; where it already plays, it plays on",
-                plural(n, "more selected account", "more selected accounts")
-            )
         } else {
             format!(
                 "Play it into {}",
                 plural(n, "selected account's client", "selected accounts' clients")
             )
         };
-        run.button.set_tooltip_text(Some(&tip));
-        widgets::name(&run.button, if stop { "Stop" } else { "Run" });
-        run_on.button.set_tooltip_text(Some(&tip));
+        set_ib(&run, if stop { "stop" } else { "play-filled" }, &tip);
+        run.set_sensitive(stop || (can && n > 0));
+        widgets::name(&run, if stop { "Stop" } else { "Run" });
     }));
-    list
+    card
 }

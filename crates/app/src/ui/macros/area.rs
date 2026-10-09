@@ -46,10 +46,10 @@ window.area-picker { background: rgba(0, 0, 0, 0.2); }
 pub fn button(window: &WeakWindow, value: &gtk::Entry, err: &gtk::Label) -> gtk::Button {
     const TIP: &str = "Pick the area to look for in a running client";
     let button = gtk::Button::builder()
-        .icon_name("image-x-generic-symbolic")
+        .icon_name("rm-image-symbolic")
         .tooltip_text(TIP)
         .valign(Align::Center)
-        .css_classes(["flat", "circular"])
+        .css_classes(["ib", "sm"])
         .build();
     button.update_property(&[gtk::accessible::Property::Label(TIP)]);
     let (window, value, err) = (window.clone(), value.downgrade(), err.downgrade());

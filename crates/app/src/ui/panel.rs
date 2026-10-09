@@ -5,7 +5,7 @@
 //! A panel takes the calls the dialogs made -- a child, `present`, `close`,
 //! `connect_closed` -- so each one moved over without changing what it does.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::OnceLock;
 
 use adw::prelude::*;
@@ -25,6 +25,10 @@ mod imp {
         pub closer: RefCell<Option<Box<dyn Fn()>>>,
         pub default: RefCell<Option<gtk::Widget>>,
         pub focus: RefCell<Option<gtk::Widget>>,
+        /// Shown under the Macros tab rather than Details.
+        pub macros: Cell<bool>,
+        /// The line under the title in its head.
+        pub sub: RefCell<String>,
     }
 
     #[glib::object_subclass]
@@ -78,28 +82,50 @@ impl Panel {
         self.set_child(Some(&view));
     }
 
-    /// The panel's own header bar: its title and a close button, without
-    /// the window's buttons (the window has those already).
-    pub fn header(&self) -> adw::HeaderBar {
-        let header = adw::HeaderBar::builder()
-            .show_start_title_buttons(false)
-            .show_end_title_buttons(false)
-            .title_widget(&adw::WindowTitle::new(&self.title(), ""))
-            .build();
-        let close = gtk::Button::builder()
-            .icon_name("window-close-symbolic")
-            .tooltip_text("Close (Esc)")
-            .css_classes(["flat", "circular"])
-            .build();
-        close.update_property(&[gtk::accessible::Property::Label("Close")]);
+    /// Show it under the Macros tab.
+    pub fn for_macros(self) -> Self {
+        self.imp().macros.set(true);
+        self
+    }
+
+    pub fn is_for_macros(&self) -> bool {
+        self.imp().macros.get()
+    }
+
+    /// The line under the title in its head.
+    pub fn with_sub(self, sub: &str) -> Self {
+        self.imp().sub.replace(sub.to_owned());
+        self
+    }
+
+    /// The panel's head: its title, the line under it, and its close.
+    pub fn header(&self) -> gtk::Box {
+        let sub = self.imp().sub.borrow().clone();
+        let title = crate::ui::widgets::lbl(&self.title(), "cx-head-title");
+        let line = crate::ui::widgets::lbl(&sub, "cx-head-sub");
+        line.set_visible(!sub.is_empty());
+        let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        text.set_valign(gtk::Align::Center);
+        text.set_hexpand(true);
+        text.append(&title);
+        text.append(&line);
+        let h = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        h.add_css_class("cx-head");
+        h.append(&text);
+        h.append(&self.close_button());
+        h
+    }
+
+    /// The close of the panel's head, for a head drawn by the panel itself.
+    pub fn close_button(&self) -> gtk::Button {
+        let close = crate::ui::ds::ib("x", "Close (Esc)", false);
         let me = self.downgrade();
         close.connect_clicked(move |_| {
             if let Some(p) = me.upgrade() {
                 p.close();
             }
         });
-        header.pack_end(&close);
-        header
+        close
     }
 
     /// Show it in the window's inspector, in place of any panel there.

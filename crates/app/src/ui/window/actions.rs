@@ -21,8 +21,9 @@ pub const SHORTCUTS: &[(&str, &str, &[&str])] = &[
     ("win.launch-group", "Launch as group", &["<Control>Return"]),
     ("win.launch-selected", "Launch selected", &["<Control><Shift>Return"]),
     ("win.stop-all", "Stop all", &["<Control><Shift>period"]),
+    ("win.pick-target", "Pick where launches go", &["<Control>t"]),
     ("win.new-macro", "New macro", &["<Control><Shift>n"]),
-    ("win.toggle-sidebar", "Show or hide macros and activity", &["F9"]),
+    ("win.toggle-sidebar", "Show or hide the inspector", &["F9"]),
     ("win.activity-log", "Activity log", &["<Control>l"]),
     ("win.macro-help", "How macros work", &["F1"]),
     ("win.shortcuts", "Keyboard shortcuts", &["<Control>question"]),
@@ -39,7 +40,7 @@ type GroupAction = (&'static str, fn(&Window, &str));
 
 impl Window {
     pub(super) fn install_actions(&self) {
-        let actions: [Action; 20] = [
+        let actions: [Action; 23] = [
             ("add-account", Window::on_add),
             ("refresh", Window::refresh_all),
             ("update", Window::on_update),
@@ -49,6 +50,9 @@ impl Window {
             ("launch-selected", Window::launch_selected),
             ("launch-group", Window::launch_chain),
             ("stop-all", Window::on_stop_all),
+            ("stop-selected", Window::stop_selected),
+            ("hide-selected", Window::hide_selected),
+            ("pick-target", Window::pick_target),
             ("hide-all", Window::on_hide_all),
             ("show-all", Window::on_show_all),
             ("select-all", Window::on_select_all),
@@ -141,9 +145,11 @@ impl Window {
                 w.set_group(UserId(id), Some(gid).filter(|g| !g.is_empty()));
             }
         });
-        let groups: [GroupAction; 2] = [
+        let groups: [GroupAction; 4] = [
             ("group-settings", |w, gid| GroupSettings::open(w, gid)),
             ("delete-group", Window::confirm_delete_group),
+            ("select-group", Window::select_group),
+            ("move-selected", Window::move_selected),
         ];
         for (name, run) in groups {
             self.add_deferred(name, glib::VariantTy::STRING, move |w, v| {
@@ -198,20 +204,5 @@ pub fn set_accels(app: &adw::Application) {
 }
 
 fn show_shortcuts(w: &Window) {
-    let dialog = adw::ShortcutsDialog::new();
-    let section = adw::ShortcutsSection::new(Some("Roblox Manager"));
-    for (action, title, _) in SHORTCUTS {
-        section.add(adw::ShortcutsItem::from_action(title, action));
-    }
-    dialog.add(section);
-    let hotkeys: Vec<(String, String)> =
-        w.state().macros.hotkeys().map(|(n, k)| (n.to_owned(), k.to_owned())).collect();
-    if !hotkeys.is_empty() {
-        let section = adw::ShortcutsSection::new(Some("Macros (while this window has focus)"));
-        for (name, accel) in hotkeys {
-            section.add(adw::ShortcutsItem::new(&format!("Run or stop {name}"), &accel));
-        }
-        dialog.add(section);
-    }
-    dialog.present(Some(w.gtk_window()));
+    crate::ui::help::show(w, false);
 }
