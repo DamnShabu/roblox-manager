@@ -269,7 +269,7 @@ impl MacroDialog {
         const TIP: &str = "Record steps by playing in a running client: press F8 in its \
                            window to start, and again to stop";
         let content = adw::ButtonContent::builder()
-            .icon_name("media-record-symbolic")
+            .icon_name("rm-record-symbolic")
             .label("_Record")
             .use_underline(true)
             .build();

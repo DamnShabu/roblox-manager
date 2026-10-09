@@ -115,6 +115,7 @@ pub fn account_row(w: &Window, acct: &Account) -> gtk::Box {
                 }
             });
             let t = gtk::Box::new(Orientation::Vertical, 0);
+            t.set_valign(Align::Center);
             t.append(&lbl(m, "mn-macro-t").ellipsize());
             t.append(&macro_progress);
             macro_cell.append(&macro_btn);

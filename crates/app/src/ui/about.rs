@@ -25,5 +25,11 @@ pub fn show(parent: Option<&gtk::Window>) {
         gtk::License::Gpl30,
         None,
     );
+    about.add_legal_section(
+        "Material Symbols",
+        Some("The app's icons, by Google."),
+        gtk::License::Apache20,
+        None,
+    );
     about.present(parent);
 }

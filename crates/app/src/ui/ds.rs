@@ -234,7 +234,7 @@ pub fn overline(text: &str) -> gtk::Label {
 
 /// A section of a panel: its overline, anything on its right, then rows.
 pub fn sec(title: &str, right: Option<&gtk::Widget>) -> gtk::Box {
-    let s = gtk::Box::new(Orientation::Vertical, 8);
+    let s = gtk::Box::new(Orientation::Vertical, 0);
     s.add_css_class("cx-sec");
     if !title.is_empty() || right.is_some() {
         let h = gtk::Box::new(Orientation::Horizontal, 8);
@@ -352,7 +352,8 @@ pub fn keys(keys: &[&str]) -> gtk::Box {
 /// A field stacked for the inspector's width: its label, the control, and
 /// help under it.
 pub fn sfield(label: &str, control: &impl IsA<gtk::Widget>, help: Option<&str>) -> gtk::Box {
-    let b = gtk::Box::new(Orientation::Vertical, 6);
+    let b = gtk::Box::new(Orientation::Vertical, 0);
+    b.add_css_class("cx-field-s");
     b.append(&lbl(label, "t-label"));
     b.append(control);
     if let Some(h) = help {

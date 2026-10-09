@@ -199,6 +199,10 @@ fn about_page() -> gtk::Box {
         &lbl("Each client runs in Stacked, a fork of Cordial, under the GPL 3.0.", "t-body-sm")
             .wrapped(),
     );
+    legal.append(
+        &lbl("Icons: Material Symbols by Google, under the Apache License 2.0.", "t-body-sm")
+            .wrapped(),
+    );
     let more =
         ds::Button::new("Credits and full licences", Variant::Ghost, true).action("app.about");
     more.button.set_halign(Align::Start);
