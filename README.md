@@ -423,7 +423,3 @@ nix run .
 
 [docs/development.md](docs/development.md) covers how the code is laid out,
 the checks to run before committing, and how releases are made.
-
-<p align="center">
-  <img src="docs/screenshots/hero-light.png" width="80%" alt="Roblox Manager in the light style">
-</p>
