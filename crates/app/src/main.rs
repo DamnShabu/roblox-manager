@@ -137,6 +137,9 @@ fn load_style() {
         eprintln!("roblox-manager: could not write the app's icons to {}: {e}", icons.display());
     }
     let Some(display) = gdk::Display::default() else { return };
+    // Scrollbars float over the content and fade when idle, whatever the
+    // desktop says: the always-on gutter bar is what the stylesheet replaces.
+    gtk::Settings::for_display(&display).set_gtk_overlay_scrolling(true);
     let base = gtk::CssProvider::new();
     base.load_from_string(include_str!("../resources/style.css"));
     gtk::style_context_add_provider_for_display(
