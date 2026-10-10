@@ -70,6 +70,30 @@ window.rm popover,
 }
 window.rm { background: var(--rm-bg); color: var(--rm-text); }
 
+/* -- scrollbars ------------------------------------------------------------ */
+/* Adwaita's bar, with overlay scrolling off on the desktop, is a 12 px
+   bordered pill in its own gutter, the loudest thing beside the table. Here
+   it is a thin translucent thumb with no trough, border or buttons, which
+   widens a little under the pointer; main.rs turns overlay scrolling on so
+   it floats over the content and fades out when idle. */
+scrollbar, scrollbar trough {
+  background: none; border: none; box-shadow: none;
+}
+scrollbar button { min-width: 0; min-height: 0; padding: 0; border: none; background: none; -gtk-icon-size: 0; }
+scrollbar slider {
+  min-width: 4px; min-height: 4px; margin: 2px;
+  border: none; outline: none; box-shadow: none; border-radius: 999px;
+  background: rgb(255 255 255 / 16%);
+  transition: min-width 150ms ease-out, min-height 150ms ease-out, background 150ms ease-out;
+}
+scrollbar.vertical slider { min-height: 32px; }
+scrollbar.horizontal slider { min-width: 32px; }
+scrollbar.overlay-indicator:not(.hovering) slider { margin: 3px; background: rgb(255 255 255 / 14%); }
+scrollbar.vertical:hover slider, scrollbar.vertical.hovering slider { min-width: 6px; }
+scrollbar.horizontal:hover slider, scrollbar.horizontal.hovering slider { min-height: 6px; }
+scrollbar slider:hover { background: rgb(255 255 255 / 28%); }
+scrollbar slider:active { background: rgb(255 255 255 / 38%); }
+
 /* -- type ----------------------------------------------------------------- */
 .t-h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
 .t-h4 { font-size: 16px; font-weight: 600; }
