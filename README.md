@@ -1,14 +1,13 @@
 # Roblox Manager
 
-Run several Roblox accounts on Linux and put them in the same server.
+Run several Roblox accounts on Linux and keep them working while you do
+something else.
 
-![Roblox Manager with three accounts running into Grand Piece Online](docs/screenshots/hero-dark.png)
-
-You sign each account in once, then launch them all with one click. One
-account goes first as the leader, and the rest join whatever server it lands
-in. The app also handles the Play button on roblox.com, and it can run simple
-key-and-click macros on an account while you use your desktop for something
-else.
+You sign each account in once, then launch any of them into a game with one
+click. The window shows at a glance what runs, what needs you, and how much
+of the machine each client takes. The app also handles the Play button on
+roblox.com, and it can run simple key-and-click macros on an account while
+you use your desktop for something else.
 
 Roblox itself runs in [Cordial](cordial/README.md), a runtime for Roblox's
 official Android build. The manager installs and updates it for you.
@@ -21,8 +20,9 @@ official Android build. The manager installs and updates it for you.
 
 **Contents:** [Install](#install) ·
 [Add an account](#add-an-account) ·
+[The window](#the-window) ·
 [Launch](#launch-into-a-game) ·
-[Leader and auto-join](#leader-and-auto-join) ·
+[Main account](#main-account) ·
 [Groups](#groups) ·
 [Links from the website](#joining-from-the-website) ·
 [Account settings](#account-settings) ·
@@ -62,7 +62,7 @@ progress shows under **Activity**.
 
 <img src="docs/screenshots/add-account.png" width="420" align="right" alt="The Add Account dialog showing a Quick Login code">
 
-Click **+** in the top-left corner (or press <kbd>Ctrl</kbd>+<kbd>N</kbd>).
+Click **+** in the header bar (or press <kbd>Ctrl</kbd>+<kbd>N</kbd>).
 
 The app signs in with Roblox **Quick Login**, so you never type a password
 here:
@@ -75,35 +75,55 @@ here:
 
 A code expires after three minutes. **New Code** gets a fresh one.
 
-Repeat this for each account. The first account you add becomes the
-**leader** (marked with a ★). You can change that later.
+Repeat this for each account. The first account you add becomes your
+**main account** (marked with a ★). You can change that later.
 
 <br clear="right">
 
+## The window
+
+- **The sidebar** on the left filters the table: **All accounts**, **Needs
+  attention**, **Running**, **Launching** and **Idle**, then each group. It
+  also lists your macros, and at the bottom how busy the machine's CPU and
+  memory are. <kbd>F9</kbd> shows or hides it.
+- **The table** lists the accounts by group. Each row shows its status, how
+  long its client has run (or when it last ran), the CPU and memory it takes,
+  its macro and its performance level. Whatever needs you (a session Roblox
+  signed out, a launch that failed) sits at the top under **Needs
+  attention**, with its fix right there.
+- **The details pane** under the table shows the account you click: its
+  performance, its macro, its window and its session, its macro's steps,
+  and its own lines of the activity log. <kbd>F7</kbd> folds it away.
+- **The status bar** along the bottom shows the latest activity;
+  **Activity** opens the full log.
+
 ## Launch into a game
 
-The strip across the top is **Launch Into**. It shows the games your
-accounts have favourited on Roblox, plus two special tiles:
+The target picker next to **Launch**, at the top right, says where launches
+go. It lists the games your accounts have favourited on Roblox, plus:
 
 - **Games browser** starts the clients on Roblox's own home screen, and you
   pick a game there.
-- **Join a friend** lists an account's friends and where each one is. Pick
-  a friend who is in a game, and launches go to their server.
+- **Join a friend** lists your main account's friends and where each one
+  is. Pick a friend who is in a game, and launches go to their server.
 
-Click a game to select it. Then use one of the buttons at the bottom right:
+Tick the accounts to launch, then:
 
 | Button | What it does |
 | --- | --- |
-| **Launch as Group** (<kbd>Ctrl</kbd>+<kbd>Enter</kbd>) | Starts the leader, waits until it's in a server, then sends the auto-join accounts into that same server. |
-| **Launch N Selected** (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>) | Starts every ticked account in the selected game. Roblox puts each one in whatever server it chooses. |
-| **Stop All** | Closes every client the manager started. |
+| **Launch** (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>) | Starts every ticked account in the target. Roblox puts each one in whatever server it chooses; with a friend as the target, they all go to the friend's server. |
+| **Stop all** | Closes every client the manager started. |
 
-Each row also has its own ▶ and ■ buttons for starting or stopping just that
-account. Every account you launch together starts at the same time.
+Each row also has its own launch and stop button for just that account, and
+a group's row launches or stops the whole group. Every account you launch
+together starts at the same time.
+
+With accounts ticked, the toolbar also sets their **Performance**, runs a
+**macro** on them, moves them to a group, stops them or hides their windows.
 
 ### Hide a client's window
 
-While an account runs, the 👁 button on its row hides its window: off the
+While an account runs, the eye button on its row hides its window: off the
 screen and off the taskbar, with the game still running at a low frame rate.
 Click it again to bring the window back. **Hide All Windows** and **Show All
 Windows** in the main menu do every account at once, and hidden windows stay
@@ -114,39 +134,32 @@ Hiding needs Stacked 0.21.7 or newer. If the button is missing, press
 and its macros keep playing while it is hidden; one launched by a version
 before 0.9.4 needs launching again first.
 
-## Leader and auto-join
+## Main account
 
-The **Leader** card at the top of the list shows who goes first and, under
-**Auto-join after**, who follows. Followers launch in the order shown. Use
-the arrows to reorder them and **−** to drop one.
+Your main account is pinned at the top of the table, outside every group,
+and it is the account **Join a friend** lists friends for. Choose **Make
+main account** from another account's ⋮ menu or its settings to pin that one
+instead.
 
-You can add a follower in three ways: drag its row onto the leader's card,
-turn on **Auto-join the Leader** in its settings, or pick **Auto-join** from
-its ⋮ menu.
-
-![An account's menu: Settings, Make Leader, Stop Auto-joining, Move To, Check Session, Sign In Again, Remove](docs/screenshots/row-menu.png)
-
-After the leader starts, the manager asks Roblox which server it's in, for
-up to 90 seconds. If the leader hasn't joined a server by then, followers
-launch anyway and end up in their own servers. If the leader is already
-running, Launch as Group skips the wait and sends the followers straight to
-it.
+Earlier versions launched a leader first and sent auto-join accounts into
+its server. That is gone: launch the accounts you want together, or join a
+friend's server.
 
 ## Groups
 
 <img src="docs/screenshots/group-settings.png" width="380" align="right" alt="Group Settings with Grand Piece Online chosen as the group's game">
 
 Groups sort accounts and give them a game of their own. Make one with
-**New Group** above the list. Then drag accounts onto it, or use
-**Move To** in an account's ⋮ menu.
+**New group** in the sidebar. Then drag accounts onto the group's row or its
+entry in the sidebar, or use **Move to** in an account's ⋮ menu.
 
-Click a group's ⋮ and choose **Settings** to pick its game. After that, the
-**Launch** button on the group's header sends every account in it to that
-game, whatever is selected in the strip. While any of its accounts are
-running, the same button reads **Stop**.
+Click the game on a group's row (or its name) to pick its game. After that,
+the **Launch** button on the group's row sends every account in it to that
+game, whatever the target says. While any of its accounts are running, the
+same button reads **Stop**. The row also says how many of its accounts run
+and the CPU and memory they take together.
 
-The checkbox on a group's header ticks or unticks all of its accounts at
-once.
+The checkbox on a group's row ticks or unticks all of its accounts at once.
 
 <br clear="right">
 
@@ -197,9 +210,9 @@ Open them from an account's ⋮ menu, or by right-clicking its row.
   own slider setting back.
 - **Macro** and **Macro-Ready Window**: see [Macros](#macros).
 - **Session** shows whether Roblox still accepts the stored sign-in.
-  **Check** asks Roblox now. If a session has expired, the row says
-  **Expired**. Use **Sign In Again** from the ⋮ menu; you won't need to
-  re-add the account.
+  **Check now** asks Roblox now. If a session has expired, the account moves
+  under **Needs attention** as **Signed out**, with **Sign in again** beside
+  it; you won't need to re-add the account.
 
 <br clear="right">
 
@@ -207,13 +220,13 @@ Open them from an account's ⋮ menu, or by right-clicking its row.
 
 A macro presses keys and clicks the mouse in one account's client, on its
 own, for as long as you let it. It keeps working while you use other
-windows. Macros live in the side pane (<kbd>F9</kbd> shows or hides it).
+windows. Macros are listed in the sidebar (<kbd>F9</kbd> shows or hides it).
 
 ![The macro editor with six steps: click, wait, key, wait, hold, wait, repeated for 25 rounds](docs/screenshots/macro-editor.png)
 
 ### Setting one up
 
-1. Click **+** in the Macros pane (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>),
+1. Click **+** next to **Macros** in the sidebar (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>),
    add steps, and **Save**.
 2. Open the account's **Settings** and pick the macro. This turns on
    **Macro-Ready Window**.
@@ -221,7 +234,8 @@ windows. Macros live in the side pane (<kbd>F9</kbd> shows or hides it).
 4. Press **Run** next to the macro in the account's settings. Press it again
    to stop.
 
-Or press ▶ on a macro in the side pane to run it on every ticked account at
+Or press the play button on a macro in the sidebar, or pick it under **Run
+macro** in the toolbar, to run it on every ticked account at
 once. That also turns on their macro-ready windows. A macro whose switch is
 off can't run.
 
@@ -368,27 +382,25 @@ Click **Restart** in the banner to switch to the new version.
 | <kbd>Ctrl</kbd>+<kbd>N</kbd> | Add an account |
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search accounts by label, Roblox name or note |
 | <kbd>Ctrl</kbd>+<kbd>R</kbd> or <kbd>F5</kbd> | Check sessions and reload favourites |
-| <kbd>Ctrl</kbd>+<kbd>Enter</kbd> | Launch as group |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd> | Launch selected |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>.</kbd> | Stop all |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> | New macro |
-| <kbd>F9</kbd> | Show or hide the macros pane |
+| <kbd>F9</kbd> | Show or hide the sidebar |
+| <kbd>F7</kbd> | Show or fold the details pane |
 | <kbd>Ctrl</kbd>+<kbd>L</kbd> | Full activity log |
 | <kbd>F1</kbd> | How macros work |
 | <kbd>Ctrl</kbd>+<kbd>?</kbd> | All shortcuts, including macro hotkeys |
 
 ## Troubleshooting
 
-**An account says "Expired".** Roblox has signed it out, which happens
-after a password change or a "log out of all sessions". Choose **Sign In
-Again** from its ⋮ menu.
+**An account says "Signed out".** Roblox has signed it out, which happens
+after a password change or a "log out of all sessions". Click **Sign in
+again** beside it under **Needs attention**, or choose it from its ⋮ menu.
 
-**Followers end up in a different server from the leader.** The manager
-finds the leader's server through Roblox's presence API. If the leader
-hadn't joined a server within 90 seconds, or Roblox didn't report one,
-followers launch on their own. Check **Activity** (<kbd>Ctrl</kbd>+<kbd>L</kbd>)
-to see what happened, then launch the followers again once the leader is
-in.
+**My accounts land in different servers.** Launching several accounts into
+a game lets Roblox pick each one's server. To put them together, join a
+friend's server: pick the friend under **Join a friend** in the target
+picker, then launch.
 
 **The Play button on the website opens Sober, Vinegar or nothing.** Choose
 **Open Roblox Links Here** in the main menu.

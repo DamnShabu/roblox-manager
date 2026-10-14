@@ -1,0 +1,391 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-14T12:00:00Z",
+  "title": "Design System: Stacked",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Control-room Black",
+        "canonical": "#0f1013",
+        "tonalRamp": [
+          "#0f1013",
+          "#14151a",
+          "#16171c",
+          "#1e2026",
+          "#2a2d35",
+          "#30333b",
+          "#7d818c",
+          "#eceef2"
+        ]
+      },
+      "side": {
+        "role": "neutral",
+        "displayName": "Side Layer",
+        "canonical": "#14151a"
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "#16171c"
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "Raised",
+        "canonical": "#1e2026"
+      },
+      "raised-2": {
+        "role": "neutral",
+        "displayName": "Raised 2",
+        "canonical": "#2a2d35"
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#23252c"
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Hairline, Strong",
+        "canonical": "#30333b"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Readout White",
+        "canonical": "#eceef2"
+      },
+      "text-2": {
+        "role": "neutral",
+        "displayName": "Secondary Grey",
+        "canonical": "#a3a7b2",
+        "tonalRamp": [
+          "#1c1d21",
+          "#33353b",
+          "#4e5058",
+          "#6a6d76",
+          "#878a95",
+          "#a3a7b2",
+          "#c7cad2",
+          "#e9eaee"
+        ]
+      },
+      "text-3": {
+        "role": "neutral",
+        "displayName": "Dim Grey",
+        "canonical": "#7d818c"
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Signal Red",
+        "canonical": "#ff3d2e",
+        "tonalRamp": [
+          "#3a0904",
+          "#5e110a",
+          "#8f1a10",
+          "#c22617",
+          "#ff3d2e",
+          "#ff6f63",
+          "#ffa69e",
+          "#ffdcd8"
+        ]
+      },
+      "accent-hover": {
+        "role": "primary",
+        "displayName": "Signal Red, lit",
+        "canonical": "#ff5a4e"
+      },
+      "on-accent": {
+        "role": "primary",
+        "displayName": "Ember Black",
+        "canonical": "#140806"
+      },
+      "success": {
+        "role": "status",
+        "displayName": "Running Green",
+        "canonical": "#4cc38a",
+        "tonalRamp": [
+          "#0c2619",
+          "#13402a",
+          "#1d5f3f",
+          "#2b8559",
+          "#4cc38a",
+          "#7fd6ab",
+          "#b2e8cd",
+          "#e2f7ec"
+        ]
+      },
+      "warning": {
+        "role": "status",
+        "displayName": "Waiting Amber",
+        "canonical": "#f0a641",
+        "tonalRamp": [
+          "#2e1d06",
+          "#4d310b",
+          "#734a12",
+          "#a7691a",
+          "#f0a641",
+          "#f4bf73",
+          "#f8d7a6",
+          "#fcefda"
+        ]
+      },
+      "danger": {
+        "role": "status",
+        "displayName": "Fault Coral",
+        "canonical": "#ff7a70",
+        "tonalRamp": [
+          "#3a0f0c",
+          "#5e1914",
+          "#8c251e",
+          "#c9372c",
+          "#ff7a70",
+          "#ff9d95",
+          "#ffc2bd",
+          "#ffe6e3"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Empty-table titles, the largest panel heads."
+      },
+      "view-title": {
+        "displayName": "View title",
+        "purpose": "The toolbar's view name, with its count in Dim Grey."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Panel heads."
+      },
+      "title-sm": {
+        "displayName": "Title sm",
+        "purpose": "The app name in the header; the selected account's name in the details pane."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Account names in the table (group names at 600)."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "The window's base size; sidebar items."
+      },
+      "body-sm": {
+        "displayName": "Body sm",
+        "purpose": "@usernames, status words, help, menus."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Buttons, inputs, selects, segments, tabs."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Column heads and field labels in Dim Grey, badges, chips."
+      },
+      "section-head": {
+        "displayName": "Section head",
+        "purpose": "Sidebar and menu section heads, Dim Grey, sentence case."
+      },
+      "numeral": {
+        "displayName": "Numeral",
+        "purpose": "Every compared reading: counts, uptime, CPU, memory, machine load."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Log times, keycaps, macro step fields; the Quick Login code at 30px."
+      }
+    },
+    "shadows": [
+      {
+        "name": "float",
+        "value": "0 2px 6px rgb(0 0 0 / 40%), 0 12px 32px rgb(0 0 0 / 45%)",
+        "purpose": "Popovers and menus (over a 1px Hairline, Strong inset ring), toasts, the activity drawer."
+      },
+      {
+        "name": "segment-lift",
+        "value": "0 1px 2px rgb(0 0 0 / 40%)",
+        "purpose": "The selected segment of a segmented control; the one resting shadow."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state",
+        "value": "120ms",
+        "purpose": "Background and colour changes on hover, press and check."
+      },
+      {
+        "name": "turn",
+        "value": "180ms",
+        "purpose": "Chevron turns (fold, drawer) and the tab underline."
+      },
+      {
+        "name": "blink",
+        "value": "1.2s ease-in-out infinite",
+        "purpose": "A live status dot pulsing between full and 35% opacity."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "wide",
+        "value": "1280px",
+        "note": "Below it uptime and memory columns leave."
+      },
+      {
+        "name": "medium",
+        "value": "1100px",
+        "note": "Below it CPU and macro columns leave."
+      },
+      {
+        "name": "narrow",
+        "value": "860px",
+        "note": "Below it the performance column leaves."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one primary action per view: the toolbar's Launch for the selection.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"17\" height=\"17\" viewBox=\"0 -960 960 960\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M320-258v-450q0-14 9-22t21-8q4 0 8 1t8 3l354 226q7 5 10.5 11t3.5 14q0 8-3.5 14T720-458L366-232q-4 2-8 3t-8 1q-12 0-21-8t-9-22Z\"/></svg>Launch 3 selected</button>",
+      "css": ".ds-btn-primary{font-family:'Inter Variable',Inter,system-ui,sans-serif;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border:none;border-radius:6px;background:#ff3d2e;color:#140806;font-size:13px;font-weight:600;transition:background-color 120ms;cursor:pointer}.ds-btn-primary:hover{background:#ff5a4e}.ds-btn-primary:active{background-image:linear-gradient(rgb(0 0 0/14%),rgb(0 0 0/14%))}.ds-btn-primary:focus-visible{outline:2px solid #ff3d2e;outline-offset:1px;}.ds-btn-primary:disabled{opacity:.45}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Every other action, including a group's own Launch.",
+      "html": "<button class=\"ds-btn-secondary\"><svg width=\"17\" height=\"17\" viewBox=\"0 -960 960 960\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M320-258v-450q0-14 9-22t21-8q4 0 8 1t8 3l354 226q7 5 10.5 11t3.5 14q0 8-3.5 14T720-458L366-232q-4 2-8 3t-8 1q-12 0-21-8t-9-22Z\"/></svg>Launch</button>",
+      "css": ".ds-btn-secondary{font-family:'Inter Variable',Inter,system-ui,sans-serif;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:none;border-radius:6px;background:#1e2026;color:#eceef2;font-size:13px;font-weight:500;transition:background-color 120ms;cursor:pointer}.ds-btn-secondary svg{color:#a3a7b2}.ds-btn-secondary:hover{background:#2a2d35}.ds-btn-secondary:focus-visible{outline:2px solid #ff3d2e;outline-offset:1px;}"
+    },
+    {
+      "name": "Ghost Toolbar Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "The selection's actions in the toolbar; no ground until hover, a chevron when it opens a menu.",
+      "html": "<button class=\"ds-btn-ghost\">Performance<svg width=\"16\" height=\"16\" viewBox=\"0 -960 960 960\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M469-358q-5-2-10-7L261-563q-9-9-8.5-21.5T262-606q9-9 21.5-9t21.5 9l175 176 176-176q9-9 21-8.5t21 9.5q9 9 9 21.5t-9 21.5L501-365q-5 5-10 7t-11 2q-6 0-11-2Z\"/></svg></button>",
+      "css": ".ds-btn-ghost{font-family:'Inter Variable',Inter,system-ui,sans-serif;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border:none;border-radius:6px;background:none;color:#eceef2;font-size:13px;font-weight:500;transition:background-color 120ms;cursor:pointer}.ds-btn-ghost svg{color:#a3a7b2}.ds-btn-ghost:hover{background:#1e2026}.ds-btn-ghost:focus-visible{outline:2px solid #ff3d2e;outline-offset:1px;}"
+    },
+    {
+      "name": "Icon Button",
+      "kind": "button",
+      "refersTo": "icon-button",
+      "description": "32px square; grey at rest, white on Raised under the pointer, Raised 2 when toggled.",
+      "html": "<button class=\"ds-ib\" aria-label=\"Launch\"><svg width=\"18\" height=\"18\" viewBox=\"0 -960 960 960\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M320-258v-450q0-14 9-22t21-8q4 0 8 1t8 3l354 226q7 5 10.5 11t3.5 14q0 8-3.5 14T720-458L366-232q-4 2-8 3t-8 1q-12 0-21-8t-9-22Z\"/></svg></button>",
+      "css": ".ds-ib{display:inline-grid;place-items:center;width:32px;height:32px;padding:0;border:none;border-radius:6px;background:none;color:#a3a7b2;transition:background-color 120ms,color 120ms;cursor:pointer}.ds-ib:hover{background:#1e2026;color:#eceef2}.ds-ib:active,.ds-ib[aria-pressed=true]{background:#2a2d35;color:#eceef2}.ds-ib:focus-visible{outline:2px solid #ff3d2e;outline-offset:1px;}"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "The header's search; Raised ground, no border, red focus outline.",
+      "html": "<label class=\"ds-search\"><svg width=\"16\" height=\"16\" viewBox=\"0 -960 960 960\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M378-329q-108.16 0-183.08-75Q120-479 120-585t75-181q75-75 181.5-75t181 75Q632-691 632-584.85 632-542 618-502q-14 40-42 75l242 240q9 8.56 9 21.78T818-143q-9 9-22.22 9-13.22 0-21.78-9L533-384q-30 26-69.96 40.5Q423.08-329 378-329Zm-1-60q81.25 0 138.13-57.5Q572-504 572-585t-56.87-138.5Q458.25-781 377-781q-82.08 0-139.54 57.5Q180-666 180-585t57.46 138.5Q294.92-389 377-389Z\"/></svg><input placeholder=\"Search accounts\"></label>",
+      "css": ".ds-search{font-family:'Inter Variable',Inter,system-ui,sans-serif;display:flex;align-items:center;gap:8px;width:320px;height:32px;padding:0 10px;border-radius:6px;background:#1e2026;color:#7d818c}.ds-search:hover{background:#2a2d35}.ds-search input{flex:1;border:none;background:none;color:#eceef2;font:inherit;font-size:13px;outline:none}.ds-search input::placeholder{color:#7d818c}.ds-search:focus-within{outline:2px solid #ff3d2e;outline-offset:1px;}"
+    },
+    {
+      "name": "Segmented Control",
+      "kind": "custom",
+      "refersTo": "segment-on",
+      "description": "Performance levels; a black well, the chosen segment Raised 2 with white text and a 1px lift.",
+      "html": "<div class=\"ds-seg\" role=\"radiogroup\"><button class=\"on\" aria-checked=\"true\">Low</button><button>Medium</button><button>High</button><button>Max</button></div>",
+      "css": ".ds-seg{font-family:'Inter Variable',Inter,system-ui,sans-serif;display:inline-flex;padding:2px;border-radius:7px;background:#0f1013;box-shadow:inset 0 0 0 1px #23252c}.ds-seg button{height:26px;padding:0 13px;border:none;border-radius:5px;background:none;color:#a3a7b2;font:inherit;font-size:13px;font-weight:500;cursor:pointer}.ds-seg button:hover{color:#eceef2}.ds-seg button.on{background:#2a2d35;color:#eceef2;box-shadow:0 1px 2px rgb(0 0 0/40%)}.ds-seg button:focus-visible{outline:2px solid #ff3d2e;outline-offset:1px;}"
+    },
+    {
+      "name": "Checkbox and Switch",
+      "kind": "custom",
+      "refersTo": "checkbox-on",
+      "description": "Material Symbols checkbox icons (empty grey, checked white) and a switch that is white when on.",
+      "html": "<div class=\"ds-on\"><span class=\"ds-check\"><svg width=\"18\" height=\"18\" viewBox=\"0 -960 960 960\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M180-120q-24 0-42-18t-18-42v-600q0-24 18-42t42-18h600q24 0 42 18t18 42v600q0 24-18 42t-42 18H180Zm0-60h600v-600H180v600Z\"/></svg></span><span class=\"ds-check on\"><svg width=\"18\" height=\"18\" viewBox=\"0 -960 960 960\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"m419-407-98-98q-9-9-21-9t-21 9q-9 9-9 21.5t9 21.5l119 120q9 9 21 9t21-9l247-248q9-9 9-21t-9-21q-9-9-21.5-9t-21.5 9L419-407ZM180-120q-24 0-42-18t-18-42v-600q0-24 18-42t42-18h600q24 0 42 18t18 42v600q0 24-18 42t-42 18H180Z\"/></svg></span><span class=\"ds-switch on\"><i></i></span><span class=\"ds-switch\"><i></i></span></div>",
+      "css": ".ds-on{display:flex;align-items:center;gap:16px}.ds-check{display:inline-grid;color:#7d818c;transition:color 120ms}.ds-check:hover{color:#a3a7b2}.ds-check.on{color:#eceef2}.ds-switch{display:inline-flex;width:32px;height:18px;border-radius:9999px;background:#2a2d35}.ds-switch i{width:14px;height:14px;margin:2px;border-radius:9999px;background:#a3a7b2}.ds-switch.on{background:#eceef2;justify-content:flex-end}.ds-switch.on i{background:#0f1013}"
+    },
+    {
+      "name": "Sidebar Item",
+      "kind": "nav",
+      "refersTo": "sidebar-item",
+      "description": "A filter, group or macro in the 240px sidebar; Dim Grey icon, tabular count, Raised when chosen.",
+      "html": "<nav class=\"ds-sb\"><div class=\"ds-sb-h\">Status</div><button class=\"ds-sb-it on\"><span class=\"i\"></span>All accounts<span class=\"n\">31</span></button><button class=\"ds-sb-it\"><span class=\"i bad\"></span>Needs attention<span class=\"n\">0</span></button><button class=\"ds-sb-it\"><span class=\"i\"></span>Running<span class=\"n\">0</span></button></nav>",
+      "css": ".ds-sb{font-family:'Inter Variable',Inter,system-ui,sans-serif;width:240px;padding:6px 10px 12px;background:#14151a;color:#eceef2}.ds-sb-h{padding:14px 10px 6px;font-size:12px;font-weight:600;color:#7d818c}.ds-sb-it{display:flex;align-items:center;gap:10px;width:100%;height:32px;padding:0 10px;border:none;border-radius:6px;background:none;color:#eceef2;font:inherit;font-size:14px;cursor:pointer}.ds-sb-it .i{width:14px;height:14px;border-radius:3px;border:1.5px solid #7d818c}.ds-sb-it .i.bad{border-color:#ff7a70;background:#ff7a70;border-radius:9999px}.ds-sb-it.on .i{border-color:#eceef2}.ds-sb-it .n{margin-left:auto;font-size:13px;color:#7d818c;font-variant-numeric:tabular-nums}.ds-sb-it:hover,.ds-sb-it.on{background:#1e2026}.ds-sb-it:focus-visible{outline:2px solid #ff3d2e;outline-offset:1px;}"
+    },
+    {
+      "name": "Account Row",
+      "kind": "custom",
+      "refersTo": "table-row",
+      "description": "A 40px table row: name expands, state is a dot and word, readings tabular and right-aligned.",
+      "html": "<div class=\"ds-row\"><span class=\"ds-av\"></span><span class=\"who\"><b>givemegoodname35</b><em>@givemegoodname35</em></span><span class=\"st\"><i></i>Running</span><span class=\"num\">2 h 14 m</span><span class=\"num r\">18%</span><span class=\"num r\">1.2 GB</span><span class=\"perf\"><b>Low</b> 10 FPS<svg width=\"14\" height=\"14\" viewBox=\"0 -960 960 960\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M469-358q-5-2-10-7L261-563q-9-9-8.5-21.5T262-606q9-9 21.5-9t21.5 9l175 176 176-176q9-9 21-8.5t21 9.5q9 9 9 21.5t-9 21.5L501-365q-5 5-10 7t-11 2q-6 0-11-2Z\"/></svg></span></div>",
+      "css": ".ds-row{font-family:'Inter Variable',Inter,system-ui,sans-serif;display:flex;align-items:center;gap:12px;height:40px;padding:0 16px;background:#0f1013;border-bottom:1px solid #23252c;color:#eceef2;transition:background-color 120ms}.ds-row:hover{background:#15161b}.ds-row.current{background:#1e2026}.ds-av{width:24px;height:24px;border-radius:9999px;background:#2a2d35}.ds-row .who{flex:1;min-width:180px;display:flex;gap:8px;align-items:baseline}.ds-row .who b{font-size:14px;font-weight:500}.ds-row .who em{font-style:normal;font-size:13px;color:#7d818c}.ds-row .st{width:124px;display:flex;gap:8px;align-items:center;font-size:13px;font-weight:500}.ds-row .st i{width:7px;height:7px;border-radius:9999px;background:#4cc38a}.ds-row .num{width:80px;font-size:13px;color:#a3a7b2;font-variant-numeric:tabular-nums}.ds-row .num.r{width:60px;text-align:right}.ds-row .perf{width:140px;display:flex;gap:4px;align-items:center;font-size:12px;color:#7d818c}.ds-row .perf b{font-size:13px;font-weight:600;color:#eceef2}"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "A pill on Raised with a status dot and a word.",
+      "html": "<span class=\"ds-badge\"><i></i>Expired</span>",
+      "css": ".ds-badge{font-family:'Inter Variable',Inter,system-ui,sans-serif;display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:9999px;background:#1e2026;color:#ff7a70;font-size:12px;font-weight:500}.ds-badge i{width:7px;height:7px;border-radius:9999px;background:currentColor}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Control Room",
+    "overview": "One working window, checked between other things and then left. Everything running is visible at once and quiet until something needs the user; what needs them arrives with its fix. The ground is near-black and low-glare so thirty rows of accounts read as one calm surface, and the one red button is the thing the eye finds first.\n\nIt is a native GTK4/libadwaita app, dense and flat. A 52px header bar, a 240px sidebar of filters, groups, macros and machine load, a main column of toolbar over a dense accounts table, a foldable details pane under the table, and a 30px status bar with an activity drawer. Structure is drawn with 1px hairlines and close tonal steps of near-black, not cards or shadows. Colour is spent on state alone, and only in small dots and icons; \"on\" is white. The stylesheet also sets Adwaita's own named colours to the same tokens, and gives every surface it paints a text colour too, so the desktop's palette never lands on these surfaces. Dark only.\n\nFunction first: nothing on screen is decoration. Real game icons and real account avatars carry identity; type, hairlines and white do the rest.",
+    "keyCharacteristics": [
+      "Dark only: near-black content, a lifted side layer for header, sidebar and status bar, a panel layer for the details pane and popovers.",
+      "One red, on the primary action and on focus; nothing else is red.",
+      "\"On\" is white: checked checkboxes, switches, the selected segment's label, the current tab's underline.",
+      "State colour lives only in dots and icons, always beside a word.",
+      "Inter at 14/13/12 with sentence-case labels; tabular numerals for every reading.",
+      "Material Symbols Rounded (weight 400) for every icon, checkboxes included.",
+      "6px corners on every control."
+    ],
+    "rules": [
+      {
+        "name": "The One Red Rule",
+        "body": "Signal Red is the one primary action and the focus ring. A group's own Launch, Run, Check now and every other button are grey.",
+        "section": "colors"
+      },
+      {
+        "name": "The White Is On Rule",
+        "body": "A checked checkbox, a switch that is on, the chosen segment and the current tab are white. \"On\" is never red and never a status colour.",
+        "section": "colors"
+      },
+      {
+        "name": "The Dot And Word Rule",
+        "body": "State colour appears only in small dots (7 to 8px) and icons, each beside a word (Idle, Running, Expired). No coloured row grounds, no coloured edge stripes, no coloured text blocks.",
+        "section": "colors"
+      },
+      {
+        "name": "The Sentence Case Rule",
+        "body": "Every label, head, button and column is sentence case. Nothing is upper-cased or letter-spaced for effect.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tabular Reading Rule",
+        "body": "Every number the user compares (counts, uptime, CPU, memory, machine load) uses tabular numerals; CPU and memory sit right-aligned in their columns.",
+        "section": "typography"
+      },
+      {
+        "name": "The Hairline Rule",
+        "body": "Regions and rows are separated by a 1px Hairline. Nothing that rests carries a shadow, apart from the segment lift.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep Signal Red (#ff3d2e) for the one primary action and the focus ring.",
+      "Do draw \"on\" in white: checked checkboxes, switches, the chosen segment's label, the current tab's underline.",
+      "Do put state colour only in 7 to 8px dots and icons, always beside a word.",
+      "Do separate regions and rows with 1px Hairlines on the tonal blacks.",
+      "Do use 6px corners on every control and Material Symbols Rounded 400 for every icon, embedded as SVG and drawn in the text colour.",
+      "Do write every label in sentence case and every compared number in tabular numerals.",
+      "Do let only the account column expand in the table; every other column keeps its width and leaves in order as the window narrows.",
+      "Do give every surface that gets a background its text colour too, so the desktop's palette never shows through."
+    ],
+    "donts": [
+      "Don't colour a group's Launch, Run or any second action red; they are secondary buttons.",
+      "Don't use Signal Red for errors or expired sessions; that is Fault Coral.",
+      "Don't add coloured edge stripes, coloured row grounds or tinted cards to show state.",
+      "Don't put a shadow on anything that rests; Float is for popovers, toasts and the drawer.",
+      "Don't upper-case or letter-space labels, heads or columns.",
+      "Don't depend on the desktop's fonts or icon theme; Inter, JetBrains Mono and the icons ship with the app.",
+      "Don't add a light theme; the window is dark only."
+    ]
+  }
+}

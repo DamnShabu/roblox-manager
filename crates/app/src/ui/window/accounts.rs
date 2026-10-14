@@ -1,47 +1,70 @@
-//! The accounts page: drawing it, and everything a row, section or dialog
-//! asks of the accounts and groups.
+//! The accounts page: drawing it for the current view, and everything a
+//! row, a group's row, the sidebar or a dialog asks of the accounts and
+//! groups.
+
+use std::collections::HashSet;
 
 use adw::prelude::*;
-use rbxmgr_core::accounts::Account;
+use rbxmgr_core::accounts::{Account, Group};
 use rbxmgr_core::types::{Label, PlaceId, Profile, User, UserId};
 
 use super::Window;
+use crate::state::{Need, View};
 use crate::ui::accounts::group_settings::GroupSettings;
 use crate::ui::confirm;
 use crate::ui::ds;
 use crate::ui::login::AddAccountDialog;
+use crate::ui::table::attention::attention_section;
 use crate::ui::table::band::group_band;
-use crate::ui::table::chain::launch_order;
 use crate::ui::table::row::account_row;
 use crate::ui::widgets::{Fluent, LabelFluent, clear, lbl, sentence};
+
+/// One group's part of the table: the group (None for Ungrouped), all its
+/// members, and the ones the view shows.
+type Section = (Option<Group>, Vec<Account>, Vec<Account>);
 
 impl Window {
     pub fn refresh_accounts(&self) {
         self.0.rows.borrow_mut().clear();
         let ui = &self.0.ui;
         clear(&ui.table);
-        let (leader, followers, groups, sections, move_to) = {
+        ui.sidebar.draw_groups(self);
+        let (empty, needs, main, sections, move_to) = {
             let s = self.state();
             let store = &s.accounts;
-            let followers: Vec<Account> = store.followers().into_iter().cloned().collect();
+            let all = s.view == View::All;
+            let attention: HashSet<UserId> = s.needs().iter().map(|n| n.id).collect();
+            let needs: Vec<Need> =
+                if matches!(s.view, View::All | View::Attention) { s.needs() } else { Vec::new() };
+            // In the All view, what needs attention is drawn there, not twice.
+            let pulled = |a: &Account| all && attention.contains(&a.user_id);
+            let main = store.leader().filter(|l| all && !pulled(l)).cloned();
             let visual = store.visual_order();
-            let sections: Vec<Vec<Account>> = store
+            let sections: Vec<Section> = store
                 .groups()
                 .iter()
                 .map(|g| Some(g.id.as_str()))
                 .chain([None])
-                .map(|gid| {
-                    // The leader heads its own group's rows.
-                    store
-                        .leader()
-                        .filter(|l| store.group_of(l) == gid)
-                        .into_iter()
-                        .chain(visual.iter().copied().filter(|a| store.group_of(a) == gid))
+                .filter_map(|gid| {
+                    let members: Vec<Account> = visual
+                        .iter()
+                        .copied()
+                        .filter(|a| store.group_of(a) == gid)
                         .cloned()
-                        .collect()
+                        .collect();
+                    let shown: Vec<Account> =
+                        members.iter().filter(|a| s.in_view(a) && !pulled(a)).cloned().collect();
+                    let group =
+                        gid.and_then(|g| store.groups().iter().find(|x| x.id == g)).cloned();
+                    let keep = match &s.view {
+                        View::All => group.is_some() || !members.is_empty(),
+                        View::Group(v) => gid.unwrap_or_default() == v,
+                        View::Attention => false,
+                        View::Running | View::Launching | View::Idle => !shown.is_empty(),
+                    };
+                    keep.then_some((group, members, shown))
                 })
                 .collect();
-            let empty = store.accounts().is_empty();
             let move_to: Vec<(String, String)> = store
                 .groups()
                 .iter()
@@ -52,15 +75,9 @@ impl Window {
                 })
                 .chain([(String::new(), "Ungrouped".to_owned())])
                 .collect();
-            (
-                if empty { None } else { Some(store.leader().cloned()) },
-                followers,
-                store.groups().to_vec(),
-                sections,
-                move_to,
-            )
+            (store.accounts().is_empty(), needs, main, sections, move_to)
         };
-        let Some(leader) = leader else {
+        if empty {
             ui.pages.set_visible_child_name("welcome");
             self.refresh_launch_state();
             // The one thing to do first: the sign-in is ready beside it.
@@ -68,23 +85,55 @@ impl Window {
                 AddAccountDialog::open(self, None);
             }
             return;
-        };
+        }
         ui.pages.set_visible_child_name("accounts");
-        ui.cmd.set_groups(&move_to, self.state().accounts.selected().len());
+        ui.toolbar.set_groups(&move_to, self.state().accounts.selected().len());
         if !self.state().filter.is_empty() {
             self.search_results();
             self.refresh_launch_state();
             return;
         }
-        ui.table.append(&launch_order(self, leader.as_ref(), &followers));
-        for (i, members) in sections.iter().enumerate() {
-            let group = groups.get(i);
-            if group.is_none() && members.is_empty() {
-                continue;
-            }
-            ui.table.append(&group_band(self, group, members));
+        if !needs.is_empty() {
+            ui.table.append(&attention_section(self, &needs));
         }
+        if let Some(main) = &main {
+            ui.table.append(&account_row(self, main));
+        }
+        for (group, members, shown) in &sections {
+            ui.table.append(&group_band(self, group.as_ref(), members, shown));
+        }
+        if needs.is_empty() && main.is_none() && sections.is_empty() {
+            ui.table.append(&self.empty_view());
+        }
+        self.draw_details();
         self.refresh_launch_state();
+    }
+
+    /// Show `view` in the table.
+    pub fn set_view(&self, view: View) {
+        if self.state().view == view {
+            return;
+        }
+        self.state_mut().view = view;
+        self.refresh_accounts();
+    }
+
+    /// What a view with no account in it says.
+    fn empty_view(&self) -> gtk::Box {
+        let text = match self.state().view {
+            View::Attention => "Nothing needs attention",
+            View::Running => "No account is running",
+            View::Launching => "No account is launching",
+            View::Idle => "Every account is running",
+            View::All | View::Group(_) => "No accounts here",
+        };
+        let empty = gtk::Box::new(gtk::Orientation::Vertical, 8).css("cx-empty");
+        empty.append(&lbl(text, "cx-empty-t").xalign(0.5));
+        let all = ds::Button::new("Show all accounts", ds::Variant::Secondary, true)
+            .on(self.act(|w| w.set_view(View::All)));
+        all.button.set_halign(gtk::Align::Center);
+        empty.append(&all.button);
+        empty
     }
 
     /// Search the accounts: `query` narrows the table to the ones it finds.
@@ -147,22 +196,13 @@ impl Window {
     }
 
     // -- layout -----------------------------------------------------------
-    pub fn set_leader(&self, id: UserId) {
+    /// Pin `id` as the main account: drawn first, out of every group.
+    pub fn set_main(&self, id: UserId) {
         self.state_mut().accounts.make_leader(id);
         self.changed();
         if let Some(l) = self.label_of(id) {
-            self.log(&format!("Leader set to {l}"));
+            self.log(&format!("Main account set to {l}"));
         }
-    }
-
-    pub fn set_follow(&self, id: UserId, on: bool) {
-        self.state_mut().accounts.set_follow(id, on);
-        self.changed();
-    }
-
-    pub fn move_follower(&self, id: UserId, delta: isize) {
-        self.state_mut().accounts.move_follower(id, delta);
-        self.changed();
     }
 
     pub fn set_group(&self, id: UserId, group: Option<String>) {
@@ -193,9 +233,12 @@ impl Window {
         self.refresh_launch_state();
     }
 
-    /// Select every account, or none.
+    /// Select every account the view shows, or none of them.
     pub fn select_every(&self, on: bool) {
-        let ids: Vec<UserId> = self.state().accounts.accounts().iter().map(|a| a.user_id).collect();
+        let ids: Vec<UserId> = {
+            let s = self.state();
+            s.accounts.accounts().iter().filter(|a| s.in_view(a)).map(|a| a.user_id).collect()
+        };
         self.select_accounts(&ids, on);
     }
 
@@ -303,6 +346,7 @@ impl Window {
         self.state_mut().accounts.set_group_game(gid, game);
         self.changed();
         self.show_games();
+        self.load_missing_game_icons();
     }
 
     // -- one account --------------------------------------------------------
@@ -316,9 +360,26 @@ impl Window {
         self.save_accounts();
     }
 
+    /// Its rows and the details redraw it: nothing is rebuilt.
     pub fn set_performance(&self, id: UserId, level: rbxmgr_core::cordial::Performance) {
         self.state_mut().accounts.set_performance(id, level);
-        self.changed();
+        self.save_accounts();
+        self.refresh_states();
+    }
+
+    /// One level for every selected account.
+    pub fn set_performance_selected(&self, level: rbxmgr_core::cordial::Performance) {
+        let ids: Vec<UserId> = self.state().accounts.selected().iter().map(|a| a.user_id).collect();
+        for id in &ids {
+            self.state_mut().accounts.set_performance(*id, level);
+        }
+        self.save_accounts();
+        self.refresh_states();
+        self.toast(&format!(
+            "{} for {}; it applies when each next launches",
+            level.label(),
+            crate::ui::widgets::plural(ids.len(), "account", "accounts")
+        ));
     }
 
     pub fn on_add(&self) {

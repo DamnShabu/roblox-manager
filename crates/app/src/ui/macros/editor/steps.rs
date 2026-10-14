@@ -9,7 +9,7 @@ use rbxmgr_core::macros::grammar::{self, Row};
 use rbxmgr_core::macros::lanes;
 
 use super::MacroDialog;
-use crate::ui::macros::card::step_icon;
+use crate::ui::macros::kinds::step_icon;
 use crate::ui::macros::{area, point};
 use crate::ui::widgets::{Btn, Fluent, LabelFluent, lbl, plural, wrap};
 

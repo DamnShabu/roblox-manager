@@ -24,87 +24,17 @@ pub struct ReadyClient {
     pub label: String,
     pub display: PathBuf,
 }
-use crate::ui::ds;
-use crate::ui::macros::card::macro_card;
 use crate::ui::macros::images;
-use crate::ui::widgets::{Fluent, LabelFluent, clear, hotkey_label, lbl};
+use crate::ui::widgets::hotkey_label;
 use crate::worker;
 
 impl Window {
     pub fn refresh_macros(&self) {
-        self.0.cards.borrow_mut().clear();
-        let page = &self.0.ui.insp.macros_list;
-        clear(page);
         let names: Vec<String> = self.state().macros.names().map(str::to_owned).collect();
-        let help = ds::ib("info", "How macros work (F1)", true);
-        help.set_action_name(Some("win.macro-help"));
-        let add = ds::ib("plus", "New macro (Ctrl+Shift+N)", true);
-        add.set_action_name(Some("win.new-macro"));
-        let title = lbl("Macros", "cx-head-title");
-        let sub = lbl("Keys and clicks played into macro-ready clients", "cx-head-sub");
-        let head = gtk::Box::new(gtk::Orientation::Horizontal, 8).css("cx-head");
-        let text = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        text.append(&title);
-        text.append(&sub);
-        head.append(&text.hexpand());
-        head.append(&help);
-        head.append(&add);
-        page.append(&head);
-        let body = ds::sec("", None);
-        body.add_css_class("first");
-        let runs_on = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        runs_on.append(&ds::icon("users").css("muted s16"));
-        let runs_label = lbl("", "t-caption muted").wrapped();
-        runs_on.append(&runs_label);
-        self.watch_macros(Box::new(move |s| {
-            let n = s.accounts.selected().len();
-            runs_label.set_label(&match n {
-                0 => "Select accounts in the table to run a macro on them.".to_owned(),
-                1 => "Run plays into the selected account's client.".to_owned(),
-                n => format!("Run plays into the {n} selected accounts' clients."),
-            });
-        }));
-        body.append(&runs_on);
-        if names.is_empty() {
-            let empty = gtk::Box::new(gtk::Orientation::Vertical, 8).css("cx-empty");
-            empty.append(&lbl("No macros yet", "cx-empty-t").xalign(0.5));
-            empty.append(
-                &lbl("A macro presses keys and clicks for an account on its own.", "")
-                    .wrapped()
-                    .xalign(0.5),
-            );
-            let new = ds::Button::with_icons(
-                "New macro",
-                ds::Variant::Secondary,
-                true,
-                Some("plus"),
-                None,
-            )
-            .action("win.new-macro");
-            new.button.set_halign(gtk::Align::Center);
-            empty.append(&new.button);
-            body.append(&empty);
-        } else {
-            let card = gtk::Box::new(gtk::Orientation::Vertical, 0).css("mc-card");
-            for name in &names {
-                card.append(&macro_card(self, name));
-            }
-            body.append(&card);
-        }
-        let hint = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        let k = ds::icon("keyboard").css("muted s16");
-        k.set_valign(gtk::Align::Start);
-        hint.append(&k);
-        hint.append(
-            &lbl(
-                "A hotkey runs or stops its macro on the selected accounts while this window                  has focus. Switching a macro off stops it everywhere.",
-                "t-caption muted",
-            )
-            .wrapped(),
-        );
-        body.append(&hint);
-        page.append(&body);
+        self.0.ui.sidebar.draw_macros(self);
+        self.0.ui.toolbar.set_macros(&names);
         self.bind_hotkeys();
+        self.draw_details();
         self.refresh_launch_state();
     }
 

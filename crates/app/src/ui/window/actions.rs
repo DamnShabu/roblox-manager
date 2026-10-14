@@ -4,6 +4,7 @@
 use adw::prelude::*;
 use gtk::glib::variant::StaticVariantType;
 use gtk::{gio, glib};
+use rbxmgr_core::cordial::Performance;
 use rbxmgr_core::types::UserId;
 use rbxmgr_core::window_state::Style;
 
@@ -18,12 +19,12 @@ pub const SHORTCUTS: &[(&str, &str, &[&str])] = &[
     ("win.add-account", "Add account", &["<Control>n"]),
     ("win.search", "Search accounts", &["<Control>f"]),
     ("win.refresh", "Check sessions and reload favourites", &["<Control>r", "F5"]),
-    ("win.launch-group", "Launch as group", &["<Control>Return"]),
     ("win.launch-selected", "Launch selected", &["<Control><Shift>Return"]),
     ("win.stop-all", "Stop all", &["<Control><Shift>period"]),
     ("win.pick-target", "Pick where launches go", &["<Control>t"]),
     ("win.new-macro", "New macro", &["<Control><Shift>n"]),
-    ("win.toggle-sidebar", "Show or hide the inspector", &["F9"]),
+    ("win.toggle-sidebar", "Show or hide the sidebar", &["F9"]),
+    ("win.toggle-details", "Show or fold the details", &["F7"]),
     ("win.activity-log", "Activity log", &["<Control>l"]),
     ("win.macro-help", "How macros work", &["F1"]),
     ("win.shortcuts", "Keyboard shortcuts", &["<Control>question"]),
@@ -48,7 +49,6 @@ impl Window {
             ("new-group", Window::add_group),
             ("new-macro", |w| macros::editor::MacroDialog::open(w, None)),
             ("launch-selected", Window::launch_selected),
-            ("launch-group", Window::launch_chain),
             ("stop-all", Window::on_stop_all),
             ("stop-selected", Window::stop_selected),
             ("hide-selected", Window::hide_selected),
@@ -63,9 +63,10 @@ impl Window {
             ("activity-log", activity::open_log),
             ("macro-help", macros::help::show),
             ("shortcuts", show_shortcuts),
-            ("toggle-sidebar", |w| {
-                let split = &w.0.ui.split;
-                split.set_show_sidebar(!split.shows_sidebar());
+            ("toggle-sidebar", Window::toggle_sidebar),
+            ("toggle-details", |w| {
+                let fold = &w.0.ui.details.fold;
+                fold.set_active(!fold.is_active());
             }),
         ];
         for (name, run) in actions {
@@ -115,13 +116,9 @@ impl Window {
     /// with its id. Each waits for the menu to close before it runs: most
     /// redraw the list, the menu's row with it.
     fn install_item_actions(&self) {
-        let accounts: [AccountAction; 6] = [
+        let accounts: [AccountAction; 5] = [
             ("account-settings", |w, id| AccountSettings::open(w, id)),
-            ("make-leader", Window::set_leader),
-            ("toggle-follow", |w, id| {
-                let on = w.state().accounts.get(id).is_some_and(|a| a.follow.is_none());
-                w.set_follow(id, on);
-            }),
+            ("make-main", Window::set_main),
             ("check-session", |w, id| w.check_sessions(vec![id])),
             ("sign-in-again", |w, id| {
                 let acct = w.state().accounts.get(id).cloned();
@@ -145,6 +142,42 @@ impl Window {
                 w.set_group(UserId(id), Some(gid).filter(|g| !g.is_empty()));
             }
         });
+        // (user id, level), from a row's performance menu.
+        self.add_deferred("set-performance", &pair, |w, v| {
+            if let Some((id, level)) = v.get::<(u64, String)>()
+                && let Some(level) = Performance::ALL.into_iter().find(|p| p.label() == level)
+            {
+                w.set_performance(UserId(id), level);
+            }
+        });
+        // (user id, macro), from a row's Add macro.
+        self.add_deferred("set-macro", &pair, |w, v| {
+            if let Some((id, name)) = v.get::<(u64, String)>() {
+                w.pick_macro(UserId(id), Some(name));
+            }
+        });
+        // A level, for every selected account.
+        self.add_deferred("perf-selected", glib::VariantTy::STRING, |w, v| {
+            if let Some(level) = v.get::<String>()
+                && let Some(level) = Performance::ALL.into_iter().find(|p| p.label() == level)
+            {
+                w.set_performance_selected(level);
+            }
+        });
+        let macros: [GroupAction; 2] = [
+            ("edit-macro", |w, name| macros::editor::MacroDialog::open(w, Some(name))),
+            ("toggle-macro", |w, name| {
+                let on = w.state().macros.enabled(name);
+                w.enable_macro(name, !on);
+            }),
+        ];
+        for (name, run) in macros {
+            self.add_deferred(name, glib::VariantTy::STRING, move |w, v| {
+                if let Some(m) = v.get::<String>() {
+                    run(w, &m);
+                }
+            });
+        }
         let groups: [GroupAction; 4] = [
             ("group-settings", |w, gid| GroupSettings::open(w, gid)),
             ("delete-group", Window::confirm_delete_group),

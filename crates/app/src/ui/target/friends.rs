@@ -106,7 +106,7 @@ impl FriendsPage {
         me
     }
 
-    /// The tab was opened: list the accounts, and the leader's friends.
+    /// The tab was opened: list the accounts, and the main account's friends.
     pub fn shown(self: &Rc<Self>) {
         let Some(w) = self.window.upgrade() else { return };
         let (accounts, first) = {
@@ -196,10 +196,10 @@ impl FriendsPage {
         let (chosen, chain) = match self.window.upgrade() {
             Some(w) => {
                 let s = w.state();
-                let chain = s.accounts.leader().map(|l| match s.accounts.followers().len() {
-                    0 => format!("Launch {} there", l.name),
-                    n => format!("Launch {} + {n} there", l.name),
-                });
+                let chain = match s.accounts.selected().len() {
+                    0 => None,
+                    n => Some(format!("Launch {n} selected there")),
+                };
                 (s.friend.as_ref().map(|f| f.user), chain)
             }
             None => (None, None),
@@ -301,7 +301,7 @@ impl FriendsPage {
                 && let Some(w) = me.window.upgrade()
             {
                 w.join_friend(target.clone());
-                w.launch_chain();
+                w.launch_selected();
             }
         });
         b.button.set_valign(Align::Center);

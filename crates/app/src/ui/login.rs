@@ -49,9 +49,8 @@ pub struct AddAccountDialog {
     pulse: gtk::ProgressBar,
     status: gtk::Label,
     status_box: gtk::Box,
-    /// Where a new account goes once added, and whether it auto-joins.
+    /// Where a new account goes once added.
     put_in: RefCell<Option<String>>,
-    follow: Cell<bool>,
 }
 
 impl AddAccountDialog {
@@ -87,7 +86,6 @@ impl AddAccountDialog {
                 status: lbl("Requesting a code…", "t-label").wrapped().hexpand(),
                 status_box: vbox!(8, ""),
                 put_in: RefCell::default(),
-                follow: Cell::new(false),
             }
         });
         d.assemble();
@@ -235,12 +233,11 @@ impl AddAccountDialog {
         self.dialog.set_child(Some(&root));
     }
 
-    /// Where a new account goes once it is added, and whether it follows
-    /// the leader.
+    /// Where a new account goes once it is added.
     fn once_added(self: &Rc<Self>) -> gtk::Box {
         let sec = ds::sec("Once it is added", None);
         let Some(w) = self.window.upgrade() else { return sec };
-        let (groups, leader) = {
+        let groups = {
             let s = w.state();
             let groups: Vec<(Option<String>, String)> = std::iter::once((None, "Ungrouped".into()))
                 .chain(s.accounts.groups().iter().map(|g| {
@@ -249,7 +246,7 @@ impl AddAccountDialog {
                     (Some(g.id.clone()), name)
                 }))
                 .collect();
-            (groups, s.accounts.leader().map(|l| l.name.to_string()))
+            groups
         };
         let names: Vec<&str> = groups.iter().map(|(_, n)| n.as_str()).collect();
         let (me, groups) = (Rc::downgrade(self), groups.clone());
@@ -259,20 +256,6 @@ impl AddAccountDialog {
             }
         });
         sec.append(&ds::sfield("Put it in", &pick, None));
-        if let Some(l) = leader {
-            let me = Rc::downgrade(self);
-            let sw = crate::ui::widgets::switch(false, Some("Auto-join the leader"), move |on| {
-                if let Some(d) = me.upgrade() {
-                    d.follow.set(on);
-                }
-            });
-            let line = hbox!(12, "", sw, lbl("Auto-join the leader", "t-label"));
-            sec.append(&ds::sfield(
-                "Role",
-                &line,
-                Some(&format!("Joins {l}'s server right after it launches.")),
-            ));
-        }
         sec
     }
 
@@ -428,9 +411,6 @@ impl AddAccountDialog {
                         let put_in = d.put_in.borrow().clone();
                         if put_in.is_some() {
                             w.set_group(user.id, put_in);
-                        }
-                        if d.follow.get() {
-                            w.set_follow(user.id, true);
                         }
                     }
                     w.after_sign_in(&label, &user, new);
