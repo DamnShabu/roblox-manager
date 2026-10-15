@@ -314,6 +314,22 @@ pub fn parse(text: &str) -> Result<Macro, ParseError> {
     Ok(m)
 }
 
+/// One editor row checked on its own, as it is typed: why it would not
+/// parse, or None. Where it sits (an `at` under its timeline, a `do` under
+/// its `when`) is [`parse`]'s to check when the macro is saved.
+pub fn check_row(row: &Row) -> Option<String> {
+    let text = to_text(std::slice::from_ref(row), 0);
+    let line = lines(&text).next()?;
+    let checked = match line.command.as_str() {
+        "#" => Ok(()),
+        "at" => timed(&line).map(drop),
+        "when" => when::condition(line.rest).map(drop),
+        "do" => done(&line).map(drop),
+        _ => step(&line).map(drop),
+    };
+    checked.err()
+}
+
 enum Parsed {
     Step(Step),
     Loops(u32),

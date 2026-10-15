@@ -2,9 +2,6 @@
 //! its label and note, how it launches, its macro, its session, and
 //! removing it. Changes apply as they are made.
 
-use std::cell::Cell;
-use std::rc::Rc;
-
 use adw::prelude::*;
 use gtk::{Align, Orientation, PolicyType, WrapMode};
 use rbxmgr_core::accounts::{Account, relative_time};
@@ -198,10 +195,10 @@ fn identity(w: &Window, acct: &Account) -> gtk::Box {
     sec
 }
 
-/// Its group, its role in the launch order, and how its client runs.
+/// Its group, whether it is the main account, and how its client runs.
 fn launching(w: &Window, panel: &Panel, acct: &Account) -> gtk::Box {
     let id = acct.user_id;
-    let (groups, current, leader, place, followers) = {
+    let (groups, current, leader) = {
         let s = w.state();
         let groups: Vec<(Option<String>, String)> = std::iter::once((None, "Ungrouped".into()))
             .chain(s.accounts.groups().iter().map(|g| {
@@ -210,13 +207,7 @@ fn launching(w: &Window, panel: &Panel, acct: &Account) -> gtk::Box {
             }))
             .collect();
         let current = s.accounts.group_of(acct).map(str::to_owned);
-        (
-            groups,
-            current,
-            s.accounts.leader().map(|l| l.name.to_string()),
-            acct.follow,
-            s.accounts.followers().len(),
-        )
+        (groups, current, s.accounts.leader().map(|l| l.name.to_string()))
     };
     let launched = match acct.last_launch.as_deref() {
         None => "Never launched".to_owned(),
@@ -235,86 +226,33 @@ fn launching(w: &Window, panel: &Panel, acct: &Account) -> gtk::Box {
     });
     sec.append(&ds::sfield("Group", &group, None));
 
-    // Solo, Auto-join or Leader. Making it the leader redraws the panel:
-    // its auto-join place no longer applies.
-    let role_now = if acct.leader {
-        "leader"
-    } else if place.is_some() {
-        "join"
+    // The main account: pinned at the top, and the one friends and
+    // favourites come from. Making it the main one redraws the panel.
+    let main = gtk::Box::new(Orientation::Vertical, 6);
+    if acct.leader {
+        main.append(
+            &lbl("This is your main account: it is pinned at the top of the table.", "cx-help")
+                .wrapped(),
+        );
     } else {
-        "solo"
-    };
-    let (weak, p) = (w.weak(), panel.downgrade());
-    let busy = Rc::new(Cell::new(false));
-    let role = ds::seg(
-        &[("solo", "Solo"), ("join", "Auto-join"), ("leader", "Leader")],
-        role_now,
-        move |key| {
-            let (Some(w), Some(p)) = (weak.upgrade(), p.upgrade()) else { return };
-            if busy.replace(true) {
-                return;
-            }
-            match key {
-                "leader" => w.set_leader(id),
-                "join" => w.set_follow(id, true),
-                _ => w.set_follow(id, false),
-            }
-            if let Some(acct) = w.state().accounts.get(id).cloned() {
-                p.set_child(Some(&content(&w, &p, &acct)));
-            }
-            busy.set(false);
-        },
-    );
-    if acct.leader || leader.is_none() {
-        // The leader stays one until another is made leader; with none,
-        // there is nothing to auto-join.
-        let mut child = role.first_child();
-        while let Some(b) = child {
-            if acct.leader {
-                b.set_sensitive(false);
-            }
-            child = b.next_sibling();
-        }
-        if !acct.leader
-            && let Some(join) = role.first_child().and_then(|c| c.next_sibling())
-        {
-            join.set_sensitive(false);
-        }
+        let (weak, p) = (w.weak(), panel.downgrade());
+        let make =
+            ds::Button::new("Make main account", ds::Variant::Secondary, true).on(move || {
+                let (Some(w), Some(p)) = (weak.upgrade(), p.upgrade()) else { return };
+                w.set_main(id);
+                if let Some(acct) = w.state().accounts.get(id).cloned() {
+                    p.set_child(Some(&content(&w, &p, &acct)));
+                }
+            });
+        make.button.set_halign(Align::Start);
+        main.append(&make.button);
+        let help = match &leader {
+            Some(l) => format!("Pinned at the top instead of {l}; out of every group."),
+            None => "Pinned at the top of the table, out of every group.".to_owned(),
+        };
+        main.append(&lbl(&help, "cx-help").wrapped());
     }
-    let role_box = gtk::Box::new(Orientation::Vertical, 6);
-    role_box.append(&role);
-    let help = match (acct.leader, place, &leader) {
-        (true, _, _) => {
-            "Launch as group starts it first; its auto-join accounts follow it".to_owned()
-        }
-        (false, Some(n), Some(l)) => {
-            let order = gtk::Box::new(Orientation::Horizontal, 4);
-            order.append(&lbl(&format!("#{n} of {followers}"), "cx-chip"));
-            let up = ds::ib("chev-up", "Join earlier", true);
-            up.set_sensitive(n > 1);
-            let down = ds::ib("chev-down", "Join later", true);
-            down.set_sensitive((n as usize) < followers);
-            for (b, by) in [(&up, -1), (&down, 1)] {
-                let (weak, p) = (w.weak(), panel.downgrade());
-                b.connect_clicked(move |_| {
-                    let (Some(w), Some(p)) = (weak.upgrade(), p.upgrade()) else { return };
-                    w.move_follower(id, by);
-                    if let Some(acct) = w.state().accounts.get(id).cloned() {
-                        p.set_child(Some(&content(&w, &p, &acct)));
-                    }
-                });
-                order.append(b);
-            }
-            role_box.append(&order);
-            format!("Joins {l}'s server right after it launches")
-        }
-        (false, _, Some(l)) => format!("Launches on its own; Auto-join sends it into {l}'s server"),
-        (false, _, None) => {
-            "No leader yet: make one the leader to launch them as a group".to_owned()
-        }
-    };
-    role_box.append(&lbl(&help, "cx-help").wrapped());
-    sec.append(&ds::sfield("Role", &role_box, None));
+    sec.append(&ds::sfield("Main account", &main, None));
 
     let detail = lbl(performance_detail(acct.performance()), "cx-help").wrapped();
     let opts: Vec<(&str, &str)> = Performance::ALL.iter().map(|p| (p.label(), p.label())).collect();
@@ -335,7 +273,7 @@ fn launching(w: &Window, panel: &Panel, acct: &Account) -> gtk::Box {
 }
 
 /// What a performance level does, under its control.
-fn performance_detail(level: Performance) -> &'static str {
+pub fn performance_detail(level: Performance) -> &'static str {
     match level {
         Performance::Low => {
             "10 FPS, the lowest graphics, lower priority, and slower still out of focus. For an \

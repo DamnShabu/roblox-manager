@@ -116,6 +116,12 @@ impl Paths {
         self.state_home.join("rbxmgr/window.json")
     }
 
+    /// What a run that did not end cleanly left: its crash logs, and the
+    /// running run's activity. XDG state, like the window's.
+    pub fn crashes(&self) -> PathBuf {
+        self.state_home.join("rbxmgr/crashes")
+    }
+
     pub fn logs(&self) -> PathBuf {
         self.cache().join("logs")
     }

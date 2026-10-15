@@ -7,6 +7,7 @@ pub mod accounts;
 pub mod activity;
 pub mod confirm;
 pub mod ds;
+pub mod fonts;
 pub mod help;
 pub mod icons;
 pub mod join_link;

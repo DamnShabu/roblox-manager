@@ -17,8 +17,14 @@ Its state is *ok* (Roblox last accepted it), *expired* (Roblox refused it --
 **Keyring** -- the desktop Secret Service. Every read or write unlocks it first;
 `forget` is the one best-effort path that never prompts.
 
-**Leader** -- the account that launches first in a group launch. **Followers**
-(the auto-join list) launch after it, into its **server**.
+**Main account** -- the one account pinned at the top of the table, outside
+every group, whose friends Join a friend lists. Stored as `leader` in
+accounts.json, the word earlier versions used: they launched it first and
+sent its **followers** (`follow`, the auto-join list) into its server. That
+launch is gone; the fields stay so older files read the same.
+
+**View** -- what the table shows, picked in the sidebar: every account,
+those needing attention, running, launching or idle, or one group.
 
 **Group** -- a named set of accounts drawn together, with a game to launch
 them into.

@@ -15,13 +15,6 @@ pub(super) fn launch(
     if run.stopped() {
         return run.give_up(accounts);
     }
-    let mut starting = Vec::new();
-    for a in accounts {
-        match run.running(a) {
-            Ok(true) => run.log(format!("{}: already running -- skipping launch", a.label)),
-            Ok(false) => starting.push(a.clone()),
-            Err(why) => run.log(format!("{}: FAILED -- {why}", a.label)),
-        }
-    }
+    let starting = run.split_running(accounts);
     run.start_all(&starting, url(place, server).as_deref(), "launched");
 }

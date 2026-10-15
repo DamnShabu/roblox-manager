@@ -329,3 +329,19 @@ fn the_lengths_a_macro_does_not_write_are_not_random() {
         assert_eq!(lo, hi, "a default is one value, so the player never picks from it");
     }
 }
+
+#[test]
+fn a_row_is_checked_on_its_own_wherever_it_would_sit() {
+    let row = |kind: &str, value: &str| Row { kind: kind.into(), value: value.into() };
+    assert_eq!(check_row(&row("Key", "e")), None);
+    assert_eq!(check_row(&row("Wait", "60-240")), None);
+    assert_eq!(check_row(&row("Note", "anything at all")), None);
+    assert_eq!(check_row(&row("Exit", "")), None);
+    // Rows that only parse under another are checked as their own step.
+    assert_eq!(check_row(&row("Do", "tap e")), None);
+    assert_eq!(check_row(&row("At", "0.5 hold w 1")), None);
+    assert_eq!(check_row(&row("When", "color 960 30 #ff3030")), None);
+    assert!(check_row(&row("Wait", "soon")).is_some());
+    assert!(check_row(&row("Click", "here")).is_some());
+    assert!(check_row(&row("Do", "jump around")).is_some());
+}

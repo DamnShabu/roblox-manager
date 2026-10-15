@@ -142,6 +142,9 @@ pub struct Group {
     pub place_id: Option<PlaceId>,
     #[serde(default, deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
     pub game: Option<String>,
+    /// The universe its game's icon is filed under, once looked up.
+    #[serde(default, deserialize_with = "lenient", skip_serializing_if = "Option::is_none")]
+    pub universe_id: Option<String>,
     #[serde(default = "yes", deserialize_with = "lenient_open")]
     pub open: bool,
     #[serde(flatten)]

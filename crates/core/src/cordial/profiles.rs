@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 
 use super::build::Build;
 use super::performance::Performance;
-use super::process::{ProcessView, Runner, last_line};
+use super::process::{Output, ProcessView, Runner, last_line};
 use super::{CordialError, clients, engine, quality, session};
 use crate::keyring::{Attrs, Keyring};
 use crate::macros::{cage_window, nested, relay};
@@ -220,12 +220,17 @@ impl CordialProfiles {
         Ok(())
     }
 
+    /// Where the profile's client writes its output.
+    pub fn log_path(&self, profile: &Profile) -> PathBuf {
+        self.paths.logs().join(format!("{profile}.log"))
+    }
+
     /// The profile's log path, the previous launch's moved to `.log.1`.
     fn rotate_log(&self, profile: &Profile) -> Result<PathBuf, CordialError> {
         let logs = self.paths.logs();
         fs::create_dir_all(&logs)
             .map_err(|e| io(&format!("could not create {}", logs.display()), e))?;
-        let path = logs.join(format!("{profile}.log"));
+        let path = self.log_path(profile);
         if path.exists() {
             fs::rename(&path, logs.join(format!("{profile}.log.1")))
                 .map_err(|e| io("could not keep the previous log", e))?;
@@ -250,6 +255,12 @@ impl CordialProfiles {
             )));
         }
         Ok(clients::parse(&String::from_utf8_lossy(&out.stdout)))
+    }
+
+    /// Run `argv` where the clients are seen, for a look at them; its
+    /// status is the caller's to judge.
+    pub(super) fn run_seen(&self, argv: &[&str]) -> Result<Output, CordialError> {
+        self.runner.run(&self.view.argv(argv), Duration::from_secs(10))
     }
 
     /// The profiles a client has open.

@@ -4,14 +4,14 @@
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{Align, glib};
+use gtk::{Align, gio, glib};
 use rbxmgr_core::macros::grammar::{self, Row};
 use rbxmgr_core::macros::lanes;
 
 use super::MacroDialog;
-use crate::ui::macros::card::step_icon;
+use crate::ui::macros::kinds::step_icon;
 use crate::ui::macros::{area, point};
-use crate::ui::widgets::{Btn, Fluent, LabelFluent, lbl, plural, wrap};
+use crate::ui::widgets::{Btn, Fluent, LabelFluent, lbl, plural, sentence, wrap};
 
 const STEP_TYPES: [&str; 16] = [
     "Key", "Hold", "Press", "Release", "Repeat", "Type", "Click", "Move", "Scroll", "Wait",
@@ -44,6 +44,30 @@ fn hint(kind: &str) -> &'static str {
     }
 }
 
+/// The step types the add buttons leave out, offered under More: each with
+/// what it does, and the rows it starts as.
+const MORE: [(&str, &str); 8] = [
+    ("Press", "Press a key or button down and leave it down"),
+    ("Release", "Let go of a key or button pressed earlier"),
+    ("Repeat", "Tap a key a number of times"),
+    ("Scroll", "Scroll the mouse wheel"),
+    ("Start", "Wait before the first round only"),
+    ("Stagger", "Start each account a few seconds after the last"),
+    ("Exit", "End the round here; the next one starts"),
+    ("Timeline", "Steps at set times, together: keys held while the mouse moves"),
+];
+
+/// The rows a new step of `kind` starts as: a timeline comes with its first
+/// step under it, as a when does.
+fn starting_rows(kind: &str) -> Vec<Row> {
+    let row = |kind: &str, value: &str| Row { kind: kind.to_owned(), value: value.to_owned() };
+    match kind {
+        "Timeline" => vec![row("Timeline", "2"), row("At", "0 hold w 1")],
+        "When" => vec![row("When", ""), row("Do", "")],
+        _ => vec![row(kind, "")],
+    }
+}
+
 impl MacroDialog {
     /// The Steps group: the rows or the text, and the buttons that add to
     /// them.
@@ -58,10 +82,7 @@ impl MacroDialog {
                     .tip(&format!("Add a {} step", kind.to_lowercase()))
                     .build(move || {
                         if let Some(d) = me.upgrade() {
-                            d.rows
-                                .borrow_mut()
-                                .push(Row { kind: kind.to_owned(), value: String::new() });
-                            d.draw_steps();
+                            d.add_rows(starting_rows(kind));
                         }
                     })
                     .button
@@ -69,6 +90,7 @@ impl MacroDialog {
             })
             .collect();
         adds.push(self.when_button().upcast());
+        adds.push(self.more_button().upcast());
         adds.push(self.record_button().upcast());
         for (name, label) in [("steps", "Steps"), ("text", "Text")] {
             self.view.add(adw::Toggle::builder().name(name).label(label).build());
@@ -119,6 +141,7 @@ impl MacroDialog {
 
     pub(super) fn draw_steps(self: &Rc<Self>) {
         self.list.remove_all();
+        self.entries.borrow_mut().clear();
         let rows = self.rows.borrow().clone();
         let real = rows.iter().filter(|r| !matches!(r.kind.as_str(), "Note" | "Timeline")).count();
         self.count.set_label(&plural(real, "step", "steps"));
@@ -180,14 +203,17 @@ impl MacroDialog {
             .valign(Align::Center)
             .css_classes(["monospace"])
             .build();
+        check(&value, r);
         let me = Rc::downgrade(self);
         value.connect_changed(move |e| {
             if let Some(d) = me.upgrade() {
                 if let Some(row) = d.rows.borrow_mut().get_mut(i) {
                     row.value = e.text().to_string();
+                    check(e, row);
                 }
             }
         });
+        self.entries.borrow_mut().push(value.clone());
         let button = |ic: &str, tip: &str, on: bool, act: fn(&Rc<Self>, usize)| {
             let me = Rc::downgrade(self);
             let b = Btn::new("ib sm").icon(ic).tip(tip).build(move || {
@@ -255,10 +281,7 @@ impl MacroDialog {
             .tip("Add steps that play the moment something shows in the client")
             .build(move || {
                 if let Some(d) = me.upgrade() {
-                    d.add_rows(vec![
-                        Row { kind: "When".to_owned(), value: String::new() },
-                        Row { kind: "Do".to_owned(), value: String::new() },
-                    ]);
+                    d.add_rows(starting_rows("When"));
                 }
             })
             .button
@@ -306,9 +329,66 @@ impl MacroDialog {
             let added = format!("{lead}{}", grammar::to_text(&rows, 0));
             buffer.insert(&mut buffer.end_iter(), &added);
         } else {
+            let first = self.rows.borrow().len();
             self.rows.borrow_mut().extend(rows);
             self.draw_steps();
+            // Straight on to what it does: the new step's value, ready to type.
+            if let Some(entry) = self.entry_of(first) {
+                entry.grab_focus();
+            }
         }
+    }
+
+    /// The value entry drawn for row `i`, when it has one (a timeline's
+    /// steps are edited as text).
+    fn entry_of(&self, i: usize) -> Option<gtk::Entry> {
+        let entries = self.entries.borrow();
+        // Drawn in row order, a timeline's rows skipped: count the rows
+        // before `i` that have one.
+        let units = lanes::units(&self.rows.borrow());
+        let mut drawn = 0;
+        for (start, len) in units {
+            if self.rows.borrow().get(start).is_some_and(|r| r.kind == "Timeline") {
+                if (start..start + len).contains(&i) {
+                    return None;
+                }
+                continue;
+            }
+            if (start..start + len).contains(&i) {
+                return entries.get(drawn + i - start).cloned();
+            }
+            drawn += len;
+        }
+        None
+    }
+
+    /// More: every other step type, each said in a line.
+    fn more_button(self: &Rc<Self>) -> gtk::MenuButton {
+        let group = gio::SimpleActionGroup::new();
+        let add = gio::SimpleAction::new("add", Some(glib::VariantTy::STRING));
+        let me = Rc::downgrade(self);
+        add.connect_activate(move |_, kind| {
+            if let (Some(d), Some(kind)) = (me.upgrade(), kind.and_then(|k| k.get::<String>())) {
+                d.add_rows(starting_rows(&kind));
+            }
+        });
+        group.add_action(&add);
+        let menu = gio::Menu::new();
+        for (kind, about) in MORE {
+            let item = gio::MenuItem::new(Some(&format!("{kind} \u{2014} {about}")), None);
+            item.set_action_and_target_value(Some("steps.add"), Some(&kind.to_variant()));
+            menu.append_item(&item);
+        }
+        let content =
+            adw::ButtonContent::builder().icon_name("rm-plus-symbolic").label("More").build();
+        let button = gtk::MenuButton::builder()
+            .child(&content)
+            .menu_model(&menu)
+            .tooltip_text("Add another kind of step")
+            .css_classes(["ds", "ghost", "sm"])
+            .build();
+        button.insert_action_group("steps", Some(&group));
+        button
     }
 
     /// The step listed at row `start` swapped with the one before or after
@@ -316,6 +396,22 @@ impl MacroDialog {
     pub(super) fn shift(self: &Rc<Self>, start: usize, up: bool) {
         if lanes::shift(&mut self.rows.borrow_mut(), start, up) {
             self.draw_steps();
+        }
+    }
+}
+
+/// Mark `entry` when its row would not parse, with why in its tooltip. An
+/// empty value is still being typed, unless the step takes none.
+fn check(entry: &gtk::Entry, row: &Row) {
+    let typed = !row.value.trim().is_empty() || row.kind == "Exit";
+    match grammar::check_row(row).filter(|_| typed) {
+        Some(why) => {
+            entry.add_css_class("error");
+            entry.set_tooltip_text(Some(&sentence(&why)));
+        }
+        None => {
+            entry.remove_css_class("error");
+            entry.set_tooltip_text(None);
         }
     }
 }
