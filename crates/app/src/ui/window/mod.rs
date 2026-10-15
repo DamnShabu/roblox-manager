@@ -4,34 +4,35 @@
 mod accounts;
 mod actions;
 mod chrome;
+mod details;
 mod hiding;
 mod inspector;
 mod launching;
 mod links;
 mod macros;
-mod overview;
 mod roblox;
+mod sidebar;
 mod strip;
 mod topbar;
 mod updates;
 
 pub use self::hiding::can_hide;
+pub use self::launching::monitor_hz;
 pub use self::macros::ReadyClient;
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
+use std::sync::{Arc, Mutex};
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use rbxmgr_core::cordial::Window as ClientWindow;
+use rbxmgr_core::cordial::{Meter, Window as ClientWindow};
 use rbxmgr_core::types::{Profile, UserId};
 use rbxmgr_core::window_state::WindowState;
 
 use self::chrome::Chrome;
-use self::overview::Need;
 use super::table::Columns;
-use super::widgets::toggle_class;
 use crate::services::Services;
 use crate::state::AppState;
 use crate::worker::{self, Logger};
@@ -55,12 +56,8 @@ pub struct Inner {
     ui: Chrome,
     /// Redraw each drawn account's live parts, without rebuilding the rows.
     rows: RefCell<Vec<Redraw>>,
-    /// Redraw each macro's running state.
-    cards: RefCell<Vec<Redraw>>,
     /// Redraw open dialogs' live parts.
     dialogs: RefCell<Vec<LiveRedraw>>,
-    /// The need the alert strip was dismissed on: hidden until another.
-    alert_dismissed: RefCell<Option<Need>>,
     /// Each row's and band's confirmation, to open from their menus.
     confirms: RefCell<HashMap<UserId, glib::WeakRef<gtk::Revealer>>>,
     group_confirms: RefCell<HashMap<String, glib::WeakRef<gtk::Revealer>>>,
@@ -70,8 +67,14 @@ pub struct Inner {
     /// stays hidden, and goes once the link needs nothing more of it.
     seen: Cell<bool>,
     polling: Cell<bool>,
+    /// Whether the sidebar is wanted: a narrow window hides it by itself,
+    /// which is no choice of the user's and is not remembered.
+    sidebar_on: Cell<bool>,
     /// Why the last look at the running clients failed, while it fails.
     poll_failing: RefCell<Option<String>>,
+    /// The last reading of what the clients take, for the CPU each spent
+    /// since; the poll's worker reads it.
+    meter: Arc<Mutex<Meter>>,
 }
 
 impl Window {
@@ -104,15 +107,15 @@ impl Window {
                 log,
                 ui,
                 rows: RefCell::default(),
-                cards: RefCell::default(),
                 dialogs: RefCell::default(),
-                alert_dismissed: RefCell::default(),
                 confirms: RefCell::default(),
                 group_confirms: RefCell::default(),
                 link_popup: RefCell::default(),
                 seen: Cell::new(false),
                 polling: Cell::new(false),
+                sidebar_on: Cell::new(saved.sidebar),
                 poll_failing: RefCell::default(),
+                meter: Arc::default(),
             }
         });
         let w = Window(inner);
@@ -127,6 +130,8 @@ impl Window {
             None => glib::Propagation::Proceed,
         });
         w.refresh();
+        w.load_missing_headshots();
+        w.load_missing_game_icons();
         w.log("Ready");
         for path in w.state().accounts.set_aside().iter().chain(w.state().macros.set_aside()) {
             w.toast(&format!("A settings file did not read; it was kept as {}", path.display()));
@@ -225,6 +230,13 @@ impl Window {
     }
 
     /// Open or close the activity drawer.
+    /// Show or hide the sidebar, and remember it.
+    pub fn toggle_sidebar(&self) {
+        let on = !self.0.sidebar_on.get();
+        self.0.sidebar_on.set(on);
+        self.0.ui.sidebar.root.set_visible(on);
+    }
+
     pub fn toggle_drawer(&self) {
         let t = &self.0.ui.strip.log_toggle;
         t.set_active(!t.is_active());
@@ -342,14 +354,11 @@ impl Window {
         self.refresh_macros();
     }
 
-    /// Every drawn status: rows, group headers, macro cards, the title.
+    /// Every drawn status: rows, group rows, the sidebar, the title.
     pub fn refresh_states(&self) {
         let s = self.state();
         for redraw in self.0.rows.borrow().iter() {
             redraw(&s);
-        }
-        for card in self.0.cards.borrow().iter() {
-            card(&s);
         }
         // Taken out while they run: a redraw that sets a widget may reach
         // code that watches a new one.
@@ -358,15 +367,8 @@ impl Window {
         let mut added = self.0.dialogs.replace(dialogs);
         self.0.dialogs.borrow_mut().append(&mut added);
         let ui = &self.0.ui;
-        let line = s.status_line();
-        ui.top.status.set_label(&line);
-        ui.strip.status.set_label(&line);
-        let dot = &ui.top.status_dot;
-        toggle_class(dot, "run", !s.running.is_empty() && s.launching.is_empty());
-        toggle_class(dot, "start", !s.launching.is_empty());
-        let playing = s.macro_runs.len();
-        ui.insp.macros_count.set_label(&playing.to_string());
-        ui.insp.macros_count.set_visible(playing > 0);
+        ui.top.status.set_label(&s.status_line());
+        ui.sidebar.draw(&s);
         let live = !s.running.is_empty() || !s.launching.is_empty() || !s.macro_runs.is_empty();
         let selected: Vec<UserId> = s.accounts.selected().iter().map(|a| a.user_id).collect();
         let sel_live = selected.iter().any(|id| s.running.contains(id) || s.launching.contains(id));
@@ -375,7 +377,6 @@ impl Window {
         self.set_action_enabled("stop-all", live);
         self.set_action_enabled("stop-selected", sel_live);
         self.set_action_enabled("hide-selected", sel_live);
-        self.draw_needs();
     }
 
     /// Keep `redraw` up to date with the accounts' state until they are next
@@ -383,12 +384,6 @@ impl Window {
     pub(super) fn watch_accounts(&self, redraw: Redraw) {
         redraw(&self.state());
         self.0.rows.borrow_mut().push(redraw);
-    }
-
-    /// Keep `redraw` up to date until the macros are next drawn afresh.
-    pub(super) fn watch_macros(&self, redraw: Redraw) {
-        redraw(&self.state());
-        self.0.cards.borrow_mut().push(redraw);
     }
 
     /// Keep a dialog's widget up to date while `redraw` says it is there.
@@ -406,19 +401,26 @@ impl Window {
         }
         let ids: Vec<UserId> = self.state().accounts.accounts().iter().map(|a| a.user_id).collect();
         let profiles = self.0.services.profiles.clone();
+        let meter = self.0.meter.clone();
         let weak = self.weak();
         worker::run(
             worker::catching(move || {
-                let live = profiles.running().map_err(|e| e.to_string())?;
-                let running: HashSet<UserId> =
-                    ids.into_iter().filter(|id| live.contains(&Profile::of(*id))).collect();
+                let clients = profiles.clients().map_err(|e| e.to_string())?;
+                let running: HashSet<UserId> = ids
+                    .into_iter()
+                    .filter(|id| clients.values().any(|p| *p == Profile::of(*id)))
+                    .collect();
                 // A state file that does not read is a window the manager
                 // cannot hide or show, the same as an engine that writes none.
                 let windows: HashMap<UserId, ClientWindow> = running
                     .iter()
                     .filter_map(|id| Some((*id, profiles.window(&Profile::of(*id)).ok()??)))
                     .collect();
-                Ok((running, windows))
+                // What they take is a nicety: a reading that fails leaves
+                // those columns blank, and the rest of the poll stands.
+                let reading =
+                    meter.lock().ok().and_then(|mut m| profiles.usage(&mut m, &clients).ok());
+                Ok((running, windows, reading))
             }),
             move |found: Result<Result<_, String>, worker::Crashed>| {
                 let Some(w) = weak.upgrade() else { return };
@@ -438,18 +440,25 @@ impl Window {
                     (Some(_), None) => w.log("Running clients can be seen again"),
                     _ => {}
                 }
-                let Ok((running, windows)) = found else { return };
-                let changed = {
-                    let s = w.state();
-                    running != s.running || windows != s.windows
-                };
-                if changed {
-                    let mut s = w.state_mut();
-                    s.running = running;
-                    s.windows = windows;
-                    drop(s);
-                    w.refresh_states();
-                }
+                let Ok((running, windows, reading)) = found else { return };
+                let mut s = w.state_mut();
+                s.running = running;
+                s.windows = windows;
+                s.usage = reading
+                    .as_ref()
+                    .map(|r| {
+                        s.running
+                            .iter()
+                            .filter_map(|id| Some((*id, *r.clients.get(&Profile::of(*id))?)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                s.machine = reading.and_then(|r| r.machine);
+                // A client that is gone keeps no level it launched at.
+                let live = s.running.clone();
+                s.launched_as.retain(|id, _| live.contains(id));
+                drop(s);
+                w.refresh_states();
             },
         );
     }
@@ -488,7 +497,7 @@ impl Window {
             height,
             maximized: self.0.win.is_maximized(),
             // A narrow window hides the pane by itself: that is no choice.
-            sidebar: self.0.ui.split.is_collapsed() || self.0.ui.split.shows_sidebar(),
+            sidebar: self.0.sidebar_on.get(),
             style: self.style(),
         };
         if let Err(e) = state.save(&self.services().paths.window_state()) {

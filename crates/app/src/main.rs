@@ -136,6 +136,12 @@ fn load_style() {
     if let Err(e) = ui::icons::install(&icons) {
         eprintln!("roblox-manager: could not write the app's icons to {}: {e}", icons.display());
     }
+    // The design's type, the same on every machine; without it the
+    // desktop's fonts stand in.
+    let fonts = rbxmgr_core::Paths::from_env().cache().join("ui-fonts");
+    if let Err(e) = ui::fonts::install(&fonts) {
+        eprintln!("roblox-manager: could not load the app's fonts: {e}");
+    }
     let Some(display) = gdk::Display::default() else { return };
     let base = gtk::CssProvider::new();
     base.load_from_string(include_str!("../resources/style.css"));

@@ -1,8 +1,8 @@
-//! One account as a table row: select it, see how it is (status, role,
-//! macro, performance, when it last ran), launch or stop it, and a menu for
-//! the rest (also on a right click). Under it, when asked for, why its last
-//! launch failed and the confirmation to remove it. Every account but the
-//! leader can be dragged onto another row, a band or the launch order.
+//! One account as a table row: select it, see how it is (status, how long
+//! it has run, its CPU and memory, its macro, its performance), hide its
+//! window, launch or stop it, and a menu for the rest (also on a right
+//! click). A click on the row shows it in the details pane. Every account
+//! but the main one can be dragged onto another row or a group's row.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -10,35 +10,29 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{Align, Orientation, gdk, gio, glib};
 use rbxmgr_core::accounts::{Account, SessionState};
-use rbxmgr_core::cordial::{Performance, Window as ClientWindow};
+use rbxmgr_core::cordial::Window as ClientWindow;
 use rbxmgr_core::types::UserId;
 
-use super::{Col, short_since};
-use crate::state::{Chip, Inspected};
-use crate::ui::accounts::settings::AccountSettings;
-use crate::ui::ds::{self, Tone, Variant};
-use crate::ui::widgets::{Fluent, LabelFluent, clear, lbl, name, sentence, toggle_class};
-use crate::ui::window::{Window, can_hide};
+use super::format::{bytes, last_ran, percent, uptime};
+use super::perf::PerfCell;
+use super::{Col, row_button, table_row};
+use crate::state::{AppState, Chip, Inspected};
+use crate::ui::ds::{self, Variant};
+use crate::ui::widgets::{Fluent, LabelFluent, lbl, name, toggle_class};
+use crate::ui::window::{Window, can_hide, monitor_hz};
+
+/// A client's CPU share from which its row says it is heavy, in percent.
+const HEAVY_CPU: f32 = 15.0;
+/// And its memory, in bytes.
+const HEAVY_MEMORY: u64 = 1024 * 1024 * 1024;
 
 pub fn account_row(w: &Window, acct: &Account) -> gtk::Box {
     let id = acct.user_id;
     let cols = w.columns();
-    let (macro_shown, picture) = {
-        let s = w.state();
-        let m = acct.macro_name.clone().filter(|m| s.macros.contains(m));
-        (m, w.services().avatars.cached(&id.to_string()))
-    };
-    let row = gtk::Box::new(Orientation::Horizontal, 8).css("mn-row");
+    let hz = monitor_hz();
+    let picture = w.services().avatars.cached(&id.to_string());
+    let row = table_row("mn-row");
 
-    // -- grip, check, avatar -------------------------------------------------
-    let grip = if acct.leader {
-        ds::icon("star-filled").css("mn-grip leader s16").tip("The leader")
-    } else {
-        ds::icon("grip").css("mn-grip s16").tip(
-            "Drag onto another row to reorder, onto a band to move it, or onto the launch order",
-        )
-    };
-    row.append(&cols.cell(Col::Grip, &grip));
     let quiet = Rc::new(Cell::new(false));
     let check = ds::check(acct.selected, &format!("Select {}", acct.name));
     {
@@ -50,101 +44,29 @@ pub fn account_row(w: &Window, acct: &Account) -> gtk::Box {
         });
     }
     row.append(&cols.cell(Col::Check, &check));
-    row.append(&cols.cell(Col::Av, &ds::av(acct.name.as_str(), picture.as_deref(), 24)));
 
-    // -- name -------------------------------------------------------------------
-    let title = gtk::Box::new(Orientation::Horizontal, 4);
-    title.append(&lbl(acct.name.as_str(), "mn-name-t").ellipsize());
-    let note = acct.note.trim();
-    if !note.is_empty() {
-        title.append(&ds::icon("note").css("mn-note").tip(note));
-    }
-    let hidden_mark =
-        ds::icon("eye-off").css("mn-note").tip("Window hidden; the game keeps running");
-    title.append(&hidden_mark);
-    let user = acct.username.clone().unwrap_or_else(|| acct.name.to_string());
-    let text = gtk::Box::new(Orientation::Vertical, 0);
-    text.append(&title);
-    text.append(&lbl(&format!("@{user}"), "mn-name-s").ellipsize());
-    let name_btn = gtk::Button::builder()
-        .child(&text)
-        .tooltip_text("Show its settings")
-        .css_classes(["mn-name"])
-        .halign(Align::Start)
-        .build();
-    name_btn.connect_clicked({
-        let w = w.weak();
-        move |_| {
-            if let Some(w) = w.upgrade() {
-                AccountSettings::open(&w, id);
-            }
-        }
-    });
-    row.append(&cols.cell(Col::Name, &name_btn));
+    let (who, hidden_mark) = identity(acct, picture.as_deref());
+    row.append(&cols.cell(Col::Name, &who));
 
-    // -- status, role, macro, perf, last ---------------------------------------
-    let status = gtk::Box::new(Orientation::Horizontal, 4);
+    let dot = gtk::Box::new(Orientation::Horizontal, 0).css("mn-dot");
+    dot.set_valign(Align::Center);
+    let state = lbl("", "mn-state");
+    let status = gtk::Box::new(Orientation::Horizontal, 8);
+    status.append(&dot);
+    status.append(&state);
     row.append(&cols.cell(Col::Status, &status));
-    let role = gtk::Box::new(Orientation::Horizontal, 4).css("mn-role");
-    match (acct.leader, acct.follow) {
-        (true, _) => {
-            role.add_css_class("leader");
-            role.append(&ds::icon("star-filled"));
-            role.append(&lbl("Leader", ""));
-            role.set_tooltip_text(Some("Launch as group starts it first"));
-        }
-        (false, Some(n)) => {
-            role.append(&lbl(&format!("Auto-join #{n}"), ""));
-            role.set_tooltip_text(Some("Launch as group sends it into the leader's server"));
-        }
-        (false, None) => role.append(&lbl("—", "mn-dash")),
-    }
-    row.append(&cols.cell(Col::Role, &role));
-    let macro_cell = gtk::Box::new(Orientation::Horizontal, 4).css("mn-macro");
-    let macro_btn = ds::ib("play", "Play its macro", true);
-    macro_btn.add_css_class("go");
-    let macro_progress = lbl("", "mn-macro-s").ellipsize().visible(false);
-    match &macro_shown {
-        Some(m) => {
-            macro_btn.connect_clicked({
-                let w = w.weak();
-                move |_| {
-                    if let Some(w) = w.upgrade() {
-                        w.play_macro_here(id);
-                    }
-                }
-            });
-            let t = gtk::Box::new(Orientation::Vertical, 0);
-            t.set_valign(Align::Center);
-            t.append(&lbl(m, "mn-macro-t").ellipsize());
-            t.append(&macro_progress);
-            macro_cell.append(&macro_btn);
-            macro_cell.append(&t);
-        }
-        None => macro_cell.append(&lbl("—", "mn-dash")),
-    }
-    row.append(&cols.cell(Col::Macro, &macro_cell));
-    let perf = acct.performance();
-    let perf_short = match perf {
-        Performance::Low => "Low",
-        Performance::Medium => "Med",
-        Performance::High => "High",
-        Performance::Max => "Max",
-    };
-    row.append(&cols.cell(
-        Col::Perf,
-        &lbl(perf_short, "mn-perf").tip(&format!("Performance: {}", perf.label())),
-    ));
-    row.append(&cols.cell(
-        Col::Last,
-        &lbl(&short_since(acct.last_launch.as_deref()), "mn-last").tip("Last launched"),
-    ));
+    let ran = lbl("", "mn-num");
+    let cpu = lbl("", "mn-num");
+    let memory = lbl("", "mn-num");
+    row.append(&cols.cell(Col::Uptime, &ran));
+    row.append(&cols.cell(Col::Cpu, &cpu));
+    row.append(&cols.cell(Col::Memory, &memory));
+    let macro_cell = MacroCell::build(w, acct);
+    row.append(&cols.cell(Col::Macro, &macro_cell.root));
+    let perf = PerfCell::build(id, acct.name.as_str(), hz);
+    row.append(&cols.cell(Col::Perf, &perf.root));
 
-    // -- actions -------------------------------------------------------------------
-    let acts = gtk::Box::new(Orientation::Horizontal, 0);
-    acts.set_halign(Align::End);
-    acts.set_hexpand(true);
-    let hide = ds::ib("eye-off", "Hide its window", true);
+    let hide = row_button("eye", "Hide its window");
     hide.connect_clicked({
         let w = w.weak();
         move |_| {
@@ -154,7 +76,7 @@ pub fn account_row(w: &Window, acct: &Account) -> gtk::Box {
             }
         }
     });
-    let play = ds::ib("play", "Launch into the target", true);
+    let play = row_button("play-filled", "Launch into the target");
     play.connect_clicked({
         let w = w.weak();
         move |_| {
@@ -169,36 +91,21 @@ pub fn account_row(w: &Window, acct: &Account) -> gtk::Box {
         .menu_model(&model)
         .valign(Align::Center)
         .tooltip_text(format!("More for {}", acct.name))
-        .css_classes(["ib", "sm", "mn-more"])
+        .css_classes(["ib", "sm", "mn-act"])
         .build();
     name(&more, &format!("More for {}", acct.name));
+    let acts = gtk::Box::new(Orientation::Horizontal, 2);
+    acts.set_halign(Align::End);
     acts.append(&hide);
     acts.append(&play);
     acts.append(&more);
     row.append(&cols.cell(Col::Actions, &acts));
     context_menu(&row, &model);
+    inspect_on_click(w, &row, id);
     if !acct.leader {
         drag_and_drop(w, &row, id);
     }
 
-    // -- what opens under it ------------------------------------------------------------
-    let reason_text = lbl("", "").wrapped().hexpand();
-    let reason = gtk::Box::new(Orientation::Horizontal, 8).css("mn-reason");
-    reason.append(&ds::icon("alert").css("s16"));
-    reason.append(&reason_text);
-    let reason_open = gtk::Revealer::builder().child(&reason).reveal_child(false).build();
-    let again = ds::Button::new("Try again", Variant::Secondary, true)
-        .on(w.act(move |w| w.play_or_stop(id)));
-    let details = ds::Button::new("Details", Variant::Ghost, true).action("win.activity-log");
-    let dismiss = ds::ib("x", "Dismiss", true);
-    {
-        let r = reason_open.clone();
-        dismiss.connect_clicked(move |_| r.set_reveal_child(false));
-    }
-    for b in [&again.button, &details.button, &dismiss] {
-        b.set_valign(Align::Center);
-        reason.append(b);
-    }
     let confirm = confirm_row(
         &format!("Remove {}?", acct.name),
         "Its session leaves the keyring and its client is closed. The Roblox account itself is \
@@ -208,65 +115,55 @@ pub fn account_row(w: &Window, acct: &Account) -> gtk::Box {
     );
     w.register_confirm(id, &confirm);
 
-    let leader = acct.leader;
     let shown = row.clone();
-    let reason_shown = reason_open.clone();
-    let failed_btn = {
-        let r = reason_open.clone();
-        move || {
-            let b = gtk::Button::builder().css_classes(["mn-badge-btn"]).build();
-            let inner = gtk::Box::new(Orientation::Horizontal, 4);
-            inner.append(&ds::badge(Tone::Danger, "Launch failed", false, false));
-            inner.append(&ds::icon("chev-down").css("s14"));
-            b.set_child(Some(&inner));
-            b.set_tooltip_text(Some("Why it did not launch"));
-            let r = r.clone();
-            b.connect_clicked(move |_| r.set_reveal_child(!r.reveals_child()));
-            b
-        }
-    };
+    let last_launch = acct.last_launch.clone();
     w.watch_accounts(Box::new(move |s| {
         let chip = s.chip(id);
-        clear(&status);
-        let failure = s.failures.get(&id);
-        match chip {
-            Chip::Running => status.append(&ds::badge(Tone::Success, "Running", true, false)),
-            Chip::Starting => status.append(&ds::badge(Tone::Warning, "Starting…", true, true)),
-            Chip::Joining => status.append(&ds::badge(Tone::Warning, "Joining…", true, true)),
-            Chip::Expired => {
-                let b = gtk::Button::builder()
-                    .child(&ds::badge(Tone::Danger, "Session expired", true, false))
-                    .css_classes(["mn-badge-btn"])
-                    .tooltip_text("Roblox no longer takes this session: sign in again")
-                    .build();
-                b.set_action_name(Some("win.sign-in-again"));
-                b.set_action_target_value(Some(&id.0.to_variant()));
-                status.append(&b);
-            }
-            Chip::Idle if failure.is_some() => status.append(&failed_btn()),
-            Chip::Idle if s.accounts.session(id) == SessionState::Checking => {
-                status.append(&ds::badge(Tone::Neutral, "Checking", true, true));
-            }
-            Chip::Idle => status.append(&lbl("Idle", "mn-idle")),
+        let (text, kind) = status_of(s, id, chip);
+        state.set_label(text);
+        for k in ["run", "start", "bad", "idle"] {
+            toggle_class(&dot, k, k == kind);
+            toggle_class(&state, k, k == kind);
         }
-        match failure {
-            Some(why) => reason_text.set_label(&sentence(why)),
-            None => reason_open.set_reveal_child(false),
+        let usage = s.usage.get(&id).filter(|_| chip == Chip::Running);
+        match usage {
+            Some(u) => {
+                ran.set_label(&uptime(u.uptime));
+                cpu.set_label(&u.cpu.map_or_else(|| "—".to_owned(), percent));
+                memory.set_label(&bytes(u.memory));
+            }
+            None if chip == Chip::Running => {
+                for l in [&ran, &cpu, &memory] {
+                    l.set_label("—");
+                }
+            }
+            None => {
+                // Uptime is for what runs: when an idle one last did is its tip.
+                for l in [&ran, &cpu, &memory] {
+                    l.set_label("—");
+                }
+            }
         }
+        ran.set_tooltip_text(
+            match usage {
+                Some(_) => None,
+                None => Some(format!("Last launched: {}", last_ran(last_launch.as_deref()))),
+            }
+            .as_deref(),
+        );
+        toggle_class(&ran, "mn-dim", usage.is_none());
+        toggle_class(&cpu, "heavy", usage.and_then(|u| u.cpu).is_some_and(|c| c >= HEAVY_CPU));
+        toggle_class(&cpu, "mn-dim", usage.and_then(|u| u.cpu).is_none());
+        toggle_class(&memory, "heavy", usage.is_some_and(|u| u.memory >= HEAVY_MEMORY));
+        toggle_class(&memory, "mn-dim", usage.is_none());
+        macro_cell.draw(s, id, chip == Chip::Running);
+        perf.draw(s, id, hz);
         let live = chip == Chip::Running;
         ds::set_ib(
             &play,
-            if live { "stop" } else { "play" },
-            if live {
-                "Close this account's client"
-            } else if leader {
-                "Launch the leader, then its auto-join accounts into its server"
-            } else {
-                "Launch into the target"
-            },
+            if live { "stop-filled" } else { "play-filled" },
+            if live { "Close this account's client" } else { "Launch into the target" },
         );
-        toggle_class(&play, "stop", live);
-        toggle_class(&play, "go", !live);
         play.set_sensitive(!matches!(chip, Chip::Starting | Chip::Joining));
         let hidden = s.windows.get(&id) == Some(&ClientWindow::Hidden);
         hide.set_visible(hidden || can_hide(s, id));
@@ -274,29 +171,9 @@ pub fn account_row(w: &Window, acct: &Account) -> gtk::Box {
         ds::set_ib(
             &hide,
             if hidden { "eye-off" } else { "eye" },
-            if hidden {
-                "Show this account's window"
-            } else {
-                "Hide its window; the game keeps running"
-            },
+            if hidden { "Show its window" } else { "Hide its window; the game keeps running" },
         );
         toggle_class(&hide, "on", hidden);
-        // A macro playing here: its stop, and where it is.
-        let playing = s.macro_runs.get(&id);
-        ds::set_ib(
-            &macro_btn,
-            if playing.is_some() { "stop" } else { "play" },
-            if playing.is_some() { "Stop its macro" } else { "Play its macro" },
-        );
-        macro_btn.set_sensitive(playing.is_some() || live);
-        match playing {
-            Some(_) => {
-                let at = s.macro_progress.get(&id).map_or("starting", String::as_str);
-                macro_progress.set_label(at);
-                macro_progress.set_visible(true);
-            }
-            None => macro_progress.set_visible(false),
-        }
         if let Some(a) = s.accounts.get(id) {
             if a.selected != check.is_active() {
                 quiet.set(true);
@@ -309,13 +186,125 @@ pub fn account_row(w: &Window, acct: &Account) -> gtk::Box {
     }));
     let block = gtk::Box::new(Orientation::Vertical, 0);
     block.append(&row);
-    block.append(&reason_shown);
     block.append(&confirm);
     block
 }
 
-/// A confirmation that opens under a row or band: what it asks, Cancel,
-/// and the destructive button.
+/// Who it is: its picture, label, the star of the main account, its Roblox
+/// name, its note and whether its window is hidden. Returns the hidden mark,
+/// which shows while it is.
+fn identity(acct: &Account, picture: Option<&std::path::Path>) -> (gtk::Box, gtk::Image) {
+    let who = gtk::Box::new(Orientation::Horizontal, 8);
+    who.append(&ds::av(acct.name.as_str(), picture, 26));
+    who.append(&lbl(acct.name.as_str(), "mn-name").ellipsize());
+    if acct.leader {
+        who.append(&ds::icon("star-filled").css("mn-star s16").tip("Your main account"));
+    }
+    let user = acct.username.clone().unwrap_or_else(|| acct.name.to_string());
+    who.append(&lbl(&format!("@{user}"), "mn-user").ellipsize());
+    let note = acct.note.trim();
+    if !note.is_empty() {
+        who.append(&ds::icon("note").css("mn-dim s16").tip(note));
+    }
+    let hidden = ds::icon("eye-off").css("mn-dim s16").tip("Window hidden; the game keeps running");
+    who.append(&hidden);
+    (who, hidden)
+}
+
+/// The words and look of its status.
+fn status_of(s: &AppState, id: UserId, chip: Chip) -> (&'static str, &'static str) {
+    match chip {
+        Chip::Running => ("Running", "run"),
+        Chip::Starting => ("Starting", "start"),
+        Chip::Joining => ("Joining", "start"),
+        Chip::Expired => ("Signed out", "bad"),
+        Chip::Idle if s.failures.contains_key(&id) => ("Failed", "bad"),
+        Chip::Idle if s.accounts.session(id) == SessionState::Checking => ("Checking", "start"),
+        Chip::Idle => ("Idle", "idle"),
+    }
+}
+
+/// Its macro: run or stop it, and where it is; or, with none picked, a
+/// menu to pick one.
+struct MacroCell {
+    root: gtk::Box,
+    run: Option<gtk::Button>,
+    at: gtk::Label,
+}
+
+impl MacroCell {
+    fn build(w: &Window, acct: &Account) -> Self {
+        let id = acct.user_id;
+        let root = gtk::Box::new(Orientation::Horizontal, 6).css("mn-macro");
+        let at = lbl("", "mn-dim").ellipsize();
+        let names: Vec<String> = w.state().macros.names().map(str::to_owned).collect();
+        let picked = acct.macro_name.clone().filter(|m| names.contains(m));
+        let Some(m) = picked else {
+            let menu = gio::Menu::new();
+            for n in &names {
+                let item = gio::MenuItem::new(Some(&n.replace('_', "__")), None);
+                item.set_action_and_target_value(
+                    Some("win.set-macro"),
+                    Some(&(id.0, n.clone()).to_variant()),
+                );
+                menu.append_item(&item);
+            }
+            let new = gio::Menu::new();
+            new.append(Some("New macro…"), Some("win.new-macro"));
+            menu.append_section(None, &new);
+            let inner = gtk::Box::new(Orientation::Horizontal, 6);
+            inner.append(&lbl("Not set", ""));
+            inner.append(&ds::icon("chev-down").css("mn-dim s16"));
+            let add = gtk::MenuButton::builder()
+                .child(&inner)
+                .menu_model(&menu)
+                .valign(Align::Center)
+                .css_classes(["mn-quiet"])
+                .tooltip_text("Pick the macro its Run plays")
+                .build();
+            root.append(&add);
+            return MacroCell { root, run: None, at };
+        };
+        let run = row_button("play-circle", "Play its macro");
+        run.connect_clicked({
+            let w = w.weak();
+            move |_| {
+                if let Some(w) = w.upgrade() {
+                    w.play_macro_here(id);
+                }
+            }
+        });
+        root.append(&run);
+        root.append(&lbl(&m, "mn-macro-n").ellipsize());
+        root.append(&at);
+        MacroCell { root, run: Some(run), at }
+    }
+
+    /// Playing or not, and where.
+    fn draw(&self, s: &AppState, id: UserId, live: bool) {
+        let Some(run) = &self.run else { return };
+        let playing = s.macro_runs.contains_key(&id);
+        ds::set_ib(
+            run,
+            if playing { "stop-circle" } else { "play-circle" },
+            if playing { "Stop its macro" } else { "Play its macro" },
+        );
+        toggle_class(run, "playing", playing);
+        run.set_sensitive(playing || live);
+        let at = s.macro_progress.get(&id).map(|p| short_progress(p)).unwrap_or("starting");
+        self.at.set_label(if playing { at } else { "" });
+        self.at.set_visible(playing);
+    }
+}
+
+/// Where a macro is, as short as the column: "round 2, step 3/7: pressing
+/// e" as "round 2, step 3/7".
+fn short_progress(p: &str) -> &str {
+    p.split_once(':').map_or(p, |(head, _)| head)
+}
+
+/// A confirmation that opens under a row or a group's row: what it asks,
+/// Cancel, and the destructive button.
 pub fn confirm_row(title: &str, body: &str, verb: &str, run: impl Fn() + 'static) -> gtk::Revealer {
     let text = gtk::Label::new(None);
     text.set_markup(&format!(
@@ -344,16 +333,16 @@ pub fn confirm_row(title: &str, body: &str, verb: &str, run: impl Fn() + 'static
         b.set_valign(Align::Center);
         confirm.append(b);
     }
-    let holder = gtk::Box::new(Orientation::Horizontal, 0).css("mn-reason plain");
+    let holder = gtk::Box::new(Orientation::Horizontal, 0).css("mn-confirm");
     holder.append(&confirm.hexpand());
     revealer.set_child(Some(&holder));
     revealer
 }
 
 /// The row's menu: window actions, aimed at this account.
-fn menu(w: &Window, acct: &Account) -> gio::Menu {
+pub fn menu(w: &Window, acct: &Account) -> gio::Menu {
     let id = acct.user_id.0;
-    let (has_leader, groups, current) = {
+    let (groups, current) = {
         let s = w.state();
         let groups: Vec<(String, String)> = std::iter::once((String::new(), "Ungrouped".into()))
             .chain(s.accounts.groups().iter().map(|g| {
@@ -362,7 +351,7 @@ fn menu(w: &Window, acct: &Account) -> gio::Menu {
             }))
             .collect();
         let current = s.accounts.group_of(acct).unwrap_or_default().to_owned();
-        (s.accounts.leader().is_some(), groups, current)
+        (groups, current)
     };
     let item = |label: &str, action: &str| {
         let item = gio::MenuItem::new(Some(label), None);
@@ -372,21 +361,19 @@ fn menu(w: &Window, acct: &Account) -> gio::Menu {
     let model = gio::Menu::new();
     model.append_item(&item("Settings", "win.account-settings"));
     if !acct.leader {
-        let layout = gio::Menu::new();
-        layout.append_item(&item("Make leader", "win.make-leader"));
-        if has_leader {
-            let follow =
-                if acct.follow.is_some() { "Stop auto-joining" } else { "Auto-join the leader" };
-            layout.append_item(&item(follow, "win.toggle-follow"));
-        }
-        model.append_section(None, &layout);
+        model.append_item(&item("Make main account", "win.make-main"));
     }
     let places = gio::Menu::new();
-    for (gid, name) in groups.into_iter().filter(|(gid, _)| *gid != current) {
-        // A menu label's underscores are mnemonics; a name's are text.
-        let entry = gio::MenuItem::new(Some(&name.replace('_', "__")), None);
-        entry.set_action_and_target_value(Some("win.move-account"), Some(&(id, gid).to_variant()));
-        places.append_item(&entry);
+    if !acct.leader {
+        for (gid, name) in groups.into_iter().filter(|(gid, _)| *gid != current) {
+            // A menu label's underscores are mnemonics; a name's are text.
+            let entry = gio::MenuItem::new(Some(&name.replace('_', "__")), None);
+            entry.set_action_and_target_value(
+                Some("win.move-account"),
+                Some(&(id, gid).to_variant()),
+            );
+            places.append_item(&entry);
+        }
     }
     if places.n_items() > 0 {
         model.append_section(Some("Move to"), &places);
@@ -419,6 +406,20 @@ pub fn context_menu(row: &impl IsA<gtk::Widget>, model: &gio::Menu) {
             glib::idle_add_local_once(move || p.unparent());
         });
         pop.popup();
+    });
+    row.add_controller(click);
+}
+
+/// A click on the row (not on one of its buttons) shows it in the details
+/// pane.
+pub(super) fn inspect_on_click(w: &Window, row: &gtk::Box, id: UserId) {
+    let click = gtk::GestureClick::builder().button(gdk::BUTTON_PRIMARY).build();
+    let weak = w.weak();
+    click.connect_released(move |g, _, _, _| {
+        g.set_state(gtk::EventSequenceState::Claimed);
+        if let Some(w) = weak.upgrade() {
+            w.inspect(Some(Inspected::Account(id)));
+        }
     });
     row.add_controller(click);
 }
@@ -496,5 +497,16 @@ pub fn dragged_id(value: Option<&glib::Value>) -> Option<UserId> {
 fn mark(row: &gtk::Box, place: Option<&str>) {
     for c in ["drop-above", "drop-below"] {
         toggle_class(row, c, Some(c) == place);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn progress_is_cut_before_what_the_step_does() {
+        assert_eq!(short_progress("round 2, step 3/7: pressing e"), "round 2, step 3/7");
+        assert_eq!(short_progress("starting"), "starting");
     }
 }

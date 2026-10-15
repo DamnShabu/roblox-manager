@@ -40,6 +40,8 @@ impl Variant {
 pub struct Button {
     pub button: gtk::Button,
     label: gtk::Label,
+    /// The icon before the words, when it has one.
+    left: Option<gtk::Image>,
 }
 
 impl Button {
@@ -63,15 +65,16 @@ impl Button {
         label.set_use_underline(true);
         let inner = gtk::Box::new(Orientation::Horizontal, 6);
         inner.set_halign(Align::Center);
-        if let Some(l) = left {
-            inner.append(&icon(l));
+        let left = left.map(icon);
+        if let Some(l) = &left {
+            inner.append(l);
         }
         inner.append(&label);
         if let Some(r) = right {
             inner.append(&icon(r));
         }
         button.set_child(Some(&inner));
-        Button { button, label }
+        Button { button, label, left }
     }
 
     pub fn on(self, f: impl Fn() + 'static) -> Self {
@@ -91,6 +94,13 @@ impl Button {
 
     pub fn set_text(&self, t: &str) {
         self.label.set_label(t);
+    }
+
+    /// Swap the icon before the words, when it has one.
+    pub fn set_icon(&self, name: &str) {
+        if let Some(l) = &self.left {
+            l.set_icon_name(Some(&icons::name(name)));
+        }
     }
 }
 
@@ -118,7 +128,6 @@ pub fn set_ib(b: &gtk::Button, icon_name: &str, tip: &str) {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
-    Neutral,
     Success,
     Warning,
     Danger,
@@ -130,7 +139,6 @@ pub fn badge(tone: Tone, text: &str, dot: bool, live: bool) -> gtk::Box {
     let b = gtk::Box::new(Orientation::Horizontal, 6);
     b.add_css_class("badge");
     b.add_css_class(match tone {
-        Tone::Neutral => "neutral",
         Tone::Success => "success",
         Tone::Warning => "warning",
         Tone::Danger => "danger",
@@ -229,7 +237,7 @@ pub fn monogram(name: &str) -> String {
 
 /// An overline: the small upper-case label over a section.
 pub fn overline(text: &str) -> gtk::Label {
-    lbl(&text.to_uppercase(), "t-overline")
+    lbl(text, "t-overline")
 }
 
 /// A section of a panel: its overline, anything on its right, then rows.
@@ -320,23 +328,6 @@ pub fn head(
         h.append(t);
     }
     h
-}
-
-/// An inline notice: an icon and words, tinted by `tone`.
-pub fn note(tone: Tone, icon_name: &str, text: &str) -> gtk::Box {
-    let b = gtk::Box::new(Orientation::Horizontal, 8);
-    b.add_css_class("cx-note");
-    b.add_css_class(match tone {
-        Tone::Danger => "danger",
-        Tone::Warning => "warning",
-        Tone::Success => "success",
-        Tone::Neutral | Tone::Accent => "neutral",
-    });
-    let i = icon(icon_name).css("s16");
-    i.set_valign(Align::Start);
-    b.append(&i);
-    b.append(&lbl(text, "").wrapped().hexpand());
-    b
 }
 
 /// Keys as keycaps: ["Ctrl", "F7"].

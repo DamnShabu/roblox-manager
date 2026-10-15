@@ -31,7 +31,7 @@ pub enum AccountError {
     LabelTaken(String),
     #[error("no such account")]
     NoSuchAccount,
-    #[error("the leader can't be in a group")]
+    #[error("the main account stays out of groups")]
     LeaderInGroup,
     #[error("could not save: {0}")]
     Io(String),

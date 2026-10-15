@@ -13,11 +13,13 @@ mod profiles;
 mod quality;
 pub mod session;
 pub mod stacked;
+mod usage;
 
 pub use build::{Build, roblox_build};
 pub use performance::Performance;
 pub use process::{Child, Output, ProcessView, Runner, SystemRunner};
 pub use profiles::{ClientOpts, CordialProfiles, STARTUP_CHECK, Window};
+pub use usage::{ClientUsage, MachineLoad, Meter, Reading};
 
 use crate::keyring::KeyringError;
 

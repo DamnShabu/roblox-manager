@@ -13,7 +13,7 @@ use serde_json::{Map, Value};
 
 use super::build::Build;
 use super::performance::Performance;
-use super::process::{ProcessView, Runner, last_line};
+use super::process::{Output, ProcessView, Runner, last_line};
 use super::{CordialError, clients, engine, quality, session};
 use crate::keyring::{Attrs, Keyring};
 use crate::macros::{cage_window, nested, relay};
@@ -250,6 +250,12 @@ impl CordialProfiles {
             )));
         }
         Ok(clients::parse(&String::from_utf8_lossy(&out.stdout)))
+    }
+
+    /// Run `argv` where the clients are seen, for a look at them; its
+    /// status is the caller's to judge.
+    pub(super) fn run_seen(&self, argv: &[&str]) -> Result<Output, CordialError> {
+        self.runner.run(&self.view.argv(argv), Duration::from_secs(10))
     }
 
     /// The profiles a client has open.

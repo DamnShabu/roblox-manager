@@ -237,38 +237,18 @@ pub(crate) fn scroll(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
         .build()
 }
 
-/// The top bar's target and recent targets, from the state.
-pub fn draw_bar(w: &Window, art: &gtk::Box, name_label: &gtk::Label, recents: &gtk::Box) {
+/// The toolbar's target: its art and its name.
+pub fn draw_bar(w: &Window, art: &gtk::Box, name_label: &gtk::Label) {
     let s = w.state();
     clear(art);
     let (pic, text) = match (&s.friend, &s.place) {
-        (Some(f), _) => (ds::art_icon("user", 28), format!("{} · {}", f.display, f.game)),
+        (Some(f), _) => (ds::art_icon("user", 20), format!("{} · {}", f.display, f.game)),
         (None, Some(p)) => match s.game_list.iter().find(|t| &t.game.place_id == p) {
-            Some(t) => (ds::art(&t.game.name, t.icon.as_deref(), 28), t.game.name.clone()),
-            None => (ds::art_icon("gamepad", 28), format!("Place {p}")),
+            Some(t) => (ds::art(&t.game.name, t.icon.as_deref(), 20), t.game.name.clone()),
+            None => (ds::art_icon("gamepad", 20), format!("Place {p}")),
         },
-        (None, None) => (ds::art_icon("grid", 28), "Games browser".to_owned()),
+        (None, None) => (ds::art_icon("grid", 20), "Games browser".to_owned()),
     };
     art.append(&pic);
     name_label.set_label(&text);
-    clear(recents);
-    for t in s.recents() {
-        let place = t.game.place_id.clone();
-        let on = s.friend.is_none() && s.place.as_ref() == Some(&place);
-        let b = gtk::Button::builder()
-            .child(&ds::art(&t.game.name, t.icon.as_deref(), 28))
-            .css_classes(["mn-recent-b"])
-            .tooltip_text(format!("Launch into {}", t.game.name))
-            .valign(Align::Center)
-            .build();
-        name(&b, &t.game.name);
-        toggle_class(&b, "on", on);
-        let weak = w.weak();
-        b.connect_clicked(move |_| {
-            if let Some(w) = weak.upgrade() {
-                w.pick_game(Some(place.clone()));
-            }
-        });
-        recents.append(&b);
-    }
 }
