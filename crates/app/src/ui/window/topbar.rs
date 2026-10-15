@@ -1,4 +1,4 @@
-//! The header bar: the app's mark, its name and how things are, the search,
+//! The header bar: the app's name and how things are, the search,
 //! and the tools at the end. It is the window's title bar too: drag it to
 //! move the window.
 
@@ -20,9 +20,6 @@ impl TopBar {
     pub fn build(w: &WeakWindow) -> Self {
         let bar = gtk::Box::new(Orientation::Horizontal, 12).css("mn-top");
         bar.append(&gtk::WindowControls::new(gtk::PackType::Start));
-        let logo = gtk::Image::from_icon_name("rm-brand");
-        logo.set_pixel_size(24);
-        bar.append(&logo);
         bar.append(&lbl("Stacked", "mn-brand"));
         let status = lbl("All idle", "mn-dim").ellipsize();
         bar.append(&status);

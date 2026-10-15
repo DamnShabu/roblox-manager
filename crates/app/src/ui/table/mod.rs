@@ -52,8 +52,8 @@ impl Col {
         }
     }
 
-    /// The narrowness at which it goes: 1 below 1280 px, 2 below 1100 px,
-    /// 3 below 860 px.
+    /// The narrowness at which it goes, as the table's area narrows (its
+    /// steps are `Chrome::content_breakpoints`).
     fn gone_at(self) -> u8 {
         match self {
             Col::Uptime | Col::Memory => 1,
