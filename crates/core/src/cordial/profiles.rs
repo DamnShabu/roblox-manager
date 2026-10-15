@@ -12,6 +12,7 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use super::build::Build;
+use super::crashes::{ClientCrash, Crashes};
 use super::performance::Performance;
 use super::process::{Output, ProcessView, Runner, last_line};
 use super::{CordialError, clients, engine, quality, session};
@@ -63,6 +64,8 @@ pub struct CordialProfiles {
     /// The lock that keeps cages off the display they open on, held from the
     /// first macro-ready launch on. See [`nested::hold_parent_display`].
     parent_display: Mutex<Option<File>>,
+    /// Clients this manager started that have since crashed.
+    crashes: Crashes,
 }
 
 impl CordialProfiles {
@@ -81,6 +84,7 @@ impl CordialProfiles {
             sleep,
             relay: None,
             parent_display: Mutex::default(),
+            crashes: Crashes::default(),
         }
     }
 
@@ -194,7 +198,10 @@ impl CordialProfiles {
         let mut child = self.runner.spawn(&argv, log, &env)?;
         (self.sleep)(STARTUP_CHECK);
         match child.exited()? {
-            None => Ok(()),
+            None => {
+                self.crashes.watch(profile.clone(), child, log_path);
+                Ok(())
+            }
             Some(status) => {
                 let tail = read_tail(&log_path);
                 Err(CordialError::ExitedAtOnce {
@@ -203,6 +210,11 @@ impl CordialProfiles {
                 })
             }
         }
+    }
+
+    /// The clients started here that crashed since the last call.
+    pub fn take_crashes(&self) -> Vec<ClientCrash> {
+        self.crashes.take()
     }
 
     /// Lock the display cages open on before one starts, unless it already

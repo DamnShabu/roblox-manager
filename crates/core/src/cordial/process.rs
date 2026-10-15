@@ -3,6 +3,7 @@
 
 use std::fs::File;
 use std::io::Read;
+use std::os::unix::process::ExitStatusExt as _;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -172,7 +173,9 @@ impl Child for SystemChild {
         let status = child
             .try_wait()
             .map_err(|e| process_error(&format!("could not check the client: {e}")))?;
-        Ok(status.map(|s| s.code().unwrap_or(-1)))
+        // 128 + the signal, as a shell reports it, so a crash reads the same
+        // whether it came through cage or a wrapper or straight from the client.
+        Ok(status.map(|s| s.code().unwrap_or_else(|| 128 + s.signal().unwrap_or(0))))
     }
 }
 

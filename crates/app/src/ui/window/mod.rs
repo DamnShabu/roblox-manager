@@ -147,6 +147,7 @@ impl Window {
         glib::timeout_add_seconds_local(2, move || match handle.upgrade() {
             Some(w) => {
                 w.poll_running();
+                crate::crash::show_clients(&w);
                 glib::ControlFlow::Continue
             }
             None => glib::ControlFlow::Break,
