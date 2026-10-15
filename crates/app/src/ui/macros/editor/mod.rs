@@ -30,6 +30,8 @@ pub struct MacroDialog {
     rounds: gtk::SpinButton,
     count: gtk::Label,
     list: gtk::ListBox,
+    /// The value entry of each step drawn, in the order drawn.
+    entries: RefCell<Vec<gtk::Entry>>,
     /// Steps as rows, or the macro as text to paste or copy.
     view: adw::ToggleGroup,
     views: gtk::Stack,
@@ -91,6 +93,7 @@ impl MacroDialog {
             rounds,
             count: lbl("", "dimmed"),
             list: crate::ui::widgets::boxed_list(),
+            entries: RefCell::default(),
             view: adw::ToggleGroup::builder().valign(Align::Center).build(),
             views: gtk::Stack::builder().vhomogeneous(false).build(),
             text: gtk::TextView::builder()
@@ -113,19 +116,15 @@ impl MacroDialog {
     }
 
     fn assemble(self: &Rc<Self>, new: bool) {
-        // -- header bar: Cancel, the title, Save ------------------------------
-        let back =
-            ds::Button::with_icons("All macros", Variant::Ghost, true, Some("chev-left"), None)
-                .tip("Back to the list; nothing unsaved is kept");
-        let cancel = ds::Button::new("Cancel", Variant::Ghost, true);
-        for b in [&back.button, &cancel.button] {
-            let dialog = self.dialog.downgrade();
-            b.connect_clicked(move |_| {
-                if let Some(d) = dialog.upgrade() {
-                    d.close();
-                }
-            });
-        }
+        // -- header bar: the name, Cancel, Save --------------------------------
+        let cancel = ds::Button::new("Cancel", Variant::Ghost, true)
+            .tip("Close it; nothing unsaved is kept (Esc)");
+        let dialog = self.dialog.downgrade();
+        cancel.button.connect_clicked(move |_| {
+            if let Some(d) = dialog.upgrade() {
+                d.close();
+            }
+        });
         let me = Rc::downgrade(self);
         let save = ds::Button::new("Save", Variant::Primary, true).on(move || {
             if let Some(d) = me.upgrade() {
@@ -134,11 +133,11 @@ impl MacroDialog {
         });
         self.name.set_hexpand(true);
         self.name.set_valign(Align::Center);
-        for b in [&back.button, &cancel.button, &save.button] {
+        for b in [&cancel.button, &save.button] {
             b.set_valign(Align::Center);
         }
-        let header =
-            hbox!(8, "cx-head", back.button, self.name.clone(), cancel.button, save.button.clone());
+        self.name.set_tooltip_text(Some("The macro's name"));
+        let header = hbox!(8, "cx-head", self.name.clone(), cancel.button, save.button.clone());
         self.dialog.set_default_widget(Some(&save.button));
 
         // -- name and hotkey ------------------------------------------------------
