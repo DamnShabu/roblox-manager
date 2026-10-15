@@ -137,6 +137,7 @@ fn world(n: u64, sessions: &[(&str, &str)], running: &[u64]) -> World {
     let pacing = Pacing {
         leader_timeout: Duration::from_secs(9),
         poll: Duration::from_secs(3),
+        glance: Duration::from_secs(3),
         sleep: Arc::new(move |d| {
             let mut slept = slept2.lock().unwrap();
             slept.push(d);
@@ -250,6 +251,14 @@ fn an_account_already_running_is_skipped_and_costs_no_wait() {
 }
 
 #[test]
+fn which_accounts_are_running_is_looked_up_once_per_launch() {
+    let w = world(5, &[], &[2]);
+    w.launch(request(&[1, 2, 3, 4, 5], Mode::Each, Some("77"), None));
+    let pgreps = w.runner.ran().iter().filter(|argv| argv.iter().any(|a| a == "pgrep")).count();
+    assert_eq!(pgreps, 1);
+}
+
+#[test]
 fn expired_and_failed_accounts_are_reported_and_the_rest_still_launch() {
     let w = world(3, &[("a1", "expired"), ("a2", "offline")], &[]);
     let r = w.launch(request(&[1, 2, 3], Mode::Each, Some("77"), None));
@@ -277,6 +286,20 @@ fn a_group_waits_for_the_leaders_server_and_the_rest_join_it() {
     assert_eq!(started[0].1, link("77", None));
     assert_eq!(started[1].1, link("88", Some("s-1")), "followers go to the leader's place");
     assert_eq!(started[2].1, link("88", Some("s-1")));
+}
+
+#[test]
+fn a_leader_that_names_its_server_in_its_log_is_followed_there_without_presence() {
+    let w = world(3, &[], &[]);
+    let job = "6baeb082-1c5f-4e0b-9c4a-0123456789ab";
+    *w.runner.child_output.lock().unwrap() =
+        Some(format!("  pumping the looper\n[cordial] game: joining server {job} of place 88\n"));
+    let r = w.launch(request(&[1, 2, 3], Mode::Group, Some("77"), None));
+    assert_eq!(launched(&r), [1, 2, 3]);
+    assert_eq!(r.server.as_ref().map(ServerId::as_str), Some(job));
+    assert_eq!(w.started()[1].1, link("88", Some(job)), "followers go where the log said");
+    assert_eq!(*w.roblox.presence_asks.lock().unwrap(), 0, "presence was never needed");
+    assert!(w.slept.lock().unwrap().is_empty(), "nobody waited a poll for it");
 }
 
 #[test]

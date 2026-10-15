@@ -220,12 +220,17 @@ impl CordialProfiles {
         Ok(())
     }
 
+    /// Where the profile's client writes its output.
+    pub fn log_path(&self, profile: &Profile) -> PathBuf {
+        self.paths.logs().join(format!("{profile}.log"))
+    }
+
     /// The profile's log path, the previous launch's moved to `.log.1`.
     fn rotate_log(&self, profile: &Profile) -> Result<PathBuf, CordialError> {
         let logs = self.paths.logs();
         fs::create_dir_all(&logs)
             .map_err(|e| io(&format!("could not create {}", logs.display()), e))?;
-        let path = logs.join(format!("{profile}.log"));
+        let path = self.log_path(profile);
         if path.exists() {
             fs::rename(&path, logs.join(format!("{profile}.log.1")))
                 .map_err(|e| io("could not keep the previous log", e))?;

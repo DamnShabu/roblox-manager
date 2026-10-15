@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use crate::cordial::{Build, ClientOpts, CordialError, CordialProfiles};
+use crate::cordial::{Build, ClientOpts, CordialError, CordialProfiles, JoiningWatch};
 use crate::keyring::Keyring;
 use crate::roblox::{Presence, Roblox, RobloxError, join_url};
 use crate::stop::StopFlag;
@@ -26,6 +26,9 @@ pub struct Pacing {
     pub leader_timeout: Duration,
     /// How often to ask.
     pub poll: Duration,
+    /// How often the leader's own log is read for the server it is joining,
+    /// which it names before presence does. Never less often than `poll`.
+    pub glance: Duration,
     pub sleep: Arc<dyn Fn(Duration) + Send + Sync>,
 }
 
@@ -34,6 +37,7 @@ impl Default for Pacing {
         Pacing {
             leader_timeout: Duration::from_secs(90),
             poll: Duration::from_secs(3),
+            glance: Duration::from_millis(250),
             sleep: Arc::new(thread::sleep),
         }
     }
@@ -215,6 +219,31 @@ impl Run<'_> {
         &self.launcher.pacing
     }
 
+    /// Which of `accounts` are already up and which are to start, from one
+    /// look at the running clients rather than one per account. Not knowing
+    /// is a failure of every one of them, recorded and logged here.
+    fn split_running(&self, accounts: &[LaunchAccount]) -> Vec<LaunchAccount> {
+        let up = match self.launcher.profiles.running() {
+            Ok(up) => up,
+            Err(e) => {
+                for a in accounts {
+                    self.log(format!("{}: FAILED -- {e}", a.label));
+                    self.fail(a, e.to_string());
+                }
+                return Vec::new();
+            }
+        };
+        let mut starting = Vec::new();
+        for a in accounts {
+            if up.contains(&Profile::of(a.id)) {
+                self.log(format!("{}: already running -- skipping launch", a.label));
+            } else {
+                starting.push(a.clone());
+            }
+        }
+        starting
+    }
+
     /// Whether the account's client is up. Not knowing is a failure of that
     /// account, recorded here; the caller logs it.
     fn running(&self, a: &LaunchAccount) -> Result<bool, String> {
@@ -292,6 +321,11 @@ impl Run<'_> {
                 Err(why)
             }
         }
+    }
+
+    /// The account's client log, followed for the server it joins.
+    fn joining_watch(&self, a: &LaunchAccount) -> JoiningWatch {
+        JoiningWatch::new(self.launcher.profiles.log_path(&Profile::of(a.id)))
     }
 
     /// Where the account is now, asked as itself.

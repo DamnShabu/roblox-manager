@@ -140,6 +140,9 @@ impl Window {
             w.log(&format!("macros.json could not be read; macros will not save: {why}"));
             w.toast("Your macros could not be read, so changes to them will not be saved");
         }
+        // Once now, so a client already playing shows as running when the
+        // window opens rather than at the timer's first tick.
+        w.poll_running();
         let handle = w.weak();
         glib::timeout_add_seconds_local(2, move || match handle.upgrade() {
             Some(w) => {
