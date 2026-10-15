@@ -6,6 +6,7 @@
 
 pub mod accounts;
 pub mod cordial;
+pub mod crash;
 pub mod desktop;
 pub mod github;
 pub mod install;
