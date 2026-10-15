@@ -112,10 +112,17 @@ impl Runner for SystemRunner {
         let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
         let stderr = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
         let deadline = Instant::now() + timeout;
+        // Looked at again soon at first, then less often: most of what runs
+        // here (pgrep, ps, cordial-fetch --status) is done in a millisecond
+        // or two, and a flat 20 ms step made every one of them take 20.
+        let mut nap = Duration::from_millis(1);
         let status = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status,
-                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+                Ok(None) if Instant::now() < deadline => {
+                    thread::sleep(nap);
+                    nap = (nap * 2).min(Duration::from_millis(20));
+                }
                 Ok(None) => {
                     end_group(&mut child);
                     return Err(process_error(&format!(
@@ -223,6 +230,8 @@ pub(crate) mod recording {
         /// When set, every `pgrep` answers this (its running clients),
         /// leaving the queued answers for other commands.
         pub pgrep: Mutex<Option<String>>,
+        /// What every spawned child writes to its log as it starts.
+        pub child_output: Mutex<Option<String>>,
         pub ran: Mutex<Vec<Vec<String>>>,
         pub spawned: Mutex<Vec<Spawned>>,
     }
@@ -272,10 +281,13 @@ pub(crate) mod recording {
         fn spawn(
             &self,
             argv: &[String],
-            _log: File,
+            mut log: File,
             env: &[(String, String)],
         ) -> Result<Box<dyn Child>, CordialError> {
             self.spawned.lock().unwrap().push((argv.to_vec(), env.to_vec()));
+            if let Some(out) = self.child_output.lock().unwrap().as_deref() {
+                std::io::Write::write_all(&mut log, out.as_bytes()).unwrap();
+            }
             let exit = match self.child_error.lock().unwrap().clone() {
                 Some(why) => Err(why),
                 None => Ok(*self.child_exit.lock().unwrap()),
