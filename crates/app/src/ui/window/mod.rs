@@ -221,6 +221,7 @@ impl Window {
 
     fn show_log(&self, line: String) {
         let stamp = chrono::Local::now().format("%H:%M").to_string();
+        crate::crash::line(&chrono::Local::now().format("%H:%M:%S").to_string(), &line);
         self.state_mut().log(stamp, line);
         let s = self.state();
         self.0.ui.strip.show(s.activity.first());
@@ -242,7 +243,7 @@ impl Window {
         t.set_active(!t.is_active());
     }
 
-    /// The table's columns, which come and go with the window's width.
+    /// The table's columns, which come and go with the table area's width.
     pub fn columns(&self) -> &Columns {
         &self.0.ui.cols
     }

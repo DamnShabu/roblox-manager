@@ -131,9 +131,16 @@ impl Chrome {
         let content = gtk::Box::new(Orientation::Horizontal, 0);
         content.append(&sidebar.root);
         content.append(&main);
+        // The size the table area's own steps go by; it asks for no more
+        // than this, and its steps make what it holds fit.
+        let area = adw::BreakpointBin::builder()
+            .child(&content)
+            .width_request(360)
+            .height_request(200)
+            .build();
         let insp = Inspector::build(w);
         let split = adw::OverlaySplitView::builder()
-            .content(&content)
+            .content(&area)
             .sidebar(&insp.root)
             .sidebar_position(gtk::PackType::End)
             .min_sidebar_width(NARROW)
@@ -194,47 +201,75 @@ impl Chrome {
             shortcuts,
             panel: RefCell::default(),
         };
-        chrome.breakpoints(win, w);
+        chrome.breakpoints(win);
+        chrome.content_breakpoints(&area, w);
         chrome
     }
 
-    /// Narrower windows: fewer columns, then no sidebar and the panel over
-    /// the table rather than beside it, then the toolbar's and the header's
-    /// extras go.
-    fn breakpoints(&self, win: &adw::ApplicationWindow, w: &WeakWindow) {
-        let steps: [(&str, u8); 4] = [
-            ("max-width: 1280sp", 1),
-            ("max-width: 1100sp", 2),
-            ("max-width: 860sp", 3),
-            ("max-width: 720sp", 4),
-        ];
+    /// Narrower windows: the header's and the status bar's extras go, then
+    /// the panel lies over the table rather than beside it.
+    fn breakpoints(&self, win: &adw::ApplicationWindow) {
+        let steps: [(&str, u8); 3] =
+            [("max-width: 1100sp", 1), ("max-width: 860sp", 2), ("max-width: 720sp", 3)];
         for (cond, level) in steps {
             let Ok(cond) = adw::BreakpointCondition::parse(cond) else { continue };
             let bp = adw::Breakpoint::new(cond);
+            bp.add_setter(&self.split, "collapsed", Some(&true.to_value()));
+            bp.add_setter(&self.top.search, "width-request", Some(&180.to_value()));
+            // The risk line keeps its room; the activity's line gives way.
+            bp.add_setter(&self.strip.last, "visible", Some(&false.to_value()));
             if level >= 2 {
-                bp.add_setter(&self.sidebar.root, "visible", Some(&false.to_value()));
+                bp.add_setter(&self.top.status, "visible", Some(&false.to_value()));
+            }
+            if level >= 3 {
+                bp.add_setter(&self.top.search, "visible", Some(&false.to_value()));
+                bp.add_setter(&self.strip.links, "visible", Some(&false.to_value()));
+            }
+            win.add_breakpoint(bp);
+        }
+    }
+
+    /// A narrower table area -- a narrow window, or a wide one with a panel
+    /// open beside it: fewer columns, then what the selection can do folds
+    /// into one menu, then no sidebar, then the toolbar's extras go.
+    ///
+    /// Measured on the area itself, not the window: steps that went by the
+    /// window's width left the area as wide as its parts needed (1,472 px
+    /// with the sidebar and the full toolbar, 2,072 with the macro editor
+    /// open) on a window narrower than that, so a fullscreen or maximised
+    /// window drew past the screen's edge and had its controls cut off.
+    fn content_breakpoints(&self, bin: &adw::BreakpointBin, w: &WeakWindow) {
+        // (the width, how much of the toolbar and sidebar goes, the table's
+        // narrowness): each step leaves the table's columns room to fit.
+        let steps: [(&str, u8, u8); 5] = [
+            ("max-width: 1700sp", 0, 1),
+            ("max-width: 1500sp", 1, 2),
+            ("max-width: 1100sp", 2, 2),
+            ("max-width: 800sp", 3, 3),
+            ("max-width: 620sp", 4, 3),
+        ];
+        for (cond, level, columns) in steps {
+            let Ok(cond) = adw::BreakpointCondition::parse(cond) else { continue };
+            let bp = adw::Breakpoint::new(cond);
+            if level >= 1 {
                 bp.add_setter(&self.toolbar.tools, "visible", Some(&false.to_value()));
                 bp.add_setter(&self.toolbar.selected, "visible", Some(&false.to_value()));
                 bp.add_setter(&self.toolbar.sep, "visible", Some(&false.to_value()));
                 bp.add_setter(&self.toolbar.compact, "visible", Some(&true.to_value()));
-                // The risk line keeps its room; the activity's line gives way.
-                bp.add_setter(&self.strip.last, "visible", Some(&false.to_value()));
-                bp.add_setter(&self.split, "collapsed", Some(&true.to_value()));
-                bp.add_setter(&self.top.search, "width-request", Some(&180.to_value()));
+            }
+            if level >= 2 {
+                bp.add_setter(&self.sidebar.root, "visible", Some(&false.to_value()));
             }
             if level >= 3 {
                 bp.add_setter(&self.toolbar.stop_all.button, "visible", Some(&false.to_value()));
-                bp.add_setter(&self.top.status, "visible", Some(&false.to_value()));
             }
             if level >= 4 {
-                bp.add_setter(&self.top.search, "visible", Some(&false.to_value()));
-                bp.add_setter(&self.strip.links, "visible", Some(&false.to_value()));
                 bp.add_setter(&self.toolbar.count, "visible", Some(&false.to_value()));
             }
             let weak = w.clone();
             bp.connect_apply(move |_| {
                 if let Some(w) = weak.upgrade() {
-                    w.columns().set_level(level.min(3));
+                    w.columns().set_level(columns);
                 }
             });
             let weak = w.clone();
@@ -244,7 +279,7 @@ impl Chrome {
                     w.columns().set_level(0);
                 }
             });
-            win.add_breakpoint(bp);
+            bin.add_breakpoint(bp);
         }
     }
 

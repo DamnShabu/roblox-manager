@@ -1,5 +1,6 @@
 //! roblox-manager: several Roblox accounts, launched into one server.
 
+mod crash;
 mod services;
 mod state;
 mod ui;
@@ -34,6 +35,7 @@ fn main() -> glib::ExitCode {
         .build();
     app.connect_startup(|app| {
         gtk::Window::set_default_icon_name(APP_ID);
+        crash::install();
         load_style();
         // A macro's hotkey from anywhere: bind a compositor key to
         //   gapplication action io.github.mujo.RobloxManager run-macro "'NAME'"
@@ -68,6 +70,7 @@ fn main() -> glib::ExitCode {
     app.connect_activate(|app| {
         if let Some(w) = window(app) {
             w.present();
+            crash::show_pending(&w);
         }
     });
     // A join link from the browser (the desktop entry handles roblox-player:
@@ -87,7 +90,9 @@ fn main() -> glib::ExitCode {
             eprintln!("roblox-manager: the previous copy was still running; starting anyway");
         }
     }
-    app.run_with_args(&args)
+    let code = app.run_with_args(&args);
+    crash::end();
+    code
 }
 
 /// The window, made (and not yet shown) if there is none.
