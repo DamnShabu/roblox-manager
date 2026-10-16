@@ -257,9 +257,10 @@ them.
 
 Every time in seconds can be a range such as `60-240`, and a new value is
 picked each time. Nothing else is random: a tap is held for 0.08 s, typed
-characters are 0.1 s apart and a Repeat with no EVERY taps every 0.15 s. The
-accounts one Run plays a macro on all pick the same values from a range, so
-they play it alike; the next Run picks new ones.
+characters are 0.1 s apart and a Repeat with no EVERY taps every 0.15 s. When
+one press of **Run** starts a macro on several accounts, they all get the
+same value from each range, so they play it alike. The next **Run** picks
+new values.
 
 Keys are letters, digits and punctuation, or names: `space`, `enter`,
 `esc`, `tab`, `shift`, `ctrl`, `alt`, `up`, `down`, `left`, `right`, `F1`

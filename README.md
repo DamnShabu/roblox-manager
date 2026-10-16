@@ -73,15 +73,15 @@ progress shows under **Activity**.
 
 1. **Add an account.** Click **+** (<kbd>Ctrl</kbd>+<kbd>N</kbd>), open
    Quick Login on any device where you're signed in, and enter the code.
-   Repeat for each account. [More](docs/guide.md#add-an-account)
+   Repeat for each account. [Adding accounts](docs/guide.md#add-an-account)
 2. **Pick where to go.** The target picker next to **Launch** lists your
    favourite games, Roblox's games browser and your friends' servers.
-   [More](docs/guide.md#launch-into-a-game)
+   [Launch targets](docs/guide.md#launch-into-a-game)
 3. **Launch.** Tick the accounts and click **Launch**
    (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Enter</kbd>).
 4. **Leave them a macro.** Make one under **Macros** in the sidebar, pick it
    in an account's settings, launch again and press **Run**.
-   [More](docs/guide.md#macros)
+   [Setting up macros](docs/guide.md#macros)
 
 ## Documentation
 
@@ -116,7 +116,7 @@ See [SECURITY.md](SECURITY.md) to report a problem.
 Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md)
 says how, and `nix run .` builds and runs the manager from a checkout.
 
-## License
+## Licence
 
 [MIT](LICENSE). Roblox Manager is not affiliated with, endorsed by or
 sponsored by Roblox Corporation. "Roblox" is a trademark of Roblox
