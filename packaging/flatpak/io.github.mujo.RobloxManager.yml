@@ -15,8 +15,8 @@
 #                            cordial/source.json (`cargo test` fails until
 #                            it does), and cordial-cargo-sources.json is
 #                            regenerated from cordial/Cargo.lock
-#   - both with flatpak-builder-tools' cargo/flatpak-cargo-generator.py:
-#       flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+#   - both with packaging/flatpak/update-sources.sh (CI checks they are
+#     current)
 
 app-id: io.github.mujo.RobloxManager
 # GNOME rather than freedesktop: the window and Cordial's engine window are

@@ -990,6 +990,32 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/glib-unix/glib-unix-0.22.8.crate",
+        "sha256": "bc698e05c8483a899312f76b30b8d6d59e44f9e6ddf93a7487a6de34019b543d",
+        "dest": "cargo/vendor/glib-unix-0.22.8"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"bc698e05c8483a899312f76b30b8d6d59e44f9e6ddf93a7487a6de34019b543d\", \"files\": {}}",
+        "dest": "cargo/vendor/glib-unix-0.22.8",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/glib-unix-sys/glib-unix-sys-0.22.9.crate",
+        "sha256": "8644d8d71c4f25b27f775dc9bb4dcd69ff81de8614b23f16c2d7944c915e96ab",
+        "dest": "cargo/vendor/glib-unix-sys-0.22.9"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"8644d8d71c4f25b27f775dc9bb4dcd69ff81de8614b23f16c2d7944c915e96ab\", \"files\": {}}",
+        "dest": "cargo/vendor/glib-unix-sys-0.22.9",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/gobject-sys/gobject-sys-0.22.9.crate",
         "sha256": "07595c9ba696bd9819cb6a8df39f08078f3dd679508fe052dd558492c2053834",
         "dest": "cargo/vendor/gobject-sys-0.22.9"
@@ -1835,14 +1861,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/rustls/rustls-0.23.45.crate",
-        "sha256": "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634",
-        "dest": "cargo/vendor/rustls-0.23.45"
+        "url": "https://static.crates.io/crates/rustls/rustls-0.23.46.crate",
+        "sha256": "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf",
+        "dest": "cargo/vendor/rustls-0.23.46"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634\", \"files\": {}}",
-        "dest": "cargo/vendor/rustls-0.23.45",
+        "contents": "{\"package\": \"48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf\", \"files\": {}}",
+        "dest": "cargo/vendor/rustls-0.23.46",
         "dest-filename": ".cargo-checksum.json"
     },
     {

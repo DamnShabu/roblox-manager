@@ -1,0 +1,50 @@
+# Once a month, a pull request that moves flake.lock (nixpkgs and
+# nix-appimage) forward. Dependabot covers Cargo and the actions.
+#
+# A pull request opened with the workflow's own token starts no workflows,
+# so this then starts the required checks on its branch by hand
+# (workflow_dispatch is the one event that token may trigger). Their
+# results land on the branch's head commit, which is what the pull request
+# needs to merge.
+name: Update flake.lock
+
+on:
+  schedule:
+    - cron: "11 3 1 * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: update-flake-lock
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    env:
+      BRANCH: update_flake_lock_action
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - id: update
+        uses: DeterminateSystems/update-flake-lock@da03c0f078bc4b2c37ee4f7e072d34bf8f188bb3 # v29
+        with:
+          branch: ${{ env.BRANCH }}
+          pr-title: "nix: update flake.lock"
+          pr-labels: |
+            dependencies
+            nix
+      - name: Run the required checks on the pull request's branch
+        if: steps.update.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for workflow in ci.yml security.yml codeql.yml; do
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          done

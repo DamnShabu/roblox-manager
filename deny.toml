@@ -1,0 +1,41 @@
+# cargo-deny: what the dependency tree may contain. CI runs
+# `cargo deny check` on each pull request and daily (security.yml).
+
+[graph]
+targets = ["x86_64-unknown-linux-gnu"]
+all-features = true
+
+[advisories]
+# Every RustSec advisory fails, unmaintained crates included (for every
+# crate, not only direct dependencies). An exception goes in `ignore`
+# with the reason beside it.
+unmaintained = "all"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Licenses compatible with shipping the app under MIT: the ones the tree
+# has today. A new one is a decision, not a version bump.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+# crates.io only: no git dependencies, no other registries.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

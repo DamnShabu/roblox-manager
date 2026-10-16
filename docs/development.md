@@ -65,6 +65,16 @@ nix develop -c cargo fmt --check
 No source file may be longer than 600 lines.
 `crates/core/tests/size_limit.rs` fails the build when one is.
 
+After a change to `Cargo.lock` or `cordial/Cargo.lock`, regenerate the
+Flatpak's offline sources with `packaging/flatpak/update-sources.sh`.
+
+Every pull request runs these checks in CI (`.github/workflows/ci.yml`),
+together with a Nix build, the Flatpak-sources check, actionlint and
+shellcheck. It also runs the security scans: `cargo deny` against
+`deny.toml`, zizmor over the workflows, and CodeQL. CodeRabbit reviews each
+pull request against `.coderabbit.yaml`. `main` takes changes only through
+a pull request with these green, squash-merged.
+
 ## Releasing
 
 ```bash
@@ -77,7 +87,8 @@ packages from it (`packaging/linux/build.sh`, with nfpm) and the Flatpak
 bundle, then publishes all of them with their `SHA256SUMS` as the GitHub
 release that the in-app updater reads. A tag with a pre-release part
 (`v0.3.0-rc.1`) is published as a pre-release, and the updater never offers
-those.
+those. Each asset gets a build-provenance attestation
+(`gh attestation verify FILE -R DamnShabu/roblox-manager`).
 
 ## Scripting the window
 
