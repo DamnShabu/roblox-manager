@@ -141,10 +141,10 @@ fn world(n: u64, sessions: &[(&str, &str)], running: &[u64]) -> World {
         sleep: Arc::new(move |d| {
             let mut slept = slept2.lock().unwrap();
             slept.push(d);
-            if let Some((n, flag)) = &*stop2.lock().unwrap() {
-                if slept.len() == *n {
-                    flag.set();
-                }
+            if let Some((n, flag)) = &*stop2.lock().unwrap()
+                && slept.len() == *n
+            {
+                flag.set();
             }
         }),
     };

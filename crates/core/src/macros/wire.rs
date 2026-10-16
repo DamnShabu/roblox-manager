@@ -22,7 +22,7 @@ pub fn wire_str(s: &str) -> Vec<u8> {
     let mut out = words(&[s.len() as u32 + 1]);
     out.extend_from_slice(s.as_bytes());
     out.push(0);
-    while out.len() % 4 != 0 {
+    while !out.len().is_multiple_of(4) {
         out.push(0);
     }
     out

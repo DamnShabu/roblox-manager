@@ -134,12 +134,11 @@ impl MacroLibrary {
             return Err(MacroError::Name(format!("A macro called {new} already exists")));
         }
         let hotkey = hotkey.filter(|k| !k.is_empty());
-        if let Some(key) = hotkey {
-            if let Some(by) =
+        if let Some(key) = hotkey
+            && let Some(by) =
                 self.hotkeys.iter().find(|(n, k)| *k == key && Some(n.as_str()) != old)
-            {
-                return Err(MacroError::HotkeyTaken { hotkey: key.to_owned(), by: by.0.clone() });
-            }
+        {
+            return Err(MacroError::HotkeyTaken { hotkey: key.to_owned(), by: by.0.clone() });
         }
         grammar::parse(text)?;
         self.commit(|lib| {

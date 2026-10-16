@@ -144,14 +144,14 @@ impl Shade {
                 t.names.retain(|m| header(m).1 != op);
                 t.names.push(msg.clone());
             }
-        } else if let Some(t) = self.toplevels.values_mut().find(|t| t.xdg_surface == obj) {
-            if op == ACK_CONFIGURE {
-                if t.acked_here.remove(&first) {
-                    return Vec::new();
-                }
-                if let Phase::Hidden { serial: Some(s), .. } = t.phase {
-                    t.phase = Phase::Hidden { serial: Some(s), acked: s == first };
-                }
+        } else if let Some(t) = self.toplevels.values_mut().find(|t| t.xdg_surface == obj)
+            && op == ACK_CONFIGURE
+        {
+            if t.acked_here.remove(&first) {
+                return Vec::new();
+            }
+            if let Phase::Hidden { serial: Some(s), .. } = t.phase {
+                t.phase = Phase::Hidden { serial: Some(s), acked: s == first };
             }
         }
         vec![Out::Desktop(msg)]
@@ -245,25 +245,25 @@ impl Shade {
             if let Some(t) = self.toplevels.get_mut(&surface) {
                 t.syncobj = Some(syncobj);
             }
-        } else if op == GET_TOPLEVEL {
-            if let Some(&surface) = self.xdg_surfaces.get(&obj) {
-                self.toplevels.insert(
-                    surface,
-                    Toplevel {
-                        xdg_surface: obj,
-                        xdg_toplevel: word(body, 0),
-                        names: Vec::new(),
-                        syncobj: self.syncobjs.get(&surface).copied(),
-                        phase: Phase::Shown,
-                        pending: None,
-                        current: Buffer::default(),
-                        kept: 0,
-                        held: None,
-                        frame: None,
-                        acked_here: HashSet::new(),
-                    },
-                );
-            }
+        } else if op == GET_TOPLEVEL
+            && let Some(&surface) = self.xdg_surfaces.get(&obj)
+        {
+            self.toplevels.insert(
+                surface,
+                Toplevel {
+                    xdg_surface: obj,
+                    xdg_toplevel: word(body, 0),
+                    names: Vec::new(),
+                    syncobj: self.syncobjs.get(&surface).copied(),
+                    phase: Phase::Shown,
+                    pending: None,
+                    current: Buffer::default(),
+                    kept: 0,
+                    held: None,
+                    frame: None,
+                    acked_here: HashSet::new(),
+                },
+            );
         }
     }
 
