@@ -1,12 +1,14 @@
 //! The app's side of the crash log: the panic hook that writes one, the
 //! window's activity copied into it as it happens, and the message that
-//! shows the last run's on the next start.
+//! shows the last run's on the next start. Also the message for a Roblox
+//! client that crashes, shown as soon as it does.
 
 use std::cell::RefCell;
 use std::sync::{Arc, OnceLock};
 
 use adw::prelude::*;
 use gtk::{gio, glib};
+use rbxmgr_core::cordial::ClientCrash;
 use rbxmgr_core::crash::{self, Crash, CrashLog};
 
 use crate::ui::window::Window;
@@ -90,13 +92,43 @@ fn show(w: &Window, found: Crash) {
     } else {
         "It was closed by force, froze, or crashed outside its own code."
     };
-    let dialog = adw::AlertDialog::new(
-        Some("Stacked Closed Unexpectedly"),
-        Some(&format!(
-            "{why} The crash log below is saved as {}; include it when you report this.",
-            found.saved.display()
-        )),
+    let body = format!(
+        "{why} The crash log below is saved as {}; include it when you report this.",
+        found.saved.display()
     );
+    show_log(w, "Stacked Closed Unexpectedly", &body, found.log, found.saved);
+}
+
+/// Every Roblox client that crashed since the last look, each logged and
+/// shown over the window as it is found.
+pub fn show_clients(w: &Window) {
+    for found in w.services().profiles.take_crashes() {
+        let who = w
+            .state()
+            .accounts
+            .accounts()
+            .iter()
+            .find(|a| rbxmgr_core::types::Profile::of(a.user_id) == found.profile)
+            .map_or_else(|| found.profile.to_string(), |a| a.name.to_string());
+        w.log(&format!("{who}: client crashed -- {} Log: {}", found.how(), found.log.display()));
+        show_client(w, &who, found);
+    }
+}
+
+/// A Roblox client that crashed, over the window. `who` names its account.
+fn show_client(w: &Window, who: &str, found: ClientCrash) {
+    let body = format!(
+        "{} Its log is {}; the end of it is below. Include it when you report this.",
+        found.how(),
+        found.log.display()
+    );
+    let log = if found.tail.is_empty() { "(the log is empty)".to_owned() } else { found.tail };
+    show_log(w, &format!("{who}'s Client Crashed"), &body, log, found.log);
+}
+
+/// A message with a log in it, and buttons to copy the log or open its folder.
+fn show_log(w: &Window, title: &str, body: &str, log: String, saved: std::path::PathBuf) {
+    let dialog = adw::AlertDialog::new(Some(title), Some(body));
     let text = gtk::TextView::builder()
         .editable(false)
         .monospace(true)
@@ -106,20 +138,22 @@ fn show(w: &Window, found: Crash) {
         .left_margin(10)
         .right_margin(10)
         .build();
-    text.buffer().set_text(&found.log);
+    text.buffer().set_text(&log);
     let scroller = gtk::ScrolledWindow::builder()
         .child(&text)
         .min_content_height(260)
         .min_content_width(520)
         .build();
     scroller.add_css_class("card");
+    // Opened at the end: the last lines are the ones that say what happened.
+    scroller.vadjustment().connect_changed(|a| a.set_value(a.upper()));
     dialog.set_extra_child(Some(&scroller));
     dialog.add_response("folder", "_Open Folder");
     dialog.add_response("copy", "_Copy Log");
     dialog.add_response("close", "_Close");
     dialog.set_default_response(Some("close"));
     dialog.set_close_response("close");
-    let (weak, log, saved) = (w.weak(), found.log.clone(), found.saved.clone());
+    let weak = w.weak();
     dialog.connect_response(None, move |_, response| {
         let Some(w) = weak.upgrade() else { return };
         match response {

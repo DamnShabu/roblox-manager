@@ -5,6 +5,7 @@
 
 pub mod build;
 pub mod clients;
+mod crashes;
 pub mod engine;
 mod joining;
 mod migrate;
@@ -17,6 +18,7 @@ pub mod stacked;
 mod usage;
 
 pub use build::{Build, roblox_build};
+pub use crashes::ClientCrash;
 pub use joining::JoiningWatch;
 pub use performance::Performance;
 pub use process::{Child, Output, ProcessView, Runner, SystemRunner};
