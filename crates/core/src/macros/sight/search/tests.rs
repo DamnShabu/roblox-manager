@@ -70,7 +70,7 @@ fn an_image_near_on_average_but_unlike_pixel_by_pixel_is_not_found() {
     // every other pixel well off -- 91% alike by summed difference.
     let frame = smooth(&noise(320, 200, 7));
     let mut speckled = cut(&frame, 213, 131, 40, 24);
-    for (i, px) in speckled.rgb.chunks_exact_mut(3).enumerate() {
+    for (i, px) in speckled.rgb.as_chunks_mut::<3>().0.iter_mut().enumerate() {
         let (x, y) = (i % 40, i / 40);
         if (x + y) % 2 == 0 {
             px.iter_mut().for_each(|c| *c = if *c < 128 { *c + 45 } else { *c - 45 });
