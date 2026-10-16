@@ -1,0 +1,41 @@
+# Weekly updates, one grouped pull request per ecosystem. Security updates
+# come on their own, as soon as an advisory is out. flake.lock is moved by
+# .github/workflows/update-flake-lock.yml.
+#
+# A Cargo bump changes Cargo.lock, so the Flatpak's sources must follow:
+# CI's flatpak-sources job fails until packaging/flatpak/update-sources.sh
+# has been run on the branch.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # A release must be a week old before it is proposed: time for a
+    # compromised one to be pulled. Security updates skip this.
+    cooldown:
+      default-days: 7
+    labels: [dependencies, rust]
+    commit-message:
+      prefix: deps
+    groups:
+      cargo:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    # A release must be a week old before it is proposed: time for a
+    # compromised one to be pulled. Security updates skip this.
+    cooldown:
+      default-days: 7
+    labels: [dependencies, github-actions]
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
