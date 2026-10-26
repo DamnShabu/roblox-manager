@@ -10,7 +10,8 @@ use super::{WeakWindow, Window};
 use crate::ui::panel::Panel;
 use crate::ui::widgets::{Fluent, name};
 
-/// The panel's width, and its width while a macro is being edited.
+/// The panel's width, and the most it widens to while a macro is being
+/// edited.
 pub const NARROW: f64 = 400.0;
 pub const WIDE: f64 = 600.0;
 
@@ -68,10 +69,13 @@ impl Window {
                 w.drop_panel(&p);
             }
         }));
-        let px = if panel.is_for_macros() { WIDE } else { NARROW };
+        // The macro editor takes up to WIDE, half the window at most, and
+        // never less than any other panel: a narrow or tiled window keeps it
+        // whole rather than drawing it past its edge.
+        let max = if panel.is_for_macros() { WIDE } else { NARROW };
         let split = &self.0.ui.split;
-        split.set_min_sidebar_width(px);
-        split.set_max_sidebar_width(px);
+        split.set_min_sidebar_width(NARROW);
+        split.set_max_sidebar_width(max);
         split.set_show_sidebar(true);
         if let Some(button) = panel.default_widget() {
             self.0.win.set_default_widget(Some(&button));

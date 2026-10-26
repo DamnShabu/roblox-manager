@@ -12,7 +12,7 @@ use super::record::Record;
 use crate::ui::confirm;
 use crate::ui::ds::{self, Variant};
 use crate::ui::panel::Panel;
-use crate::ui::widgets::{Fluent, LabelFluent, hotkey_label, keycaps, lbl, sentence};
+use crate::ui::widgets::{Fluent, LabelFluent, hotkey_label, keycaps, lbl, sentence, wrap};
 use crate::ui::window::{WeakWindow, Window};
 
 pub struct MacroDialog {
@@ -132,6 +132,8 @@ impl MacroDialog {
             }
         });
         self.name.set_hexpand(true);
+        // Narrow enough for Cancel and Save beside it in a narrow panel.
+        self.name.set_width_chars(8);
         self.name.set_valign(Align::Center);
         for b in [&cancel.button, &save.button] {
             b.set_valign(Align::Center);
@@ -184,9 +186,12 @@ impl MacroDialog {
         self.repeat.add_css_class("cx-seg");
         let rounds_label = lbl("rounds", "t-caption muted").centered();
         self.rounds.bind_property("visible", &rounds_label, "visible").sync_create().build();
+        // The rounds go under the choice when the panel is too narrow for both.
+        let rounds = hbox!(8, "", self.rounds.clone(), rounds_label);
+        self.rounds.bind_property("visible", &rounds, "visible").sync_create().build();
         repeat_group.append(&ds::field(
             "Playback",
-            &hbox!(8, "", self.repeat.clone(), self.rounds.clone(), rounds_label),
+            &wrap(8, &[self.repeat.clone().upcast(), rounds.upcast()]),
             Some("Once, a number of rounds, or round after round until stopped"),
         ));
         about.append(repeat_group);

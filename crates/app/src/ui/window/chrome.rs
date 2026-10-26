@@ -215,6 +215,9 @@ impl Chrome {
             let Ok(cond) = adw::BreakpointCondition::parse(cond) else { continue };
             let bp = adw::Breakpoint::new(cond);
             bp.add_setter(&self.split, "collapsed", Some(&true.to_value()));
+            // Over the table, the panel takes the window's width up to its
+            // own most, rather than half of it.
+            bp.add_setter(&self.split, "sidebar-width-fraction", Some(&1.0.to_value()));
             bp.add_setter(&self.top.search, "width-request", Some(&180.to_value()));
             // The risk line keeps its room; the activity's line gives way.
             bp.add_setter(&self.strip.last, "visible", Some(&false.to_value()));

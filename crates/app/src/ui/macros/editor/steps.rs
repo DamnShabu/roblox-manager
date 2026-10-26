@@ -143,8 +143,10 @@ impl MacroDialog {
         self.list.remove_all();
         self.entries.borrow_mut().clear();
         let rows = self.rows.borrow().clone();
-        let real = rows.iter().filter(|r| !matches!(r.kind.as_str(), "Note" | "Timeline")).count();
-        self.count.set_label(&plural(real, "step", "steps"));
+        let units = lanes::units(&rows);
+        // As many as the rows are numbered: a note, a timeline or a when with
+        // its dos is one each.
+        self.count.set_label(&plural(units.len(), "step", "steps"));
         if rows.is_empty() {
             let row = gtk::ListBoxRow::builder().activatable(false).selectable(false).build();
             row.set_child(Some(&crate::ui::widgets::lbl(
@@ -154,7 +156,6 @@ impl MacroDialog {
             row.add_css_class("step-row");
             self.list.append(&row);
         }
-        let units = lanes::units(&rows);
         let count = units.len();
         for (u, &(i, len)) in units.iter().enumerate() {
             if rows[i].kind == "Timeline" {
@@ -200,6 +201,9 @@ impl MacroDialog {
             .text(&r.value)
             .placeholder_text(hint(&r.kind))
             .hexpand(true)
+            // Room for a few characters at the least, so the row still fits
+            // a narrow panel; it widens with the panel.
+            .width_chars(4)
             .valign(Align::Center)
             .css_classes(["monospace"])
             .build();
@@ -226,7 +230,7 @@ impl MacroDialog {
             b.button
         };
         let line = hbox!(
-            8,
+            6,
             "",
             lbl(number, "number dimmed").xalign(1.0),
             crate::ui::ds::icon(step_icon(&r.kind)).css("muted s16"),

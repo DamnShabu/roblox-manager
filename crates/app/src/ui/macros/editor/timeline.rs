@@ -46,12 +46,12 @@ impl MacroDialog {
         };
         let about = format!("{:.1} s · {}", drawn.secs, plural(steps, "step", "steps"));
         let header = hbox!(
-            8,
+            6,
             "",
             lbl(&format!("{number}"), "number dimmed").xalign(1.0),
             icon("rm-timeline-symbolic").css("dimmed"),
             lbl("Timeline", "heading"),
-            lbl(&about, "dimmed").hexpand().xalign(0.0),
+            lbl(&about, "dimmed").hexpand().xalign(0.0).ellipsize(),
             button(
                 "rm-pencil-symbolic",
                 "Edit its steps as text",
