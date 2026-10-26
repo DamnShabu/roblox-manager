@@ -157,7 +157,7 @@ impl MacroDialog {
                 d.draw_hotkey();
             }
         });
-        let about = ds::sec("", None);
+        let about = ds::sec("Running", None);
         about.add_css_class("first");
         about.append(&ds::field(
             "Hotkey",

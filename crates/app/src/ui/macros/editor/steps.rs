@@ -72,26 +72,6 @@ impl MacroDialog {
     /// The Steps group: the rows or the text, and the buttons that add to
     /// them.
     pub(super) fn steps_group(self: &Rc<Self>) -> gtk::Box {
-        let mut adds: Vec<gtk::Widget> = ["Key", "Wait", "Click", "Type", "Hold", "Move", "Note"]
-            .into_iter()
-            .map(|kind| {
-                let me = Rc::downgrade(self);
-                Btn::new("ds ghost sm")
-                    .text(kind)
-                    .icon("rm-plus-symbolic")
-                    .tip(&format!("Add a {} step", kind.to_lowercase()))
-                    .build(move || {
-                        if let Some(d) = me.upgrade() {
-                            d.add_rows(starting_rows(kind));
-                        }
-                    })
-                    .button
-                    .upcast()
-            })
-            .collect();
-        adds.push(self.when_button().upcast());
-        adds.push(self.more_button().upcast());
-        adds.push(self.record_button().upcast());
         for (name, label) in [("steps", "Steps"), ("text", "Text")] {
             self.view.add(adw::Toggle::builder().name(name).label(label).build());
         }
@@ -108,9 +88,9 @@ impl MacroDialog {
             Some(hbox!(12, "", self.count.clone().centered(), self.view.clone()).upcast_ref()),
         );
         self.list.add_css_class("cx-list");
-        let add_box = wrap(6, &adds);
-        add_box.set_margin_top(12);
-        self.views.add_named(&vbox!(0, "", self.list.clone(), add_box), Some("steps"));
+        let adds = self.add_buttons();
+        adds.set_margin_top(16);
+        self.views.add_named(&vbox!(0, "", self.list.clone(), adds), Some("steps"));
         let text = gtk::ScrolledWindow::builder()
             .child(&self.text)
             .min_content_height(220)
@@ -137,6 +117,44 @@ impl MacroDialog {
         steps_group.append(self.record.banner());
         steps_group.append(&self.views);
         steps_group
+    }
+
+    /// The buttons that add a step, a row for each kind: keyboard, mouse,
+    /// and the flow of the round, then recording.
+    fn add_buttons(self: &Rc<Self>) -> gtk::Box {
+        let add = |kind: &'static str| -> gtk::Widget {
+            let me = Rc::downgrade(self);
+            Btn::new("ds ghost sm")
+                .text(kind)
+                .icon("rm-plus-symbolic")
+                .tip(&format!("Add a {} step", kind.to_lowercase()))
+                .build(move || {
+                    if let Some(d) = me.upgrade() {
+                        d.add_rows(starting_rows(kind));
+                    }
+                })
+                .button
+                .upcast()
+        };
+        let row = |label: &str, buttons: &[gtk::Widget]| {
+            crate::ui::ds::field(label, &wrap(4, buttons), None)
+        };
+        vbox!(
+            8,
+            "",
+            row("Keyboard", &[add("Key"), add("Hold"), add("Type")]),
+            row("Mouse", &[add("Click"), add("Move")]),
+            row(
+                "Flow",
+                &[
+                    add("Wait"),
+                    self.when_button().upcast(),
+                    add("Note"),
+                    self.more_button().upcast()
+                ]
+            ),
+            row("From a client", &[self.record_button().upcast()])
+        )
     }
 
     pub(super) fn draw_steps(self: &Rc<Self>) {
