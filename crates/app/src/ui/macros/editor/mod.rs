@@ -211,11 +211,11 @@ impl MacroDialog {
         });
         let me = Rc::downgrade(self);
         self.rounds.connect_value_changed(move |r| {
-            if let Some(d) = me.upgrade() {
-                if d.repeat.active_name().as_deref() == Some("rounds") {
-                    d.loops.set(r.value().max(2.0) as u32);
-                    d.retime();
-                }
+            if let Some(d) = me.upgrade()
+                && d.repeat.active_name().as_deref() == Some("rounds")
+            {
+                d.loops.set(r.value().max(2.0) as u32);
+                d.retime();
             }
         });
         self.rounds.set_visible(self.repeat.active_name().as_deref() == Some("rounds"));

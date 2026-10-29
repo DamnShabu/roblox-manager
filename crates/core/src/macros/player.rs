@@ -112,11 +112,11 @@ impl Held<'_> {
         loop {
             // Read before the `when`s are: one that sees after it rings past it.
             let rings = stop.rings();
-            if let Some(when) = self.when {
-                if when.answer(input, stop, pick, self)? {
-                    self.exiting = true;
-                    return Ok(true);
-                }
+            if let Some(when) = self.when
+                && when.answer(input, stop, pick, self)?
+            {
+                self.exiting = true;
+                return Ok(true);
             }
             let now = Instant::now();
             self.repeats.fire(input, now.min(until), pick)?;

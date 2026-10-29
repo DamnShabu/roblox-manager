@@ -208,11 +208,11 @@ pub fn rows(text: &str) -> (Vec<Row>, u32) {
     let mut rows = Vec::new();
     let mut loops = 0;
     for line in lines(text) {
-        if line.command == "loop" {
-            if let Ok(n) = line.rest.parse() {
-                loops = n;
-                continue;
-            }
+        if line.command == "loop"
+            && let Ok(n) = line.rest.parse()
+        {
+            loops = n;
+            continue;
         }
         let kind = STEP_TYPES
             .iter()

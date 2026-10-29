@@ -208,10 +208,10 @@ fn checksum_for(sums: &str, name: &str) -> Option<String> {
 
 /// Best effort: a leftover download only takes room in the cache.
 fn remove(path: &Path) {
-    if let Err(e) = fs::remove_file(path) {
-        if e.kind() != io::ErrorKind::NotFound {
-            eprintln!("roblox-manager: could not delete {}: {e}", path.display());
-        }
+    if let Err(e) = fs::remove_file(path)
+        && e.kind() != io::ErrorKind::NotFound
+    {
+        eprintln!("roblox-manager: could not delete {}: {e}", path.display());
     }
 }
 

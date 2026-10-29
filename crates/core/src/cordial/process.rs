@@ -269,14 +269,10 @@ pub(crate) mod recording {
     impl Runner for Recording {
         fn run(&self, argv: &[String], _timeout: Duration) -> Result<Output, CordialError> {
             self.ran.lock().unwrap().push(argv.to_vec());
-            if argv.iter().any(|a| a == "pgrep") {
-                if let Some(clients) = self.pgrep.lock().unwrap().clone() {
-                    return Ok(Output {
-                        status: 0,
-                        stdout: clients.into_bytes(),
-                        stderr: Vec::new(),
-                    });
-                }
+            if argv.iter().any(|a| a == "pgrep")
+                && let Some(clients) = self.pgrep.lock().unwrap().clone()
+            {
+                return Ok(Output { status: 0, stdout: clients.into_bytes(), stderr: Vec::new() });
             }
             Ok(self.answers.lock().unwrap().pop_front().unwrap_or_default())
         }
