@@ -32,6 +32,7 @@ impl Window {
     pub fn refresh_macros(&self) {
         let names: Vec<String> = self.state().macros.names().map(str::to_owned).collect();
         self.0.ui.sidebar.draw_macros(self);
+        self.draw_scripts();
         self.0.ui.toolbar.set_macros(&names);
         self.bind_hotkeys();
         self.draw_details();
@@ -83,7 +84,7 @@ impl Window {
         self.refresh_states();
     }
 
-    fn stop_macro(&self, name: &str) {
+    pub(super) fn stop_macro(&self, name: &str) {
         for (stop, m) in self.state().macro_runs.values() {
             if m == name {
                 stop.set();
@@ -346,7 +347,11 @@ impl Window {
     /// Where the run `stop` stops on account `id` is, from what it reports:
     /// sent here from its thread, shown on its row. A burst is shown as its
     /// last, and nothing from a run another has since replaced is shown.
-    fn show_progress(&self, id: UserId, stop: &StopFlag) -> async_channel::Sender<String> {
+    pub(super) fn show_progress(
+        &self,
+        id: UserId,
+        stop: &StopFlag,
+    ) -> async_channel::Sender<String> {
         let (tx, rx) = async_channel::unbounded::<String>();
         let (weak, run) = (self.weak(), stop.clone());
         glib::spawn_future_local(async move {

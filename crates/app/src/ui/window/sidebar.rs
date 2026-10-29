@@ -1,12 +1,14 @@
 //! The sidebar beside the table: the accounts by status, each group, the
-//! macros (each run or stopped from here), and how much of the machine the
-//! clients take. A status or a group is a view of the table.
+//! macros and the advanced macros' scripts (each run or stopped from here),
+//! and how much of the machine the clients take. A status or a group is a
+//! view of the table.
 
 use std::cell::RefCell;
 
 use adw::prelude::*;
 use gtk::{Align, Orientation, PolicyType, gdk, gio, glib};
 use rbxmgr_core::accounts::Account;
+use rbxmgr_core::macros::script::{self, Script};
 
 use super::{WeakWindow, Window};
 use crate::state::{AppState, View};
@@ -23,8 +25,9 @@ struct Entry {
     view: View,
 }
 
-/// One macro's entry: its run or stop, and where it plays.
+/// One macro's or script's entry: its run or stop, and where it plays.
 struct MacroEntry {
+    /// What its runs are called in `macro_runs`.
     name: String,
     run: gtk::Button,
     at: gtk::Label,
@@ -37,6 +40,8 @@ pub struct Sidebar {
     groups: RefCell<Vec<Entry>>,
     macros_box: gtk::Box,
     macros: RefCell<Vec<MacroEntry>>,
+    scripts_box: gtk::Box,
+    scripts: RefCell<Vec<MacroEntry>>,
     cpu: gtk::ProgressBar,
     cpu_text: gtk::Label,
     memory: gtk::ProgressBar,
@@ -75,6 +80,18 @@ impl Sidebar {
         list.append(&heading("Macros", Some(add.upcast_ref())));
         let macros_box = gtk::Box::new(Orientation::Vertical, 2);
         list.append(&macros_box);
+        let scripts_end = gtk::Box::new(Orientation::Horizontal, 0);
+        for (icon, tip, action) in [
+            ("refresh", "Look in the scripts folder again", "win.reload-scripts"),
+            ("external", "Open the scripts folder", "win.open-scripts"),
+        ] {
+            let b = ds::ib(icon, tip, true);
+            b.set_action_name(Some(action));
+            scripts_end.append(&b);
+        }
+        list.append(&heading("Scripts", Some(scripts_end.upcast_ref())));
+        let scripts_box = gtk::Box::new(Orientation::Vertical, 2);
+        list.append(&scripts_box);
         let scroller = gtk::ScrolledWindow::builder()
             .child(&list)
             .hscrollbar_policy(PolicyType::Never)
@@ -110,6 +127,8 @@ impl Sidebar {
             groups: RefCell::default(),
             macros_box,
             macros: RefCell::default(),
+            scripts_box,
+            scripts: RefCell::default(),
             cpu,
             cpu_text,
             memory,
@@ -243,6 +262,62 @@ impl Sidebar {
         self.macros.replace(made);
     }
 
+    /// The scripts' entries, afresh, from what the scripts folder holds or
+    /// why it could not be read.
+    pub fn draw_scripts(&self, found: Result<Vec<Script>, String>) {
+        clear(&self.scripts_box);
+        let found = match found {
+            Ok(found) => found,
+            Err(e) => {
+                self.scripts_box.append(&lbl(&e, "mn-dim sb-note").wrapped());
+                self.scripts.replace(Vec::new());
+                return;
+            }
+        };
+        let mut made = Vec::new();
+        for s in found {
+            let target = s.name.to_variant();
+            let run_name = script::run_name(&s.name);
+            let run =
+                ds::ib("play-circle", &format!("Run {run_name} on the selected accounts"), true);
+            run.add_css_class("sb-run");
+            run.set_action_name(Some("win.run-script"));
+            run.set_action_target_value(Some(&target));
+            let open = gtk::Button::builder()
+                .child(&lbl(&run_name, "").ellipsize().chars(16))
+                .css_classes(["sb-it", "sb-macro"])
+                .hexpand(true)
+                .tooltip_text(s.about.as_deref().unwrap_or("Open it in your editor"))
+                .action_name("win.edit-script")
+                .action_target(&target)
+                .build();
+            let at = lbl("", "sb-count");
+            let line = gtk::Box::new(Orientation::Horizontal, 0).css("sb-mline");
+            line.append(&run);
+            line.append(&open);
+            line.append(&at);
+            let menu = gio::Menu::new();
+            for (label, action) in [
+                ("Run or stop on the selected", "win.run-script"),
+                ("Open in your editor", "win.edit-script"),
+            ] {
+                let item = gio::MenuItem::new(Some(label), None);
+                item.set_action_and_target_value(Some(action), Some(&target));
+                menu.append_item(&item);
+            }
+            context_menu(&line, &menu);
+            self.scripts_box.append(&line);
+            made.push(MacroEntry { name: run_name, run, at });
+        }
+        if made.is_empty() {
+            self.scripts_box.append(
+                &lbl("No scripts yet: put a Python file in the folder.", "mn-dim sb-note")
+                    .wrapped(),
+            );
+        }
+        self.scripts.replace(made);
+    }
+
     /// Counts, which view is on, where each macro plays, and the machine.
     pub fn draw(&self, s: &AppState) {
         let c = s.counts();
@@ -274,18 +349,8 @@ impl Sidebar {
             toggle_class(&e.button, "on", s.view == e.view);
         }
         for m in self.macros.borrow().iter() {
-            let on = s.macro_runs.values().filter(|(_, n)| n == &m.name).count();
+            let on = m.draw_run(s);
             let enabled = s.macros.enabled(&m.name);
-            ds::set_ib(
-                &m.run,
-                if on > 0 { "stop-circle" } else { "play-circle" },
-                &if on > 0 {
-                    format!("Stop {} everywhere it plays", m.name)
-                } else {
-                    format!("Run {} on the selected accounts", m.name)
-                },
-            );
-            toggle_class(&m.run, "playing", on > 0);
             m.at.set_label(&if on > 0 {
                 format!("on {on}")
             } else if enabled {
@@ -293,6 +358,10 @@ impl Sidebar {
             } else {
                 "off".to_owned()
             });
+        }
+        for m in self.scripts.borrow().iter() {
+            let on = m.draw_run(s);
+            m.at.set_label(&if on > 0 { format!("on {on}") } else { String::new() });
         }
         let clients = s.running.len();
         match &s.machine {
@@ -316,6 +385,24 @@ impl Sidebar {
                 self.machine_note.set_label(&plural(clients, "client", "clients"));
             }
         }
+    }
+}
+
+impl MacroEntry {
+    /// Its run as a stop while it plays anywhere; on how many clients.
+    fn draw_run(&self, s: &AppState) -> usize {
+        let on = s.macro_runs.values().filter(|(_, n)| n == &self.name).count();
+        ds::set_ib(
+            &self.run,
+            if on > 0 { "stop-circle" } else { "play-circle" },
+            &if on > 0 {
+                format!("Stop {} everywhere it plays", self.name)
+            } else {
+                format!("Run {} on the selected accounts", self.name)
+            },
+        );
+        toggle_class(&self.run, "playing", on > 0);
+        on
     }
 }
 

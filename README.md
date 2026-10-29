@@ -90,6 +90,8 @@ progress shows under **Activity**.
   troubleshooting.
 - **[When steps](docs/macros-when.md)**: macros that react to what's on
   screen.
+- **[Advanced macros](docs/advanced-macros.md)**: macros written in Python,
+  through the `rbxmgr` module.
 - **[Development](docs/development.md)**: how the code fits together,
   building, checks and releases.
 - **[Cordial](cordial/README.md)**: the runtime the clients run in, and how

@@ -41,13 +41,15 @@ type GroupAction = (&'static str, fn(&Window, &str));
 
 impl Window {
     pub(super) fn install_actions(&self) {
-        let actions: [Action; 23] = [
+        let actions: [Action; 25] = [
             ("add-account", Window::on_add),
             ("refresh", Window::refresh_all),
             ("update", Window::on_update),
             ("restart", Window::on_restart),
             ("new-group", Window::add_group),
             ("new-macro", |w| macros::editor::MacroDialog::open(w, None)),
+            ("open-scripts", Window::open_scripts_folder),
+            ("reload-scripts", Window::draw_scripts),
             ("launch-selected", Window::launch_selected),
             ("stop-all", Window::on_stop_all),
             ("stop-selected", Window::stop_selected),
@@ -164,8 +166,10 @@ impl Window {
                 w.set_performance_selected(level);
             }
         });
-        let macros: [GroupAction; 2] = [
+        let macros: [GroupAction; 4] = [
             ("edit-macro", |w, name| macros::editor::MacroDialog::open(w, Some(name))),
+            ("run-script", Window::run_script),
+            ("edit-script", Window::edit_script),
             ("toggle-macro", |w, name| {
                 let on = w.state().macros.enabled(name);
                 w.enable_macro(name, !on);

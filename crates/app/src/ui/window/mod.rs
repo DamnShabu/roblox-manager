@@ -11,6 +11,7 @@ mod launching;
 mod links;
 mod macros;
 mod roblox;
+mod scripts;
 mod sidebar;
 mod strip;
 mod topbar;
