@@ -34,7 +34,8 @@ fn of_step(step: &Step) -> Span {
         Step::Path(points) => last(points.iter().map(|p| p.0)),
         Step::Turn(points) => last(points.iter().map(|p| p.0)),
         Step::Timeline { secs, .. } => *secs,
-        Step::Click { .. } | Step::Move(..) | Step::Press(_) => (0.0, 0.0),
+        Step::Click { .. } => TAP_PRESS,
+        Step::Move(..) | Step::Press(_) => (0.0, 0.0),
         Step::Release(_) | Step::Repeat { .. } | Step::Scroll { .. } | Step::Exit => (0.0, 0.0),
     }
 }
@@ -63,12 +64,13 @@ pub fn starts(rows: &[Row]) -> (Vec<Option<Span>>, Span) {
             if ended {
                 return None;
             }
-            let (mut lo, mut hi) = span(row);
+            let (lo, mut hi) = span(row);
             match row.kind.as_str() {
                 "Timeline" => {
                     let block = &rows[i..i + lanes::block(rows, i)];
                     let played = lanes::of_rows(block).0.secs;
-                    (lo, hi) = (lo.max(played), hi.max(played));
+                    // Its steps may play past its length: the most it lasts.
+                    hi = hi.max(played);
                 }
                 "Exit" => ended = true,
                 "Repeat" => {
@@ -149,7 +151,10 @@ mod tests {
     fn a_timeline_lasts_until_its_last_step_and_a_repeat_holds_the_round() {
         let rows = [row("Timeline", ""), row("At", "1 hold w 2"), row("Key", "e")];
         let (starts, _) = starts(&rows);
-        assert!(starts[2].is_some_and(|(lo, _)| lo >= 3.0), "{starts:?}");
+        assert!(starts[2].is_some_and(|(_, hi)| hi >= 3.0), "{starts:?}");
+        let (_, end) = super::starts(&[row("Timeline", "3-5"), row("At", "0 tap e")]);
+        assert_eq!(end.0, 3.0);
+        assert_eq!(span(&row("Click", "960 540")), TAP_PRESS);
         let (_, end) = super::starts(&[row("Repeat", "e 10"), row("Key", "f")]);
         assert_eq!(end, (10.0, 10.0));
     }
