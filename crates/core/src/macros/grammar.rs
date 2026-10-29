@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use super::keys::{self, BUTTON_LEFT, BUTTON_MIDDLE, BUTTON_RIGHT};
 
 pub mod timeline;
+pub mod timing;
 pub mod when;
 pub use timeline::Timed;
 pub use when::{Condition, Handler, Sight};

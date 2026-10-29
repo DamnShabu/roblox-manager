@@ -1,17 +1,19 @@
-//! The editor's steps: a row each, typed and filled in, moved and removed --
-//! the list the macro's text is written from -- or the text itself.
+//! The editor's steps: a stop each on a timeline, typed and filled in, moved
+//! and removed -- the list the macro's text is written from -- or the text
+//! itself.
 
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{Align, gio, glib};
-use rbxmgr_core::macros::grammar::{self, Row};
+use gtk::{Align, glib};
+use rbxmgr_core::macros::grammar::{self, Row, timing};
 use rbxmgr_core::macros::lanes;
 
 use super::MacroDialog;
+use super::rail::{self, Stop};
 use crate::ui::macros::kinds::step_icon;
 use crate::ui::macros::{area, point};
-use crate::ui::widgets::{Btn, Fluent, LabelFluent, lbl, plural, sentence, wrap};
+use crate::ui::widgets::{Btn, Fluent, LabelFluent, lbl, plural, sentence};
 
 const STEP_TYPES: [&str; 16] = [
     "Key", "Hold", "Press", "Release", "Repeat", "Type", "Click", "Move", "Scroll", "Wait",
@@ -44,30 +46,6 @@ fn hint(kind: &str) -> &'static str {
     }
 }
 
-/// The step types the add buttons leave out, offered under More: each with
-/// what it does, and the rows it starts as.
-const MORE: [(&str, &str); 8] = [
-    ("Press", "Press a key or button down and leave it down"),
-    ("Release", "Let go of a key or button pressed earlier"),
-    ("Repeat", "Tap a key a number of times"),
-    ("Scroll", "Scroll the mouse wheel"),
-    ("Start", "Wait before the first round only"),
-    ("Stagger", "Start each account a few seconds after the last"),
-    ("Exit", "End the round here; the next one starts"),
-    ("Timeline", "Steps at set times, together: keys held while the mouse moves"),
-];
-
-/// The rows a new step of `kind` starts as: a timeline comes with its first
-/// step under it, as a when does.
-fn starting_rows(kind: &str) -> Vec<Row> {
-    let row = |kind: &str, value: &str| Row { kind: kind.to_owned(), value: value.to_owned() };
-    match kind {
-        "Timeline" => vec![row("Timeline", "2"), row("At", "0 hold w 1")],
-        "When" => vec![row("When", ""), row("Do", "")],
-        _ => vec![row(kind, "")],
-    }
-}
-
 impl MacroDialog {
     /// The Steps group: the rows or the text, and the buttons that add to
     /// them.
@@ -87,10 +65,11 @@ impl MacroDialog {
             "Steps",
             Some(hbox!(12, "", self.count.clone().centered(), self.view.clone()).upcast_ref()),
         );
-        self.list.add_css_class("cx-list");
-        let adds = self.add_buttons();
-        adds.set_margin_top(16);
-        self.views.add_named(&vbox!(0, "", self.list.clone(), adds), Some("steps"));
+        self.list.add_css_class("rail-list");
+        let end = rail::end(&self.end_time, &self.end_then, "repeat");
+        let adds = self.add_bar();
+        adds.set_margin_top(12);
+        self.views.add_named(&vbox!(0, "", self.list.clone(), end, adds), Some("steps"));
         let text = gtk::ScrolledWindow::builder()
             .child(&self.text)
             .min_content_height(220)
@@ -114,90 +93,95 @@ impl MacroDialog {
             ),
             Some("text"),
         );
+        steps_group.append(&self.record_bar());
         steps_group.append(self.record.banner());
         steps_group.append(&self.views);
         steps_group
     }
 
-    /// The buttons that add a step, a row for each kind: keyboard, mouse,
-    /// and the flow of the round, then recording.
-    fn add_buttons(self: &Rc<Self>) -> gtk::Box {
-        let add = |kind: &'static str| -> gtk::Widget {
-            let me = Rc::downgrade(self);
-            Btn::new("ds ghost sm")
-                .text(kind)
-                .icon("rm-plus-symbolic")
-                .tip(&format!("Add a {} step", kind.to_lowercase()))
-                .build(move || {
-                    if let Some(d) = me.upgrade() {
-                        d.add_rows(starting_rows(kind));
-                    }
-                })
-                .button
-                .upcast()
-        };
-        let row = |label: &str, buttons: &[gtk::Widget]| {
-            crate::ui::ds::field(label, &wrap(4, buttons), None)
-        };
-        vbox!(
-            8,
-            "",
-            row("Keyboard", &[add("Key"), add("Hold"), add("Type")]),
-            row("Mouse", &[add("Click"), add("Move")]),
-            row(
-                "Flow",
-                &[
-                    add("Wait"),
-                    self.when_button().upcast(),
-                    add("Note"),
-                    self.more_button().upcast()
-                ]
-            ),
-            row("From a client", &[self.record_button().upcast()])
-        )
-    }
-
     pub(super) fn draw_steps(self: &Rc<Self>) {
         self.list.remove_all();
         self.entries.borrow_mut().clear();
+        self.times.borrow_mut().clear();
         let rows = self.rows.borrow().clone();
         let units = lanes::units(&rows);
-        // As many as the rows are numbered: a note, a timeline or a when with
-        // its dos is one each.
+        // As many as there are stops: a note, a timeline or a when with its
+        // dos is one each.
         self.count.set_label(&plural(units.len(), "step", "steps"));
         if rows.is_empty() {
-            let row = gtk::ListBoxRow::builder().activatable(false).selectable(false).build();
-            row.set_child(Some(&crate::ui::widgets::lbl(
-                "No steps yet. Add one below.",
-                "t-body-sm muted",
-            )));
-            row.add_css_class("step-row");
-            self.list.append(&row);
+            let empty = lbl("No steps yet: add one below, or record some.", "t-body-sm muted");
+            empty.set_xalign(0.0);
+            let stop = rail::stop(&rail::time(""), "info", &empty, Stop::First, false);
+            self.list.append(&self.stop_row(&stop));
         }
         let count = units.len();
         for (u, &(i, len)) in units.iter().enumerate() {
+            let at = if u == 0 { Stop::First } else { Stop::Next };
             if rows[i].kind == "Timeline" {
-                self.list.append(&self.timeline_row(u + 1, count, i, len));
+                let card = self.timeline_row(u + 1, count, i, len);
+                let time = self.time_of(i, &rows[i]);
+                self.list.append(&self.stop_row(&rail::stop(&time, "timeline", &card, at, false)));
                 continue;
             }
             for (k, row) in (i..i + len).enumerate() {
-                // A when's do rows go with it: numbered with it, moved with it.
-                let number = if k == 0 { format!("{}", u + 1) } else { String::new() };
+                // A when's do rows go with it: under it on the rail, moved
+                // with it.
                 let moves = if k == 0 { (u > 0, u + 1 < count) } else { (false, false) };
-                self.list.append(&self.step_row(&rows, row, &number, moves));
+                let line = self.step_row(&rows, row, moves);
+                let (at, time) = match k {
+                    0 => (at, self.time_of(row, &rows[row])),
+                    _ => (Stop::Under, rail::time("")),
+                };
+                let waits = matches!(rows[row].kind.as_str(), "Wait" | "Start");
+                let stop = rail::stop(&time, step_icon(&rows[row].kind), &line, at, waits);
+                self.list.append(&self.stop_row(&stop));
+            }
+        }
+        self.retime();
+    }
+
+    /// `stop` as a row of the list.
+    fn stop_row(&self, stop: &gtk::Box) -> gtk::ListBoxRow {
+        let row =
+            gtk::ListBoxRow::builder().activatable(false).selectable(false).child(stop).build();
+        row.add_css_class("step-row");
+        row
+    }
+
+    /// The time beside row `i` on the rail, kept to be set as the steps
+    /// before it change: none for a note, "on sight" for a when -- it plays
+    /// out of turn.
+    fn time_of(&self, i: usize, row: &Row) -> gtk::Label {
+        match row.kind.as_str() {
+            "Note" => rail::time(""),
+            "When" => rail::time("on sight"),
+            _ => {
+                let label = rail::time("");
+                self.times.borrow_mut().push((i, label.clone()));
+                label
             }
         }
     }
 
-    /// Row `i` as a step row, numbered `number` (empty for a when's rows
-    /// after its first), with its moves on or off.
-    fn step_row(
-        self: &Rc<Self>,
-        rows: &[Row],
-        i: usize,
-        number: &str,
-        (up, down): (bool, bool),
-    ) -> gtk::ListBoxRow {
+    /// Set each stop's time, and the round's end, from the steps as they
+    /// are now.
+    pub(super) fn retime(&self) {
+        let (starts, end) = timing::starts(&self.rows.borrow());
+        for (i, label) in self.times.borrow().iter() {
+            if let Some(&at) = starts.get(*i) {
+                label.set_label(&timing::label(at));
+            }
+        }
+        self.end_time.set_label(&timing::label(end));
+        self.end_then.set_label(&match self.loops.get() {
+            0 => "Round ends, then plays again until stopped".to_owned(),
+            1 => "Round ends, and it stops".to_owned(),
+            n => format!("Round ends, then plays again: {n} rounds in all"),
+        });
+    }
+
+    /// Row `i` as a step's line, with its moves on or off.
+    fn step_row(self: &Rc<Self>, rows: &[Row], i: usize, (up, down): (bool, bool)) -> gtk::Box {
         let r = &rows[i];
         let mut kinds: Vec<&str> = STEP_TYPES.to_vec();
         if !kinds.contains(&r.kind.as_str()) {
@@ -206,7 +190,7 @@ impl MacroDialog {
         let kind = gtk::DropDown::from_strings(&kinds);
         kind.set_valign(Align::Center);
         // One width for every type, so the values line up.
-        kind.set_width_request(104);
+        kind.set_width_request(92);
         kind.set_selected(kinds.iter().position(|k| *k == r.kind).unwrap_or(0) as u32);
         let (me, owned): (_, Vec<String>) =
             (Rc::downgrade(self), kinds.iter().map(|k| (*k).to_owned()).collect());
@@ -233,6 +217,7 @@ impl MacroDialog {
                     row.value = e.text().to_string();
                     check(e, row);
                 }
+                d.retime();
             }
         });
         self.entries.borrow_mut().push(value.clone());
@@ -250,8 +235,6 @@ impl MacroDialog {
         let line = hbox!(
             6,
             "",
-            lbl(number, "number dimmed").xalign(1.0),
-            crate::ui::ds::icon(step_icon(&r.kind)).css("muted s16"),
             kind,
             value,
             button("rm-chev-up-symbolic", "Move up", up, |d, i| d.shift(i, true)),
@@ -269,10 +252,7 @@ impl MacroDialog {
             let pick = area::button(&self.window, &value, &self.err);
             line.insert_child_after(&pick, Some(&value));
         }
-        let row =
-            gtk::ListBoxRow::builder().activatable(false).selectable(false).child(&line).build();
-        row.add_css_class("step-row");
-        row
+        line
     }
 
     fn retype(self: &Rc<Self>, i: usize, kind: String) {
@@ -291,126 +271,6 @@ impl MacroDialog {
                 }
             });
         }
-    }
-
-    /// When: a `when` and a first `do` under it, added at the end -- steps
-    /// that play the moment something shows in the client, out of turn.
-    fn when_button(self: &Rc<Self>) -> gtk::Button {
-        let me = Rc::downgrade(self);
-        Btn::new("ds ghost sm")
-            .text("When")
-            .icon("rm-plus-symbolic")
-            .tip("Add steps that play the moment something shows in the client")
-            .build(move || {
-                if let Some(d) = me.upgrade() {
-                    d.add_rows(starting_rows("When"));
-                }
-            })
-            .button
-    }
-
-    /// Record: steps from playing in a running client, added at the end.
-    fn record_button(self: &Rc<Self>) -> gtk::Button {
-        const TIP: &str = "Record steps by playing in a running client: press F8 in its \
-                           window to start, and again to stop";
-        let content = adw::ButtonContent::builder()
-            .icon_name("rm-record-symbolic")
-            .label("_Record")
-            .use_underline(true)
-            .build();
-        let button = gtk::Button::builder()
-            .child(&content)
-            .tooltip_text(TIP)
-            .css_classes(["ds", "ghost", "sm"])
-            .build();
-        let me = Rc::downgrade(self);
-        button.connect_clicked(move |anchor| {
-            let Some(d) = me.upgrade() else { return };
-            d.err.set_visible(false);
-            let me = Rc::downgrade(&d);
-            d.record.start(anchor, move |recorded| {
-                let Some(d) = me.upgrade() else { return };
-                match recorded {
-                    Ok(rows) => d.add_rows(rows),
-                    Err(e) => {
-                        d.err.set_label(&e);
-                        d.err.set_visible(true);
-                    }
-                }
-            });
-        });
-        button
-    }
-
-    /// `rows` after the last step, in whichever view is showing.
-    fn add_rows(self: &Rc<Self>, rows: Vec<Row>) {
-        if self.in_text() {
-            let buffer = self.text.buffer();
-            let before = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false);
-            let lead = if before.is_empty() || before.ends_with('\n') { "" } else { "\n" };
-            let added = format!("{lead}{}", grammar::to_text(&rows, 0));
-            buffer.insert(&mut buffer.end_iter(), &added);
-        } else {
-            let first = self.rows.borrow().len();
-            self.rows.borrow_mut().extend(rows);
-            self.draw_steps();
-            // Straight on to what it does: the new step's value, ready to type.
-            if let Some(entry) = self.entry_of(first) {
-                entry.grab_focus();
-            }
-        }
-    }
-
-    /// The value entry drawn for row `i`, when it has one (a timeline's
-    /// steps are edited as text).
-    fn entry_of(&self, i: usize) -> Option<gtk::Entry> {
-        let entries = self.entries.borrow();
-        // Drawn in row order, a timeline's rows skipped: count the rows
-        // before `i` that have one.
-        let units = lanes::units(&self.rows.borrow());
-        let mut drawn = 0;
-        for (start, len) in units {
-            if self.rows.borrow().get(start).is_some_and(|r| r.kind == "Timeline") {
-                if (start..start + len).contains(&i) {
-                    return None;
-                }
-                continue;
-            }
-            if (start..start + len).contains(&i) {
-                return entries.get(drawn + i - start).cloned();
-            }
-            drawn += len;
-        }
-        None
-    }
-
-    /// More: every other step type, each said in a line.
-    fn more_button(self: &Rc<Self>) -> gtk::MenuButton {
-        let group = gio::SimpleActionGroup::new();
-        let add = gio::SimpleAction::new("add", Some(glib::VariantTy::STRING));
-        let me = Rc::downgrade(self);
-        add.connect_activate(move |_, kind| {
-            if let (Some(d), Some(kind)) = (me.upgrade(), kind.and_then(|k| k.get::<String>())) {
-                d.add_rows(starting_rows(&kind));
-            }
-        });
-        group.add_action(&add);
-        let menu = gio::Menu::new();
-        for (kind, about) in MORE {
-            let item = gio::MenuItem::new(Some(&format!("{kind} \u{2014} {about}")), None);
-            item.set_action_and_target_value(Some("steps.add"), Some(&kind.to_variant()));
-            menu.append_item(&item);
-        }
-        let content =
-            adw::ButtonContent::builder().icon_name("rm-plus-symbolic").label("More").build();
-        let button = gtk::MenuButton::builder()
-            .child(&content)
-            .menu_model(&menu)
-            .tooltip_text("Add another kind of step")
-            .css_classes(["ds", "ghost", "sm"])
-            .build();
-        button.insert_action_group("steps", Some(&group));
-        button
     }
 
     /// The step listed at row `start` swapped with the one before or after

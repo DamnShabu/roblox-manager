@@ -32,6 +32,11 @@ pub struct MacroDialog {
     list: gtk::ListBox,
     /// The value entry of each step drawn, in the order drawn.
     entries: RefCell<Vec<gtk::Entry>>,
+    /// The time beside each stop that has one, and its row.
+    times: RefCell<Vec<(usize, gtk::Label)>>,
+    /// When the round ends, and what follows, at the rail's foot.
+    end_time: gtk::Label,
+    end_then: gtk::Label,
     /// Steps as rows, or the macro as text to paste or copy.
     view: adw::ToggleGroup,
     views: gtk::Stack,
@@ -92,8 +97,11 @@ impl MacroDialog {
             repeat: adw::ToggleGroup::builder().valign(Align::Center).build(),
             rounds,
             count: lbl("", "dimmed"),
-            list: crate::ui::widgets::boxed_list(),
+            list: gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).build(),
             entries: RefCell::default(),
+            times: RefCell::default(),
+            end_time: rail::time(""),
+            end_then: lbl("", "cx-help").wrapped(),
             view: adw::ToggleGroup::builder().valign(Align::Center).build(),
             views: gtk::Stack::builder().vhomogeneous(false).build(),
             text: gtk::TextView::builder()
@@ -251,6 +259,7 @@ impl MacroDialog {
             _ => 0,
         });
         self.rounds.set_visible(mode.as_deref() == Some("rounds"));
+        self.retime();
     }
 
     // -- steps or text ------------------------------------------------------
@@ -383,5 +392,7 @@ impl MacroDialog {
     }
 }
 
+mod add;
+mod rail;
 mod steps;
 mod timeline;

@@ -185,7 +185,9 @@ windows. Macros are listed in the sidebar (<kbd>F9</kbd> shows or hides it).
 ### Setting one up
 
 1. Click **+** next to **Macros** in the sidebar (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>),
-   add steps, and **Save**.
+   add steps with **Add step** (or **Record** them), and **Save**. The steps
+   sit on a timeline, each with when it starts in the round, and the
+   round's end at the bottom.
 2. Open the account's **Settings** and pick the macro. This turns on
    **Macro-Ready Window**.
 3. Launch the account. If it was already running, launch it again.

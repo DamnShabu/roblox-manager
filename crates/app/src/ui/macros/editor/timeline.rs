@@ -9,7 +9,7 @@ use gtk::Align;
 use rbxmgr_core::macros::lanes::{self, Bar, Lane};
 
 use super::MacroDialog;
-use crate::ui::widgets::{Btn, Fluent, LabelFluent, icon, lbl, plural};
+use crate::ui::widgets::{Btn, Fluent, LabelFluent, lbl, plural};
 
 /// How tall a lane is.
 const LANE_HEIGHT: i32 = 14;
@@ -30,7 +30,7 @@ impl MacroDialog {
         count: usize,
         start: usize,
         len: usize,
-    ) -> gtk::ListBoxRow {
+    ) -> gtk::Box {
         let (drawn, steps) = lanes::of_rows(&self.rows.borrow()[start..start + len]);
 
         let button = |ic: &str, tip: &str, on: bool, act: Act| {
@@ -48,8 +48,6 @@ impl MacroDialog {
         let header = hbox!(
             6,
             "",
-            lbl(&format!("{number}"), "number dimmed").xalign(1.0),
-            icon("rm-timeline-symbolic").css("dimmed"),
             lbl("Timeline", "heading"),
             lbl(&about, "dimmed").hexpand().xalign(0.0).ellipsize(),
             button(
@@ -91,13 +89,7 @@ impl MacroDialog {
         let ends = hbox!(0, "", lbl("0 s", "caption dimmed").hexpand().xalign(0.0));
         ends.append(&lbl(&format!("{:.1} s", drawn.secs), "caption dimmed"));
         grid.attach(&ends, 1, drawn.lanes.len() as i32, 1, 1);
-        let row = gtk::ListBoxRow::builder()
-            .activatable(false)
-            .selectable(false)
-            .child(&vbox!(0, "", header, grid))
-            .build();
-        row.add_css_class("step-row");
-        row
+        vbox!(0, "", header, grid)
     }
 }
 
