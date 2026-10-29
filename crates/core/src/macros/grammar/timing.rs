@@ -1,7 +1,7 @@
 //! When each of a macro's steps starts, from the round's start: what the
 //! editor draws its steps along. A range, as the waits are.
 
-use super::{Parsed, Row, Step, TYPE_GAP, lines, step};
+use super::{Parsed, Row, Step, TAP_PRESS, TYPE_GAP, lines, step};
 use crate::macros::lanes;
 
 /// Seconds, the least and the most.
@@ -27,8 +27,9 @@ fn of_step(step: &Step) -> Span {
         Step::Hold { lo, hi, .. } | Step::MoveTo { lo, hi, .. } => (*lo, *hi),
         Step::Wait(lo, hi) | Step::Start(lo, hi) => (*lo, *hi),
         Step::Type(chars) => {
+            // Each character a tap, then the gap before the next.
             let n = chars.len() as f64;
-            (n * TYPE_GAP.0, n * TYPE_GAP.1)
+            (n * (TAP_PRESS.0 + TYPE_GAP.0), n * (TAP_PRESS.1 + TYPE_GAP.1))
         }
         Step::Path(points) => last(points.iter().map(|p| p.0)),
         Step::Turn(points) => last(points.iter().map(|p| p.0)),
@@ -46,9 +47,11 @@ fn last(times: impl Iterator<Item = f64>) -> Span {
 /// When each row starts, from the round's start, and when the round ends:
 /// the rows' spans one after another. A timeline lasts until its last step
 /// has played, if that is later than its length; a repeat plays beside the
-/// steps after it, but the round lasts until it has.
-pub fn starts(rows: &[Row]) -> (Vec<Span>, Span) {
+/// steps after it, but the round lasts until it has. An exit ends the round:
+/// the rows after it are never reached (None) and add nothing to it.
+pub fn starts(rows: &[Row]) -> (Vec<Option<Span>>, Span) {
     let mut at = (0.0, 0.0);
+    let mut ended = false;
     // The latest a repeat keeps the round going.
     let mut held = (0.0f64, 0.0f64);
     let starts = rows
@@ -56,6 +59,9 @@ pub fn starts(rows: &[Row]) -> (Vec<Span>, Span) {
         .enumerate()
         .map(|(i, row)| {
             let start = at;
+            if ended {
+                return None;
+            }
             let (mut lo, mut hi) = span(row);
             match row.kind.as_str() {
                 "Timeline" => {
@@ -63,6 +69,7 @@ pub fn starts(rows: &[Row]) -> (Vec<Span>, Span) {
                     let played = lanes::of_rows(block).0.secs;
                     (lo, hi) = (lo.max(played), hi.max(played));
                 }
+                "Exit" => ended = true,
                 "Repeat" => {
                     let (rlo, rhi) = repeated(row);
                     held = (held.0.max(at.0 + rlo), held.1.max(at.1 + rhi));
@@ -70,7 +77,7 @@ pub fn starts(rows: &[Row]) -> (Vec<Span>, Span) {
                 _ => {}
             }
             at = (at.0 + lo, at.1 + hi);
-            start
+            Some(start)
         })
         .collect();
     (starts, (at.0.max(held.0), at.1.max(held.1)))
@@ -118,9 +125,9 @@ mod tests {
     fn the_starter_macro_waits_a_minute_to_four_after_its_tap() {
         let rows = [row("Note", "anti-AFK"), row("Key", "space"), row("Wait", "60-240")];
         let (starts, end) = starts(&rows);
-        assert_eq!(starts[0], (0.0, 0.0));
-        assert_eq!(starts[1], (0.0, 0.0));
-        assert!((starts[2].0 - 0.08).abs() < 1e-9);
+        assert_eq!(starts[0], Some((0.0, 0.0)));
+        assert_eq!(starts[1], Some((0.0, 0.0)));
+        assert!(starts[2].is_some_and(|(lo, _)| (lo - 0.08).abs() < 1e-9));
         assert!((end.0 - 60.08).abs() < 1e-9 && (end.1 - 240.08).abs() < 1e-9);
     }
 
@@ -139,9 +146,18 @@ mod tests {
     fn a_timeline_lasts_until_its_last_step_and_a_repeat_holds_the_round() {
         let rows = [row("Timeline", ""), row("At", "1 hold w 2"), row("Key", "e")];
         let (starts, _) = starts(&rows);
-        assert!(starts[2].0 >= 3.0, "{starts:?}");
+        assert!(starts[2].is_some_and(|(lo, _)| lo >= 3.0), "{starts:?}");
         let (_, end) = super::starts(&[row("Repeat", "e 10"), row("Key", "f")]);
         assert_eq!(end, (10.0, 10.0));
+    }
+
+    #[test]
+    fn an_exit_ends_the_round_and_typing_taps_each_character() {
+        let (starts, end) = starts(&[row("Wait", "1"), row("Exit", ""), row("Wait", "60")]);
+        assert_eq!(end, (1.0, 1.0));
+        assert_eq!(starts[2], None);
+        let (lo, hi) = span(&row("Type", "hello"));
+        assert!((lo - 5.0 * (TAP_PRESS.0 + TYPE_GAP.0)).abs() < 1e-9 && lo == hi);
     }
 
     #[test]

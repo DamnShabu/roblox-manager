@@ -168,8 +168,11 @@ impl MacroDialog {
     pub(super) fn retime(&self) {
         let (starts, end) = timing::starts(&self.rows.borrow());
         for (i, label) in self.times.borrow().iter() {
-            if let Some(&at) = starts.get(*i) {
-                label.set_label(&timing::label(at));
+            match starts.get(*i) {
+                Some(Some(at)) => label.set_label(&timing::label(*at)),
+                // After an exit: the round never gets here.
+                Some(None) => label.set_label("never"),
+                None => {}
             }
         }
         self.end_time.set_label(&timing::label(end));
