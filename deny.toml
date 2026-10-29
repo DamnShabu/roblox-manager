@@ -11,7 +11,22 @@ all-features = true
 # with the reason beside it.
 unmaintained = "all"
 yanked = "deny"
-ignore = []
+ignore = [
+    # zstd 0.13 / zstd-safe 7, through backhand 0.25.5, which has no release
+    # on the fixed zstd 0.14 / zstd-safe 8.2 yet. backhand only decompresses
+    # with a fresh `zstd::bulk::Decompressor` per block, and only the Stacked
+    # AppImage the manager downloads: no streaming context to reuse, no
+    # seekable frames, no streaming legacy frames. Drop these with the bump.
+    { id = "RUSTSEC-2026-0391", reason = "streaming context reuse; backhand decompresses in bulk" },
+    { id = "RUSTSEC-2026-0398", reason = "zstd Seekable API; never used" },
+    { id = "RUSTSEC-2026-0403", reason = "streaming legacy-frame decompression; backhand decompresses in bulk" },
+    # zvariant, zvariant_derive and zbus_names were folded into zbus 6. The
+    # keyring's D-Bus code is on zbus 5 until it moves; unmaintained, with no
+    # vulnerability against them.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: merged into zbus 6; move with the zbus 6 migration" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: merged into zbus 6; move with the zbus 6 migration" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: merged into zbus 6; move with the zbus 6 migration" },
+]
 
 [licenses]
 # Licenses compatible with shipping the app under MIT: the ones the tree
