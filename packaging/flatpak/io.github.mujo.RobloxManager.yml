@@ -191,6 +191,8 @@ modules:
         dest: third_party/mcpelauncher-linker
       - type: patch
         path: ../../cordial/0002-cordial-fetch-cli.patch
+      - type: patch
+        path: ../../cordial/0003-zip-9-rustls.patch
       - cordial-cargo-sources.json
 
   # -- the manager ----------------------------------------------------------

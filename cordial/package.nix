@@ -17,7 +17,9 @@
 # and how to move it to another commit.
 #
 # Patches (source.json's "patches", applied in order):
-#   0002  cordial-fetch. Commit it to the fork and this list is empty.
+#   0002  cordial-fetch.
+#   0003  zip 9 and rustls 0.23.46, for their security advisories.
+#   Commit them to the fork and this list is empty.
 #
 # Keeping the cursor inside a fullscreen window is the fork's own (4de9752,
 # with 8ed8332 re-asking when KWin drops it and keeping Hyprland's pointer
