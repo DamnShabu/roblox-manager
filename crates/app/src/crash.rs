@@ -65,10 +65,10 @@ pub fn install() {
 
 /// A clean exit: nothing for the next start to report.
 pub fn end() {
-    if let Some(log) = LOG.get() {
-        if let Err(e) = log.end() {
-            eprintln!("roblox-manager: could not mark a clean exit: {e}");
-        }
+    if let Some(log) = LOG.get()
+        && let Err(e) = log.end()
+    {
+        eprintln!("roblox-manager: could not mark a clean exit: {e}");
     }
 }
 

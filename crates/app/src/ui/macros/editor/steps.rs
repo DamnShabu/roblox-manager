@@ -206,11 +206,11 @@ impl MacroDialog {
         check(&value, r);
         let me = Rc::downgrade(self);
         value.connect_changed(move |e| {
-            if let Some(d) = me.upgrade() {
-                if let Some(row) = d.rows.borrow_mut().get_mut(i) {
-                    row.value = e.text().to_string();
-                    check(e, row);
-                }
+            if let Some(d) = me.upgrade()
+                && let Some(row) = d.rows.borrow_mut().get_mut(i)
+            {
+                row.value = e.text().to_string();
+                check(e, row);
             }
         });
         self.entries.borrow_mut().push(value.clone());

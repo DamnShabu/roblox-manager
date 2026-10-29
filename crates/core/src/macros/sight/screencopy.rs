@@ -330,8 +330,8 @@ fn to_rgb(raw: &[u8], shape: Shape, flipped: bool) -> io::Result<Image> {
         let src = if flipped { h - 1 - row } else { row };
         let start = src * shape.stride as usize;
         let line = raw.get(start..start + w * 4).ok_or_else(|| refused("the copy came short"))?;
-        for px in line.chunks_exact(4) {
-            let v = u32::from_le_bytes([px[0], px[1], px[2], px[3]]);
+        for px in line.as_chunks::<4>().0 {
+            let v = u32::from_le_bytes(*px);
             let (r, g, b) = match shape.format {
                 ARGB8888 | XRGB8888 => (v >> 16, v >> 8, v),
                 ABGR8888 | XBGR8888 => (v, v >> 8, v >> 16),
