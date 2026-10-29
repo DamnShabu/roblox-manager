@@ -64,12 +64,17 @@ pub fn starts(rows: &[Row]) -> (Vec<Option<Span>>, Span) {
             if ended {
                 return None;
             }
-            let (lo, mut hi) = span(row);
+            let (mut lo, mut hi) = span(row);
             match row.kind.as_str() {
                 "Timeline" => {
                     let block = &rows[i..i + lanes::block(rows, i)];
                     let played = lanes::of_rows(block).0.secs;
                     // Its steps may play past its length: the most it lasts.
+                    // A set length is exact, so the least rises with it; a
+                    // range keeps its least (`played` takes in its most).
+                    if lo == hi {
+                        lo = lo.max(played);
+                    }
                     hi = hi.max(played);
                 }
                 "Exit" => ended = true,
@@ -154,6 +159,8 @@ mod tests {
         assert!(starts[2].is_some_and(|(_, hi)| hi >= 3.0), "{starts:?}");
         let (_, end) = super::starts(&[row("Timeline", "3-5"), row("At", "0 tap e")]);
         assert_eq!(end.0, 3.0);
+        let (_, end) = super::starts(&[row("Timeline", "1"), row("At", "2 hold w 2")]);
+        assert_eq!(end, (4.0, 4.0));
         assert_eq!(span(&row("Click", "960 540")), TAP_PRESS);
         let (_, end) = super::starts(&[row("Repeat", "e 10"), row("Key", "f")]);
         assert_eq!(end, (10.0, 10.0));
