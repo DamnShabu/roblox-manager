@@ -643,6 +643,18 @@ button.tp-row.on image.check { color: var(--rm-text); }
 
 /* -- macros: the editor's steps, recording, pickers -- */
 row.step-row { padding: 2px 8px; min-height: 36px; }
+/* the steps as a timeline: a rail down the left, a dot at each stop */
+list.rail-list, list.rail-list > row { background: none; box-shadow: none; border: none; }
+list.rail-list > row.step-row, .rail-stop { padding: 0; min-height: 0; }
+.rail { min-width: 26px; }
+.rail-line { min-width: 2px; background: var(--rm-border-strong); }
+.rail-line.dashed { min-width: 0; background: none; border-left: 2px dashed var(--rm-border-strong); }
+.rail-line.hidden { background: none; border: none; }
+.rail-dot { min-width: 26px; min-height: 26px; border-radius: 9999px; background: var(--rm-raised); color: var(--rm-text-2); }
+.rail-dot > image { margin: 5px; }
+.rail-dot.end { background: none; box-shadow: inset 0 0 0 2px var(--rm-border-strong); color: var(--rm-text-3); }
+.rail-time { font-size: 11px; color: var(--rm-text-3); font-feature-settings: "tnum"; }
+.record-bar { padding: 10px 12px; border-radius: 8px; background: var(--rm-raised); }
 row.step-row .number { font-feature-settings: "tnum"; min-width: 22px; color: var(--rm-text-3); }
 row.step-row dropdown > button {
   min-height: 28px; padding: 0 8px; border-radius: 6px;

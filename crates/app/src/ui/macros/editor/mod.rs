@@ -12,7 +12,7 @@ use super::record::Record;
 use crate::ui::confirm;
 use crate::ui::ds::{self, Variant};
 use crate::ui::panel::Panel;
-use crate::ui::widgets::{Fluent, LabelFluent, hotkey_label, keycaps, lbl, sentence};
+use crate::ui::widgets::{Fluent, LabelFluent, hotkey_label, keycaps, lbl, sentence, wrap};
 use crate::ui::window::{WeakWindow, Window};
 
 pub struct MacroDialog {
@@ -32,6 +32,11 @@ pub struct MacroDialog {
     list: gtk::ListBox,
     /// The value entry of each step drawn, in the order drawn.
     entries: RefCell<Vec<gtk::Entry>>,
+    /// The time beside each stop that has one, and its row.
+    times: RefCell<Vec<(usize, gtk::Label)>>,
+    /// When the round ends, and what follows, at the rail's foot.
+    end_time: gtk::Label,
+    end_then: gtk::Label,
     /// Steps as rows, or the macro as text to paste or copy.
     view: adw::ToggleGroup,
     views: gtk::Stack,
@@ -92,8 +97,11 @@ impl MacroDialog {
             repeat: adw::ToggleGroup::builder().valign(Align::Center).build(),
             rounds,
             count: lbl("", "dimmed"),
-            list: crate::ui::widgets::boxed_list(),
+            list: gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).build(),
             entries: RefCell::default(),
+            times: RefCell::default(),
+            end_time: rail::time(""),
+            end_then: lbl("", "cx-help").wrapped(),
             view: adw::ToggleGroup::builder().valign(Align::Center).build(),
             views: gtk::Stack::builder().vhomogeneous(false).build(),
             text: gtk::TextView::builder()
@@ -132,6 +140,8 @@ impl MacroDialog {
             }
         });
         self.name.set_hexpand(true);
+        // Narrow enough for Cancel and Save beside it in a narrow panel.
+        self.name.set_width_chars(8);
         self.name.set_valign(Align::Center);
         for b in [&cancel.button, &save.button] {
             b.set_valign(Align::Center);
@@ -155,7 +165,7 @@ impl MacroDialog {
                 d.draw_hotkey();
             }
         });
-        let about = ds::sec("", None);
+        let about = ds::sec("Running", None);
         about.add_css_class("first");
         about.append(&ds::field(
             "Hotkey",
@@ -184,9 +194,12 @@ impl MacroDialog {
         self.repeat.add_css_class("cx-seg");
         let rounds_label = lbl("rounds", "t-caption muted").centered();
         self.rounds.bind_property("visible", &rounds_label, "visible").sync_create().build();
+        // The rounds go under the choice when the panel is too narrow for both.
+        let rounds = hbox!(8, "", self.rounds.clone(), rounds_label);
+        self.rounds.bind_property("visible", &rounds, "visible").sync_create().build();
         repeat_group.append(&ds::field(
             "Playback",
-            &hbox!(8, "", self.repeat.clone(), self.rounds.clone(), rounds_label),
+            &wrap(8, &[self.repeat.clone().upcast(), rounds.upcast()]),
             Some("Once, a number of rounds, or round after round until stopped"),
         ));
         about.append(repeat_group);
@@ -202,6 +215,7 @@ impl MacroDialog {
                 && d.repeat.active_name().as_deref() == Some("rounds")
             {
                 d.loops.set(r.value().max(2.0) as u32);
+                d.retime();
             }
         });
         self.rounds.set_visible(self.repeat.active_name().as_deref() == Some("rounds"));
@@ -246,6 +260,7 @@ impl MacroDialog {
             _ => 0,
         });
         self.rounds.set_visible(mode.as_deref() == Some("rounds"));
+        self.retime();
     }
 
     // -- steps or text ------------------------------------------------------
@@ -378,5 +393,7 @@ impl MacroDialog {
     }
 }
 
+mod add;
+mod rail;
 mod steps;
 mod timeline;

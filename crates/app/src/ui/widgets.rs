@@ -143,11 +143,6 @@ impl LabelFluent for Label {
     }
 }
 
-/// A symbolic icon from the icon theme, at the theme's 16 px.
-pub fn icon(name: &str) -> gtk::Image {
-    gtk::Image::from_icon_name(name)
-}
-
 /// A button of an optional icon and optional label, kept for relabelling.
 #[derive(Clone)]
 pub struct IconButton {
