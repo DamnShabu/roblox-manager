@@ -48,7 +48,8 @@ fn last(times: impl Iterator<Item = f64>) -> Span {
 /// the rows' spans one after another. A timeline lasts until its last step
 /// has played, if that is later than its length; a repeat plays beside the
 /// steps after it, but the round lasts until it has. An exit ends the round:
-/// the rows after it are never reached (None) and add nothing to it.
+/// the rows after it are never reached (None) and add nothing to it, and
+/// a repeat still tapping stops there.
 pub fn starts(rows: &[Row]) -> (Vec<Option<Span>>, Span) {
     let mut at = (0.0, 0.0);
     let mut ended = false;
@@ -80,7 +81,9 @@ pub fn starts(rows: &[Row]) -> (Vec<Option<Span>>, Span) {
             Some(start)
         })
         .collect();
-    (starts, (at.0.max(held.0), at.1.max(held.1)))
+    // An exit stops any repeat still tapping, as it ends the round.
+    let end = if ended { at } else { (at.0.max(held.0), at.1.max(held.1)) };
+    (starts, end)
 }
 
 /// How long a repeat row taps for, or (0, 0).
@@ -156,6 +159,8 @@ mod tests {
         let (starts, end) = starts(&[row("Wait", "1"), row("Exit", ""), row("Wait", "60")]);
         assert_eq!(end, (1.0, 1.0));
         assert_eq!(starts[2], None);
+        let (_, end) = super::starts(&[row("Repeat", "e 600"), row("Wait", "2"), row("Exit", "")]);
+        assert_eq!(end, (2.0, 2.0));
         let (lo, hi) = span(&row("Type", "hello"));
         assert!((lo - 5.0 * (TAP_PRESS.0 + TYPE_GAP.0)).abs() < 1e-9 && lo == hi);
     }
