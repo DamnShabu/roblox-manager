@@ -4,6 +4,7 @@
 use adw::prelude::*;
 use gtk::glib::variant::StaticVariantType;
 use gtk::{gio, glib};
+use rbxmgr_core::cordial::Performance;
 use rbxmgr_core::types::UserId;
 use rbxmgr_core::window_state::Style;
 
@@ -18,11 +19,12 @@ pub const SHORTCUTS: &[(&str, &str, &[&str])] = &[
     ("win.add-account", "Add account", &["<Control>n"]),
     ("win.search", "Search accounts", &["<Control>f"]),
     ("win.refresh", "Check sessions and reload favourites", &["<Control>r", "F5"]),
-    ("win.launch-group", "Launch as group", &["<Control>Return"]),
     ("win.launch-selected", "Launch selected", &["<Control><Shift>Return"]),
     ("win.stop-all", "Stop all", &["<Control><Shift>period"]),
+    ("win.pick-target", "Pick where launches go", &["<Control>t"]),
     ("win.new-macro", "New macro", &["<Control><Shift>n"]),
-    ("win.toggle-sidebar", "Show or hide macros and activity", &["F9"]),
+    ("win.toggle-sidebar", "Show or hide the sidebar", &["F9"]),
+    ("win.toggle-details", "Show or fold the details", &["F7"]),
     ("win.activity-log", "Activity log", &["<Control>l"]),
     ("win.macro-help", "How macros work", &["F1"]),
     ("win.shortcuts", "Keyboard shortcuts", &["<Control>question"]),
@@ -39,7 +41,7 @@ type GroupAction = (&'static str, fn(&Window, &str));
 
 impl Window {
     pub(super) fn install_actions(&self) {
-        let actions: [Action; 22] = [
+        let actions: [Action; 25] = [
             ("add-account", Window::on_add),
             ("refresh", Window::refresh_all),
             ("update", Window::on_update),
@@ -47,10 +49,12 @@ impl Window {
             ("new-group", Window::add_group),
             ("new-macro", |w| macros::editor::MacroDialog::open(w, None)),
             ("open-scripts", Window::open_scripts_folder),
-            ("reload-scripts", Window::refresh_macros),
+            ("reload-scripts", Window::draw_scripts),
             ("launch-selected", Window::launch_selected),
-            ("launch-group", Window::launch_chain),
             ("stop-all", Window::on_stop_all),
+            ("stop-selected", Window::stop_selected),
+            ("hide-selected", Window::hide_selected),
+            ("pick-target", Window::pick_target),
             ("hide-all", Window::on_hide_all),
             ("show-all", Window::on_show_all),
             ("select-all", Window::on_select_all),
@@ -61,9 +65,10 @@ impl Window {
             ("activity-log", activity::open_log),
             ("macro-help", macros::help::show),
             ("shortcuts", show_shortcuts),
-            ("toggle-sidebar", |w| {
-                let split = &w.0.ui.split;
-                split.set_show_sidebar(!split.shows_sidebar());
+            ("toggle-sidebar", Window::toggle_sidebar),
+            ("toggle-details", |w| {
+                let fold = &w.0.ui.details.fold;
+                fold.set_active(!fold.is_active());
             }),
         ];
         for (name, run) in actions {
@@ -79,7 +84,7 @@ impl Window {
         self.install_item_actions();
     }
 
-    /// Light or dark: the style menu's radio items, and the style now.
+    /// The saved style, kept for the window-state file; the app is dark only.
     pub(super) fn install_style(&self, style: Style) {
         apply_style(style);
         let action = gio::SimpleAction::new_stateful(
@@ -113,13 +118,9 @@ impl Window {
     /// with its id. Each waits for the menu to close before it runs: most
     /// redraw the list, the menu's row with it.
     fn install_item_actions(&self) {
-        let accounts: [AccountAction; 6] = [
+        let accounts: [AccountAction; 5] = [
             ("account-settings", |w, id| AccountSettings::open(w, id)),
-            ("make-leader", Window::set_leader),
-            ("toggle-follow", |w, id| {
-                let on = w.state().accounts.get(id).is_some_and(|a| a.follow.is_none());
-                w.set_follow(id, on);
-            }),
+            ("make-main", Window::set_main),
             ("check-session", |w, id| w.check_sessions(vec![id])),
             ("sign-in-again", |w, id| {
                 let acct = w.state().accounts.get(id).cloned();
@@ -143,9 +144,49 @@ impl Window {
                 w.set_group(UserId(id), Some(gid).filter(|g| !g.is_empty()));
             }
         });
-        let groups: [GroupAction; 2] = [
+        // (user id, level), from a row's performance menu.
+        self.add_deferred("set-performance", &pair, |w, v| {
+            if let Some((id, level)) = v.get::<(u64, String)>()
+                && let Some(level) = Performance::ALL.into_iter().find(|p| p.label() == level)
+            {
+                w.set_performance(UserId(id), level);
+            }
+        });
+        // (user id, macro), from a row's Add macro.
+        self.add_deferred("set-macro", &pair, |w, v| {
+            if let Some((id, name)) = v.get::<(u64, String)>() {
+                w.pick_macro(UserId(id), Some(name));
+            }
+        });
+        // A level, for every selected account.
+        self.add_deferred("perf-selected", glib::VariantTy::STRING, |w, v| {
+            if let Some(level) = v.get::<String>()
+                && let Some(level) = Performance::ALL.into_iter().find(|p| p.label() == level)
+            {
+                w.set_performance_selected(level);
+            }
+        });
+        let macros: [GroupAction; 4] = [
+            ("edit-macro", |w, name| macros::editor::MacroDialog::open(w, Some(name))),
+            ("run-script", Window::run_script),
+            ("edit-script", Window::edit_script),
+            ("toggle-macro", |w, name| {
+                let on = w.state().macros.enabled(name);
+                w.enable_macro(name, !on);
+            }),
+        ];
+        for (name, run) in macros {
+            self.add_deferred(name, glib::VariantTy::STRING, move |w, v| {
+                if let Some(m) = v.get::<String>() {
+                    run(w, &m);
+                }
+            });
+        }
+        let groups: [GroupAction; 4] = [
             ("group-settings", |w, gid| GroupSettings::open(w, gid)),
             ("delete-group", Window::confirm_delete_group),
+            ("select-group", Window::select_group),
+            ("move-selected", Window::move_selected),
         ];
         for (name, run) in groups {
             self.add_deferred(name, glib::VariantTy::STRING, move |w, v| {
@@ -186,12 +227,10 @@ impl Window {
     }
 }
 
-fn apply_style(style: Style) {
-    adw::StyleManager::default().set_color_scheme(match style {
-        Style::System => adw::ColorScheme::Default,
-        Style::Light => adw::ColorScheme::ForceLight,
-        Style::Dark => adw::ColorScheme::ForceDark,
-    });
+/// The app is dark whatever the saved style says; the style is still kept,
+/// so the file it is saved in reads the same to earlier versions.
+fn apply_style(_style: Style) {
+    adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
 }
 
 /// Set every shortcut in [`SHORTCUTS`] on the application.
@@ -202,20 +241,5 @@ pub fn set_accels(app: &adw::Application) {
 }
 
 fn show_shortcuts(w: &Window) {
-    let dialog = adw::ShortcutsDialog::new();
-    let section = adw::ShortcutsSection::new(Some("Roblox Manager"));
-    for (action, title, _) in SHORTCUTS {
-        section.add(adw::ShortcutsItem::from_action(title, action));
-    }
-    dialog.add(section);
-    let hotkeys: Vec<(String, String)> =
-        w.state().macros.hotkeys().map(|(n, k)| (n.to_owned(), k.to_owned())).collect();
-    if !hotkeys.is_empty() {
-        let section = adw::ShortcutsSection::new(Some("Macros (while this window has focus)"));
-        for (name, accel) in hotkeys {
-            section.add(adw::ShortcutsItem::new(&format!("Run or stop {name}"), &accel));
-        }
-        dialog.add(section);
-    }
-    dialog.present(Some(w.gtk_window()));
+    crate::ui::help::show(w, false);
 }

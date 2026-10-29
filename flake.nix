@@ -27,6 +27,7 @@
         inherit (nixpkgs) lib;
         inherit (self.packages.${system}) roblox-manager;
       };
+      flatpak-cargo-generator = import ./packaging/flatpak/cargo-generator.nix {inherit pkgs;};
     };
 
     # The Rust workspace (crates/): toolchain plus the GTK4/libadwaita

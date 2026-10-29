@@ -282,14 +282,7 @@ impl Screencopy {
 
 impl Eyes for Screencopy {
     fn look(&mut self, area: Area) -> io::Result<Image> {
-        let mut area = area.on_display();
-        if let Some((w, h)) = self.size {
-            area.w = area.w.min(w.saturating_sub(area.x as u32));
-            area.h = area.h.min(h.saturating_sub(area.y as u32));
-        }
-        if area.w == 0 || area.h == 0 {
-            return Err(refused("that area is off the display"));
-        }
+        let area = clip(area, self.size)?;
         let frame = self.new_id();
         // capture_output_region(frame, overlay_cursor, output, x, y, w, h):
         // without the pointer, which is not part of the game.
@@ -313,6 +306,22 @@ impl Drop for Screencopy {
     }
 }
 
+/// The part of `area` on a display of `size`, when it is known. None of
+/// it there is a frame that cannot be looked at for now, not a display
+/// gone: the window may be made big enough again, and ending the macro
+/// over a resize would be wrong. The watcher waits it out and says so.
+fn clip(area: Area, size: Option<(u32, u32)>) -> io::Result<Area> {
+    let mut area = area.on_display();
+    if let Some((w, h)) = size {
+        area.w = area.w.min(w.saturating_sub(area.x.unsigned_abs()));
+        area.h = area.h.min(h.saturating_sub(area.y.unsigned_abs()));
+    }
+    if area.w == 0 || area.h == 0 {
+        return Err(io::Error::new(io::ErrorKind::ResourceBusy, "that area is off the display"));
+    }
+    Ok(area)
+}
+
 /// A copy, as red, green, blue bytes the right way up.
 fn to_rgb(raw: &[u8], shape: Shape, flipped: bool) -> io::Result<Image> {
     let (w, h) = (shape.width as usize, shape.height as usize);
@@ -321,8 +330,8 @@ fn to_rgb(raw: &[u8], shape: Shape, flipped: bool) -> io::Result<Image> {
         let src = if flipped { h - 1 - row } else { row };
         let start = src * shape.stride as usize;
         let line = raw.get(start..start + w * 4).ok_or_else(|| refused("the copy came short"))?;
-        for px in line.chunks_exact(4) {
-            let v = u32::from_le_bytes([px[0], px[1], px[2], px[3]]);
+        for px in line.as_chunks::<4>().0 {
+            let v = u32::from_le_bytes(*px);
             let (r, g, b) = match shape.format {
                 ARGB8888 | XRGB8888 => (v >> 16, v >> 8, v),
                 ABGR8888 | XBGR8888 => (v, v >> 8, v >> 16),
@@ -393,6 +402,16 @@ mod tests {
         assert_eq!(to_rgb(&red_10bit, one, false).unwrap().rgb, [255, 0, 0]);
         let odd = Shape { format: 0x1234, width: 1, height: 1, stride: 4 };
         assert!(to_rgb(&[0; 4], odd, false).is_err());
+    }
+
+    #[test]
+    fn an_area_off_a_shrunk_display_is_waited_out_not_fatal() {
+        let area = Area { x: 1800, y: 40, w: 50, h: 50 };
+        assert_eq!(clip(area, Some((1920, 1080))).unwrap(), area);
+        let off = clip(area, Some((1280, 720))).unwrap_err();
+        assert_eq!(off.kind(), io::ErrorKind::ResourceBusy);
+        let edge = clip(Area { x: 1900, ..area }, Some((1920, 1080))).unwrap();
+        assert_eq!((edge.w, edge.h), (20, 50));
     }
 
     #[test]

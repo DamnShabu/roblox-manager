@@ -13,7 +13,7 @@ use std::io::{self, IoSlice, Write};
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::keys;
 use super::player::Input;
@@ -28,6 +28,12 @@ const KEYMAP: &str = "xkb_keymap {
   xkb_symbols { include \"pc+us+inet(evdev)\" };
 };
 ";
+
+/// How long the display may go without reading what is sent, or answering
+/// a sync, before it counts as wedged. Far longer than any busy cage falls
+/// behind (see `pump`); without a bound, a cage that stops reading leaves
+/// the player blocked in a send that Stop cannot reach.
+const STALLED: Duration = Duration::from_secs(30);
 
 /// A wheel notch, in the units a wheel's axis events carry (what libinput
 /// reports for one click).
@@ -53,6 +59,8 @@ impl VirtualInput {
     /// it. A compositor that refuses either says so here, not mid-macro.
     pub fn connect(path: &Path) -> io::Result<Self> {
         let sock = UnixStream::connect(path)?;
+        sock.set_read_timeout(Some(STALLED))?;
+        sock.set_write_timeout(Some(STALLED))?;
         let mut vi = VirtualInput {
             sock,
             framer: Framer::default(),
@@ -109,7 +117,7 @@ impl VirtualInput {
     }
 
     fn send(&mut self, obj: u32, op: u16, body: &[u8]) -> io::Result<()> {
-        self.sock.write_all(&message(obj, op, body))
+        self.sock.write_all(&message(obj, op, body)).map_err(stalled)
     }
 
     /// The keymap (xkb v1), in a memfd passed alongside the request.
@@ -144,7 +152,7 @@ impl VirtualInput {
                 Ok((n, _)) => break n,
                 Err(rustix::io::Errno::AGAIN) if !block => break 0,
                 Err(rustix::io::Errno::INTR) => {}
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(stalled(e.into())),
             }
         };
         self.framer.push(&data[..got]);
@@ -259,6 +267,17 @@ impl Drop for VirtualInput {
         let _ = self.send(self.keyboard, 3, &[]);
         let _ = self.send(self.pointer, 8, &[]);
         let _ = self.roundtrip();
+    }
+}
+
+/// A send or a wait the socket's timeout cut short, said as what it means.
+fn stalled(e: io::Error) -> io::Error {
+    match e.kind() {
+        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut => io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("its display stopped answering for {}s", STALLED.as_secs()),
+        ),
+        _ => e,
     }
 }
 

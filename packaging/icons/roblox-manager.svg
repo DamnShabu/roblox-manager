@@ -1,13 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 72 72">
-  <rect width="72" height="72" rx="18" fill="#2a1f0c"/>
-  <!-- The mark at 54 of 72, centred. A transform, not a nested <svg>: Qt's
-       renderer (KDE's panels and menus) draws no nested viewport. -->
-  <g transform="translate(9 9) scale(0.54)">
-    <g transform="rotate(-14 50 50)">
-      <rect x="30" y="8" width="56" height="56" rx="7" fill="#6b5634"/>
-      <rect x="22" y="22" width="56" height="56" rx="7" fill="#b08c4c"/>
-      <rect x="14" y="36" width="56" height="56" rx="7" fill="#e9bd6a"/>
-      <rect x="35" y="57" width="14" height="14" rx="2" fill="#2a1f0c"/>
-    </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" rx="225" fill="#121317"/>
+  <g transform="translate(163.84 163.84) scale(5.8027) rotate(-8 60 60)">
+    <rect x="12" y="12" width="46" height="46" rx="10" fill="#FFFFFF"/>
+    <rect x="62" y="12" width="46" height="46" rx="10" fill="#FF3D2E"/>
+    <rect x="12" y="62" width="46" height="46" rx="10" fill="#FFFFFF"/>
+    <rect x="62" y="62" width="46" height="46" rx="10" fill="#FFFFFF"/>
+    <rect x="24" y="28" width="7" height="11" rx="2" fill="#121317"/>
+    <rect x="39" y="28" width="7" height="11" rx="2" fill="#121317"/>
+    <rect x="74" y="28" width="7" height="11" rx="2" fill="#121317"/>
+    <rect x="89" y="28" width="7" height="11" rx="2" fill="#121317"/>
+    <rect x="24" y="78" width="7" height="11" rx="2" fill="#121317"/>
+    <rect x="39" y="78" width="7" height="11" rx="2" fill="#121317"/>
+    <rect x="74" y="78" width="7" height="11" rx="2" fill="#121317"/>
+    <rect x="89" y="78" width="7" height="11" rx="2" fill="#121317"/>
+    <rect x="47" y="47" width="26" height="26" rx="3" fill="#121317"/>
   </g>
 </svg>

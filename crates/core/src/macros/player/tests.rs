@@ -59,10 +59,10 @@ impl Recorder {
     }
 
     fn note(&self, sent: Sent) {
-        if let Some((at, stop)) = &self.stop_on {
-            if *at == sent {
-                stop.set();
-            }
+        if let Some((at, stop)) = &self.stop_on
+            && *at == sent
+        {
+            stop.set();
         }
         self.sent.borrow_mut().push(sent);
     }
@@ -186,6 +186,27 @@ fn a_key_is_pressed_once_and_only_what_is_down_is_released() {
     let mut r = Recorder::default();
     steps(&mut r, &["release e", "press w", "press w", "release w", "release w"]).unwrap();
     assert_eq!(*r.sent.borrow(), [Sent::Key(17, true), Sent::Key(17, false)]);
+}
+
+#[test]
+fn a_tap_or_typed_shift_leaves_a_pressed_key_held() {
+    let mut r = Recorder::default();
+    let held =
+        steps(&mut r, &["press shift", "type A", "tap shift+w", "press w", "tap w"]).unwrap();
+    // shift goes down once and stays: typing A, and tapping shift+w, use the
+    // one already held instead of letting it go.
+    assert_eq!(
+        *r.sent.borrow(),
+        [
+            Sent::Key(42, true),
+            Sent::Key(30, true),
+            Sent::Key(30, false),
+            Sent::Key(17, true),
+            Sent::Key(17, false),
+            Sent::Key(17, true),
+        ]
+    );
+    assert_eq!(held.down, [42, 17]);
 }
 
 #[test]
@@ -542,5 +563,7 @@ fn a_macro_stalled_longer_than_it_can_make_up_carries_on_from_where_it_is() {
 
 mod alike;
 mod exit;
+mod glide;
 mod start;
+mod timeline;
 mod when;

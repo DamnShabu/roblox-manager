@@ -12,7 +12,6 @@ use rbxmgr_core::types::{Profile, UserId};
 
 use super::Window;
 use crate::state::MacroRun;
-use crate::ui::accounts::leader::placeholder;
 
 /// How far ahead a macro run on several accounts at once is due to start:
 /// time for the slowest of their clients to be reached first.
@@ -25,36 +24,18 @@ pub struct ReadyClient {
     pub label: String,
     pub display: PathBuf,
 }
-use crate::ui::macros::card::macro_card;
 use crate::ui::macros::images;
-use crate::ui::widgets::{boxed_list, clear, hotkey_label};
+use crate::ui::widgets::hotkey_label;
 use crate::worker;
 
 impl Window {
     pub fn refresh_macros(&self) {
-        self.0.cards.borrow_mut().clear();
-        let cards = &self.0.ui.macros_box;
-        clear(cards);
         let names: Vec<String> = self.state().macros.names().map(str::to_owned).collect();
-        for name in &names {
-            cards.append(&macro_card(self, name));
-        }
-        if names.is_empty() {
-            let list = boxed_list();
-            list.append(&placeholder(
-                "input-keyboard-symbolic",
-                "No macros yet. A macro presses keys and clicks for an account on its own.",
-            ));
-            let add = adw::ButtonRow::builder()
-                .title("New Macro…")
-                .start_icon_name("list-add-symbolic")
-                .action_name("win.new-macro")
-                .build();
-            list.append(&add);
-            cards.append(&list);
-        }
+        self.0.ui.sidebar.draw_macros(self);
         self.draw_scripts();
+        self.0.ui.toolbar.set_macros(&names);
         self.bind_hotkeys();
+        self.draw_details();
         self.refresh_launch_state();
     }
 
@@ -285,8 +266,9 @@ impl Window {
         let mine = stop.clone();
         let progress = self.show_progress(id, &stop);
         let weak = self.weak();
+        let run_name = format!("{label}: {name}");
         worker::run(
-            move || {
+            worker::catching(move || {
                 // Only a client seen gone ends the run. Not being able to
                 // list the clients -- pgrep slow with thirty of them up -- is
                 // no sign this one went, and its display says if it did.
@@ -339,9 +321,12 @@ impl Window {
                         Some(why)
                     }
                 }
-            },
-            move |failed: Option<String>| {
+            }),
+            move |failed: Result<Option<String>, worker::Crashed>| {
                 let Some(w) = weak.upgrade() else { return };
+                // A crashed run is over as surely as a failed one.
+                let failed = failed
+                    .unwrap_or_else(|crashed| Some(format!("{run_name} stopped -- {crashed}")));
                 let mut s = w.state_mut();
                 // Only this run's entry: a newer run may have replaced it.
                 if s.macro_runs.get(&id).is_some_and(|(flag, _)| flag.same_as(&mine)) {

@@ -38,6 +38,10 @@ if [[ "$version" != *-* ]] && ! grep -q "<release version=\"$version\"" "$metain
     sed -i "s|<releases>|<releases>\n    <release version=\"$version\" date=\"$(date +%F)\"/>|" "$metainfo"
 fi
 
+# The same gates the workflow's check job runs: a tag it would refuse is
+# a tag with no release.
+"${cargo[@]}" fmt --check
+"${cargo[@]}" clippy --quiet --all-targets -- -D warnings
 "${cargo[@]}" test --quiet >/dev/null
 git commit --quiet -am "release: v$version"
 git tag -a "v$version" -m "Roblox Manager $version"

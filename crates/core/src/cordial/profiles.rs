@@ -1,5 +1,5 @@
 //! Every account's Cordial profile, and the client that plays in it: where
-//! the profile lives, the session it is given, its low-power flags, starting
+//! the profile lives, the session it is given, its performance level, starting
 //! its client, which clients are up, and hiding their windows.
 
 use std::collections::{BTreeMap, HashSet};
@@ -12,8 +12,10 @@ use std::time::Duration;
 use serde_json::{Map, Value};
 
 use super::build::Build;
-use super::process::{ProcessView, Runner, last_line};
-use super::{CordialError, clients, engine, session};
+use super::crashes::{ClientCrash, Crashes};
+use super::performance::Performance;
+use super::process::{Output, ProcessView, Runner, last_line};
+use super::{CordialError, clients, engine, quality, session};
 use crate::keyring::{Attrs, Keyring};
 use crate::macros::{cage_window, nested, relay};
 use crate::paths::Paths;
@@ -31,8 +33,12 @@ pub const SECRET_KINDS: [&str; 2] = ["identity", "cookies"];
 pub struct ClientOpts {
     /// In a cage of its own, where macros can reach it.
     pub nested: bool,
-    /// Throttled, FIFO-paced, niced, with frame and thread caps.
-    pub low_power: bool,
+    /// How much of the machine it may use.
+    pub performance: Performance,
+    /// The monitor's refresh rate, which High and Max run at. Read from the
+    /// desktop by the window: inside a cage the client would only see the
+    /// cage's.
+    pub display_hz: Option<u32>,
 }
 
 /// A running client's window.
@@ -58,6 +64,8 @@ pub struct CordialProfiles {
     /// The lock that keeps cages off the display they open on, held from the
     /// first macro-ready launch on. See [`nested::hold_parent_display`].
     parent_display: Mutex<Option<File>>,
+    /// Clients this manager started that have since crashed.
+    crashes: Crashes,
 }
 
 impl CordialProfiles {
@@ -76,6 +84,7 @@ impl CordialProfiles {
             sleep,
             relay: None,
             parent_display: Mutex::default(),
+            crashes: Crashes::default(),
         }
     }
 
@@ -159,8 +168,10 @@ impl CordialProfiles {
     ) -> Result<(), CordialError> {
         self.clear_legacy_low_power_flags(profile)?;
         let mut env = engine::env(&engine::load_settings(&self.paths.cordial_shell_json()));
-        if opts.low_power {
-            env = engine::with_low_power(env);
+        env = engine::with_performance(env, opts.performance, opts.display_hz);
+        match opts.performance.slider() {
+            Some(level) => quality::set(&self.path(profile), level)?,
+            None => quality::restore(&self.path(profile))?,
         }
         if opts.nested {
             env = engine::with_nested(env);
@@ -170,8 +181,8 @@ impl CordialProfiles {
             .map_err(|e| io(&format!("could not open {}", log_path.display()), e))?;
         let program = super::stacked::engine_program(&self.paths);
         let mut argv = engine::client_argv(&program, profile, url, build);
-        if opts.low_power {
-            argv.splice(0..0, ["nice", "-n", "10"].map(String::from));
+        if let Some(n) = opts.performance.nice() {
+            argv.splice(0..0, ["nice", "-n", n].map(String::from));
         }
         if opts.nested {
             self.hold_parent_display()?;
@@ -187,7 +198,10 @@ impl CordialProfiles {
         let mut child = self.runner.spawn(&argv, log, &env)?;
         (self.sleep)(STARTUP_CHECK);
         match child.exited()? {
-            None => Ok(()),
+            None => {
+                self.crashes.watch(profile.clone(), child, log_path);
+                Ok(())
+            }
             Some(status) => {
                 let tail = read_tail(&log_path);
                 Err(CordialError::ExitedAtOnce {
@@ -196,6 +210,11 @@ impl CordialProfiles {
                 })
             }
         }
+    }
+
+    /// The clients started here that crashed since the last call.
+    pub fn take_crashes(&self) -> Vec<ClientCrash> {
+        self.crashes.take()
     }
 
     /// Lock the display cages open on before one starts, unless it already
@@ -213,12 +232,17 @@ impl CordialProfiles {
         Ok(())
     }
 
+    /// Where the profile's client writes its output.
+    pub fn log_path(&self, profile: &Profile) -> PathBuf {
+        self.paths.logs().join(format!("{profile}.log"))
+    }
+
     /// The profile's log path, the previous launch's moved to `.log.1`.
     fn rotate_log(&self, profile: &Profile) -> Result<PathBuf, CordialError> {
         let logs = self.paths.logs();
         fs::create_dir_all(&logs)
             .map_err(|e| io(&format!("could not create {}", logs.display()), e))?;
-        let path = logs.join(format!("{profile}.log"));
+        let path = self.log_path(profile);
         if path.exists() {
             fs::rename(&path, logs.join(format!("{profile}.log.1")))
                 .map_err(|e| io("could not keep the previous log", e))?;
@@ -230,7 +254,10 @@ impl CordialProfiles {
     /// from Cordial directly included. pgrep exits 1 when nothing matches,
     /// which is an answer, not an error.
     pub fn clients(&self) -> Result<BTreeMap<u32, Profile>, CordialError> {
-        let argv = self.view.argv(&["pgrep", "-a", "-f", "cordial-run"]);
+        // This user's only: on a shared machine another user's clients are
+        // not ours to count, hide or stop.
+        let uid = rustix::process::getuid().as_raw().to_string();
+        let argv = self.view.argv(&["pgrep", "-u", &uid, "-a", "-f", "cordial-run"]);
         let out = self.runner.run(&argv, Duration::from_secs(10))?;
         // 1 is "nothing matched"; anything past it is pgrep failing.
         if out.status > 1 || out.status < 0 {
@@ -240,6 +267,12 @@ impl CordialProfiles {
             )));
         }
         Ok(clients::parse(&String::from_utf8_lossy(&out.stdout)))
+    }
+
+    /// Run `argv` where the clients are seen, for a look at them; its
+    /// status is the caller's to judge.
+    pub(super) fn run_seen(&self, argv: &[&str]) -> Result<Output, CordialError> {
+        self.runner.run(&self.view.argv(argv), Duration::from_secs(10))
     }
 
     /// The profiles a client has open.
@@ -321,8 +354,19 @@ impl CordialProfiles {
         let pids: Vec<String> = pids.iter().map(u32::to_string).collect();
         let kill: Vec<&str> =
             std::iter::once("kill").chain(sig).chain(pids.iter().map(String::as_str)).collect();
-        self.runner.run(&self.view.argv(&kill), Duration::from_secs(10))?;
-        Ok(())
+        let out = self.runner.run(&self.view.argv(&kill), Duration::from_secs(10))?;
+        // A client that ended between the listing and the signal is no
+        // failure: kill says so for that pid and signals the rest.
+        let said = String::from_utf8_lossy(&out.stderr);
+        let gone = !said.trim().is_empty()
+            && said.lines().filter(|l| !l.trim().is_empty()).all(|l| l.contains("No such process"));
+        if out.success() || gone {
+            return Ok(());
+        }
+        Err(CordialError::Process(format!(
+            "could not signal the client: {}",
+            last_line(&out.stderr)
+        )))
     }
 
     pub(super) fn keyring(&self) -> &Keyring {

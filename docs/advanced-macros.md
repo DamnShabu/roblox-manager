@@ -1,12 +1,12 @@
 # Advanced macros
 
 An advanced macro is a Python script. Every `.py` file in
-`~/.local/share/rbxmgr/advanced-macros/` shows in the Advanced tab of the
-macros pane, with its first comment or docstring line under its name. Files
+`~/.local/share/rbxmgr/advanced-macros/` is listed under **Scripts** in
+the sidebar, with its first comment or docstring line as its tooltip. Files
 whose names start with `_` are not listed, so a module the scripts share can
 sit beside them and be imported.
 
-Tick accounts and press ▶ on a script: it runs once for each of them, as a
+Tick accounts and press ▶ beside a script: it runs once for each of them, as a
 separate `python3` process, into that account's macro-ready window. Press it
 again to stop every run. Stop ends a script wherever it is, a `time.sleep`
 included (it gets SIGTERM, then SIGKILL a second later), and the manager lets

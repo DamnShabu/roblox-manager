@@ -1,5 +1,6 @@
 //! roblox-manager: several Roblox accounts, launched into one server.
 
+mod crash;
 mod services;
 mod state;
 mod ui;
@@ -34,6 +35,7 @@ fn main() -> glib::ExitCode {
         .build();
     app.connect_startup(|app| {
         gtk::Window::set_default_icon_name(APP_ID);
+        crash::install();
         load_style();
         // A macro's hotkey from anywhere: bind a compositor key to
         //   gapplication action io.github.mujo.RobloxManager run-macro "'NAME'"
@@ -68,6 +70,7 @@ fn main() -> glib::ExitCode {
     app.connect_activate(|app| {
         if let Some(w) = window(app) {
             w.present();
+            crash::show_pending(&w);
         }
     });
     // A join link from the browser (the desktop entry handles roblox-player:
@@ -87,7 +90,9 @@ fn main() -> glib::ExitCode {
             eprintln!("roblox-manager: the previous copy was still running; starting anyway");
         }
     }
-    app.run_with_args(&args)
+    let code = app.run_with_args(&args);
+    crash::end();
+    code
 }
 
 /// The window, made (and not yet shown) if there is none.
@@ -99,8 +104,7 @@ fn window(app: &adw::Application) -> Option<Window> {
     let accounts = match AccountStore::load(&services.paths) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("roblox-manager: {e}");
-            app.quit();
+            cannot_start(app, &e.to_string());
             return None;
         }
     };
@@ -108,10 +112,45 @@ fn window(app: &adw::Application) -> Option<Window> {
     Some(Window::new(app, AppState::new(accounts, macros), services))
 }
 
-/// The app's stylesheet, and its dark surfaces while the style is dark --
-/// the split libadwaita itself makes between style.css and style-dark.css.
+/// Say why there is no window, rather than quitting with only a line on a
+/// terminal nobody launching from the desktop has open. Nothing is saved:
+/// the accounts that could not be read are still on disk as they were.
+fn cannot_start(app: &adw::Application, why: &str) {
+    eprintln!("roblox-manager: {why}");
+    let dialog = adw::AlertDialog::new(
+        Some("Roblox Manager Could Not Start"),
+        Some(&format!("{why}\n\nNothing was changed or overwritten.")),
+    );
+    dialog.add_response("close", "_Close");
+    // A dialog with no parent is a window the app does not count; held, the
+    // app stays up until it is answered.
+    let hold = std::cell::RefCell::new(Some(app.hold()));
+    dialog.connect_closed(move |_| {
+        hold.take();
+    });
+    dialog.present(None::<&gtk::Widget>);
+}
+
+/// The app's stylesheet. The app is dark only, so there is no light sheet to
+/// switch between.
 fn load_style() {
+    adw::StyleManager::default().set_color_scheme(adw::ColorScheme::ForceDark);
+    // The design's icons; without them the theme's stand in, so a failure
+    // is said and the app goes on.
+    let icons = rbxmgr_core::Paths::from_env().cache().join("ui-icons");
+    if let Err(e) = ui::icons::install(&icons) {
+        eprintln!("roblox-manager: could not write the app's icons to {}: {e}", icons.display());
+    }
+    // The design's type, the same on every machine; without it the
+    // desktop's fonts stand in.
+    let fonts = rbxmgr_core::Paths::from_env().cache().join("ui-fonts");
+    if let Err(e) = ui::fonts::install(&fonts) {
+        eprintln!("roblox-manager: could not load the app's fonts: {e}");
+    }
     let Some(display) = gdk::Display::default() else { return };
+    // Scrollbars float over the content and fade when idle, whatever the
+    // desktop says: the always-on gutter bar is what the stylesheet replaces.
+    gtk::Settings::for_display(&display).set_gtk_overlay_scrolling(true);
     let base = gtk::CssProvider::new();
     base.load_from_string(include_str!("../resources/style.css"));
     gtk::style_context_add_provider_for_display(
@@ -119,20 +158,4 @@ fn load_style() {
         &base,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
-    let dark = gtk::CssProvider::new();
-    dark.load_from_string(include_str!("../resources/style-dark.css"));
-    let follow = move |style: &adw::StyleManager| {
-        if style.is_dark() {
-            gtk::style_context_add_provider_for_display(
-                &display,
-                &dark,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-            );
-        } else {
-            gtk::style_context_remove_provider_for_display(&display, &dark);
-        }
-    };
-    let style = adw::StyleManager::default();
-    follow(&style);
-    style.connect_dark_notify(follow);
 }

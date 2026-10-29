@@ -1,0 +1,66 @@
+name: Bug report
+description: Something doesn't work the way it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check [Troubleshooting](https://github.com/DamnShabu/roblox-manager/blob/main/docs/guide.md#troubleshooting) first. It may already have the fix.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Tick two accounts
+        2. Pick Blox Fruits as the target
+        3. Click Launch
+  - type: input
+    id: version
+    attributes:
+      label: Manager version
+      description: The main menu's About shows it.
+      placeholder: "0.12.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installed from
+      options:
+        - AppImage
+        - .deb
+        - .rpm
+        - Arch package
+        - Flatpak
+        - NixOS module / nix run
+        - Built from source
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distribution and desktop
+      placeholder: Fedora 44, GNOME 50, Wayland
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        The **Activity** log (Ctrl+L), and for a client problem its log from `~/.cache/rbxmgr/logs`.
+      render: text
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Before you submit
+      options:
+        - label: Nothing above contains a session cookie (`.ROBLOSECURITY`), password or other secret.
+          required: true

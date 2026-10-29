@@ -4,30 +4,36 @@
 mod accounts;
 mod actions;
 mod chrome;
+mod details;
 mod hiding;
+mod inspector;
 mod launching;
 mod links;
 mod macros;
 mod roblox;
 mod scripts;
+mod sidebar;
+mod strip;
+mod topbar;
 mod updates;
 
 pub use self::hiding::can_hide;
+pub use self::launching::monitor_hz;
 pub use self::macros::ReadyClient;
 
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::rc::{Rc, Weak};
+use std::sync::{Arc, Mutex};
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use rbxmgr_core::cordial::Window as ClientWindow;
+use rbxmgr_core::cordial::{Meter, Window as ClientWindow};
 use rbxmgr_core::types::{Profile, UserId};
 use rbxmgr_core::window_state::WindowState;
 
 use self::chrome::Chrome;
-use super::activity;
-use super::widgets::clear;
+use super::table::Columns;
 use crate::services::Services;
 use crate::state::AppState;
 use crate::worker::{self, Logger};
@@ -38,9 +44,6 @@ pub type Redraw = Box<dyn Fn(&AppState)>;
 /// A redraw for a widget that may go away on its own (a dialog's): it says
 /// whether its widget is still there, and is dropped once it is not.
 pub type LiveRedraw = Box<dyn Fn(&AppState) -> bool>;
-
-/// How many activity lines the side pane shows; the log window has the rest.
-const ACTIVITY_SHOWN: usize = 6;
 
 /// A cheap handle on the window; widgets keep one to act on it.
 #[derive(Clone)]
@@ -54,18 +57,25 @@ pub struct Inner {
     ui: Chrome,
     /// Redraw each drawn account's live parts, without rebuilding the rows.
     rows: RefCell<Vec<Redraw>>,
-    /// Redraw each macro's running state.
-    cards: RefCell<Vec<Redraw>>,
     /// Redraw open dialogs' live parts.
     dialogs: RefCell<Vec<LiveRedraw>>,
-    /// The open activity log, which takes each new line as it comes.
-    log_view: RefCell<Option<glib::WeakRef<gtk::ListBox>>>,
+    /// Each row's and band's confirmation, to open from their menus.
+    confirms: RefCell<HashMap<UserId, glib::WeakRef<gtk::Revealer>>>,
+    group_confirms: RefCell<HashMap<String, glib::WeakRef<gtk::Revealer>>>,
     /// The open join link popup.
     link_popup: RefCell<Option<glib::WeakRef<adw::Window>>>,
     /// Whether the window has been shown: one opened for a join link alone
     /// stays hidden, and goes once the link needs nothing more of it.
     seen: Cell<bool>,
     polling: Cell<bool>,
+    /// Whether the sidebar is wanted: a narrow window hides it by itself,
+    /// which is no choice of the user's and is not remembered.
+    sidebar_on: Cell<bool>,
+    /// Why the last look at the running clients failed, while it fails.
+    poll_failing: RefCell<Option<String>>,
+    /// The last reading of what the clients take, for the CPU each spent
+    /// since; the poll's worker reads it.
+    meter: Arc<Mutex<Meter>>,
 }
 
 impl Window {
@@ -98,12 +108,15 @@ impl Window {
                 log,
                 ui,
                 rows: RefCell::default(),
-                cards: RefCell::default(),
                 dialogs: RefCell::default(),
-                log_view: RefCell::default(),
+                confirms: RefCell::default(),
+                group_confirms: RefCell::default(),
                 link_popup: RefCell::default(),
                 seen: Cell::new(false),
                 polling: Cell::new(false),
+                sidebar_on: Cell::new(saved.sidebar),
+                poll_failing: RefCell::default(),
+                meter: Arc::default(),
             }
         });
         let w = Window(inner);
@@ -118,14 +131,24 @@ impl Window {
             None => glib::Propagation::Proceed,
         });
         w.refresh();
+        w.load_missing_headshots();
+        w.load_missing_game_icons();
         w.log("Ready");
         for path in w.state().accounts.set_aside().iter().chain(w.state().macros.set_aside()) {
             w.toast(&format!("A settings file did not read; it was kept as {}", path.display()));
         }
+        if let Some(why) = w.state().macros.unreadable() {
+            w.log(&format!("macros.json could not be read; macros will not save: {why}"));
+            w.toast("Your macros could not be read, so changes to them will not be saved");
+        }
+        // Once now, so a client already playing shows as running when the
+        // window opens rather than at the timer's first tick.
+        w.poll_running();
         let handle = w.weak();
         glib::timeout_add_seconds_local(2, move || match handle.upgrade() {
             Some(w) => {
                 w.poll_running();
+                crate::crash::show_clients(&w);
                 glib::ControlFlow::Continue
             }
             None => glib::ControlFlow::Break,
@@ -146,8 +169,15 @@ impl Window {
     }
 
     pub fn present(&self) {
-        self.0.seen.set(true);
+        let first = !self.0.seen.replace(true);
         self.0.win.present();
+        // First run: the sign-in is ready beside the empty table.
+        if first
+            && self.state().accounts.accounts().is_empty()
+            && self.0.ui.panel.borrow().is_none()
+        {
+            crate::ui::login::AddAccountDialog::open(self, None);
+        }
     }
 
     /// Whether the window has been shown since it was made.
@@ -196,22 +226,65 @@ impl Window {
 
     fn show_log(&self, line: String) {
         let stamp = chrono::Local::now().format("%H:%M").to_string();
+        crate::crash::line(&chrono::Local::now().format("%H:%M:%S").to_string(), &line);
         self.state_mut().log(stamp, line);
-        let log_box = &self.0.ui.log_box;
-        clear(log_box);
         let s = self.state();
-        for entry in s.activity.iter().take(ACTIVITY_SHOWN) {
-            log_box.append(&activity::line(entry, false));
-        }
-        let open = self.0.log_view.borrow().as_ref().and_then(glib::WeakRef::upgrade);
-        if let (Some(list), Some(newest)) = (open, s.activity.first()) {
-            list.prepend(&activity::row(newest));
+        self.0.ui.strip.show(s.activity.first());
+        // The drawer shows what is kept and no more: a macro reporting every
+        // step would otherwise grow it by thousands of rows an hour.
+        self.0.ui.log.prepend(&s.activity);
+    }
+
+    /// Open or close the activity drawer.
+    /// Show or hide the sidebar, and remember it.
+    pub fn toggle_sidebar(&self) {
+        let on = !self.0.sidebar_on.get();
+        self.0.sidebar_on.set(on);
+        self.0.ui.sidebar.root.set_visible(on);
+    }
+
+    pub fn toggle_drawer(&self) {
+        let t = &self.0.ui.strip.log_toggle;
+        t.set_active(!t.is_active());
+    }
+
+    /// The table's columns, which come and go with the table area's width.
+    pub fn columns(&self) -> &Columns {
+        &self.0.ui.cols
+    }
+
+    /// The confirmation under an account's row, for Remove… to open.
+    pub fn register_confirm(&self, id: UserId, r: &gtk::Revealer) {
+        self.0.confirms.borrow_mut().insert(id, r.downgrade());
+    }
+
+    /// The confirmation under a group's band, for Delete group… to open.
+    pub fn register_group_confirm(&self, gid: &str, r: &gtk::Revealer) {
+        self.0.group_confirms.borrow_mut().insert(gid.to_owned(), r.downgrade());
+    }
+
+    /// Open the confirmation under an account's row; false when it has none
+    /// drawn (a search hides it, or its group is folded).
+    pub(super) fn open_confirm(&self, id: UserId) -> bool {
+        let r = self.0.confirms.borrow().get(&id).and_then(glib::WeakRef::upgrade);
+        match r.filter(|r| r.is_mapped()) {
+            Some(r) => {
+                r.set_reveal_child(true);
+                true
+            }
+            None => false,
         }
     }
 
-    /// Let the open log window take new lines.
-    pub fn watch_log(&self, list: &gtk::ListBox) {
-        self.0.log_view.replace(Some(list.downgrade()));
+    pub(super) fn open_group_confirm(&self, gid: &str) -> bool {
+        let r = self.0.group_confirms.borrow().get(gid).and_then(glib::WeakRef::upgrade);
+        match r.filter(|r| r.is_mapped()) {
+            Some(r) => {
+                r.set_reveal_child(true);
+                true
+            }
+            None => false,
+        }
     }
 
     /// Plain text: messages carry labels the user typed and error text,
@@ -252,13 +325,15 @@ impl Window {
         done: impl FnOnce(&Window, T) + 'static,
     ) {
         self.set_busy(true);
-        let weak = self.weak();
+        // Held by the completion, and let go of however it ends: run, or
+        // dropped unrun because the work panicked. Either way the spinner
+        // stops and rename and remove are not refused for good.
+        let busy = Busy(self.weak());
         worker::run(work, move |result| {
-            if let Some(w) = weak.upgrade() {
+            if let Some(w) = busy.0.upgrade() {
                 done(&w, result);
-                w.set_busy(false);
-                w.leave_if_unseen();
             }
+            drop(busy);
         });
     }
 
@@ -270,7 +345,12 @@ impl Window {
             s.busy = if on { s.busy + 1 } else { s.busy.saturating_sub(1) };
             s.busy > 0
         };
-        self.0.ui.spinner.set_visible(busy);
+        let bar = &self.0.ui.busy_bar;
+        if busy && !bar.is_visible() {
+            bar.set_visible(true);
+            self.0.ui.pulse();
+        }
+        bar.set_visible(busy);
     }
 
     // -- redraws ----------------------------------------------------------
@@ -280,14 +360,11 @@ impl Window {
         self.refresh_macros();
     }
 
-    /// Every drawn status: rows, group headers, macro cards, the title.
+    /// Every drawn status: rows, group rows, the sidebar, the title.
     pub fn refresh_states(&self) {
         let s = self.state();
         for redraw in self.0.rows.borrow().iter() {
             redraw(&s);
-        }
-        for card in self.0.cards.borrow().iter() {
-            card(&s);
         }
         // Taken out while they run: a redraw that sets a widget may reach
         // code that watches a new one.
@@ -295,12 +372,17 @@ impl Window {
         dialogs.retain(|redraw| redraw(&s));
         let mut added = self.0.dialogs.replace(dialogs);
         self.0.dialogs.borrow_mut().append(&mut added);
-        self.0.ui.title.set_subtitle(&s.status_line());
+        let ui = &self.0.ui;
+        ui.top.status.set_label(&s.status_line());
+        ui.sidebar.draw(&s);
         let live = !s.running.is_empty() || !s.launching.is_empty() || !s.macro_runs.is_empty();
-        self.0.ui.stop_all.set_visible(s.running.len() >= 2);
+        let selected: Vec<UserId> = s.accounts.selected().iter().map(|a| a.user_id).collect();
+        let sel_live = selected.iter().any(|id| s.running.contains(id) || s.launching.contains(id));
         self.refresh_window_actions(&s);
         drop(s);
         self.set_action_enabled("stop-all", live);
+        self.set_action_enabled("stop-selected", sel_live);
+        self.set_action_enabled("hide-selected", sel_live);
     }
 
     /// Keep `redraw` up to date with the accounts' state until they are next
@@ -308,12 +390,6 @@ impl Window {
     pub(super) fn watch_accounts(&self, redraw: Redraw) {
         redraw(&self.state());
         self.0.rows.borrow_mut().push(redraw);
-    }
-
-    /// Keep `redraw` up to date until the macros are next drawn afresh.
-    pub(super) fn watch_macros(&self, redraw: Redraw) {
-        redraw(&self.state());
-        self.0.cards.borrow_mut().push(redraw);
     }
 
     /// Keep a dialog's widget up to date while `redraw` says it is there.
@@ -331,55 +407,77 @@ impl Window {
         }
         let ids: Vec<UserId> = self.state().accounts.accounts().iter().map(|a| a.user_id).collect();
         let profiles = self.0.services.profiles.clone();
+        let meter = self.0.meter.clone();
         let weak = self.weak();
         worker::run(
-            move || {
-                let live = profiles.running().ok()?;
-                let running: HashSet<UserId> =
-                    ids.into_iter().filter(|id| live.contains(&Profile::of(*id))).collect();
+            worker::catching(move || {
+                let clients = profiles.clients().map_err(|e| e.to_string())?;
+                let running: HashSet<UserId> = ids
+                    .into_iter()
+                    .filter(|id| clients.values().any(|p| *p == Profile::of(*id)))
+                    .collect();
                 // A state file that does not read is a window the manager
                 // cannot hide or show, the same as an engine that writes none.
                 let windows: HashMap<UserId, ClientWindow> = running
                     .iter()
                     .filter_map(|id| Some((*id, profiles.window(&Profile::of(*id)).ok()??)))
                     .collect();
-                Some((running, windows))
-            },
-            move |found| {
+                // What they take is a nicety: a reading that fails leaves
+                // those columns blank, and the rest of the poll stands.
+                let reading =
+                    meter.lock().ok().and_then(|mut m| profiles.usage(&mut m, &clients).ok());
+                Ok((running, windows, reading))
+            }),
+            move |found: Result<Result<_, String>, worker::Crashed>| {
                 let Some(w) = weak.upgrade() else { return };
+                // Back on even after a crash, or no row would update again.
                 w.0.polling.set(false);
-                let Some((running, windows)) = found else { return };
-                let changed = {
-                    let s = w.state();
-                    running != s.running || windows != s.windows
-                };
-                if changed {
-                    let mut s = w.state_mut();
-                    s.running = running;
-                    s.windows = windows;
-                    drop(s);
-                    w.refresh_states();
+                let found = found.unwrap_or_else(|crashed| Err(crashed.to_string()));
+                // Said once when it starts failing and once when it is back,
+                // not every two seconds: a pgrep that cannot run otherwise
+                // leaves every row looking stopped with no hint why.
+                let failing = found.as_ref().err().cloned();
+                let was = w.0.poll_failing.replace(failing.clone());
+                match (&was, &failing) {
+                    (None, Some(why)) => {
+                        w.log(&format!("Could not see which clients are running: {why}"));
+                        w.toast("Could not see which clients are running");
+                    }
+                    (Some(_), None) => w.log("Running clients can be seen again"),
+                    _ => {}
                 }
+                let Ok((running, windows, reading)) = found else { return };
+                let mut s = w.state_mut();
+                s.running = running;
+                s.windows = windows;
+                s.usage = reading
+                    .as_ref()
+                    .map(|r| {
+                        s.running
+                            .iter()
+                            .filter_map(|id| Some((*id, *r.clients.get(&Profile::of(*id))?)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                s.machine = reading.and_then(|r| r.machine);
+                // A client that is gone keeps no level it launched at.
+                let live = s.running.clone();
+                s.launched_as.retain(|id, _| live.contains(id));
+                drop(s);
+                w.refresh_states();
             },
         );
     }
 
     // -- closing ------------------------------------------------------------
-    /// Macros play from this process, so closing stops them: asked first.
-    /// Clients are processes of their own and keep running.
+    /// Macros, launches and updates run in this process, so closing ends
+    /// them: asked first. Clients are processes of their own and keep running.
     fn on_close_request(&self) -> glib::Propagation {
-        let playing = self.state().macro_runs.len();
-        if playing == 0 {
+        let Some(body) = self.state().close_warning() else {
             self.close_now();
             return glib::Propagation::Proceed;
-        }
-        let body = format!(
-            "{} playing into {}. Closing Roblox Manager stops {}; the game clients keep running.",
-            if playing == 1 { "A macro is" } else { "Macros are" },
-            if playing == 1 { "a client" } else { "clients" },
-            if playing == 1 { "it" } else { "them" },
-        );
-        super::confirm::ask(self, "Stop Macros and Close?", &body, "_Close", |w| {
+        };
+        super::confirm::ask(self, "Stop and Close?", &body, "_Close", |w| {
             w.close_now();
             w.0.win.destroy();
         });
@@ -405,11 +503,23 @@ impl Window {
             height,
             maximized: self.0.win.is_maximized(),
             // A narrow window hides the pane by itself: that is no choice.
-            sidebar: self.0.ui.split.is_collapsed() || self.0.ui.split.shows_sidebar(),
+            sidebar: self.0.sidebar_on.get(),
             style: self.style(),
         };
         if let Err(e) = state.save(&self.services().paths.window_state()) {
             eprintln!("roblox-manager: could not remember the window's size: {e}");
+        }
+    }
+}
+
+/// One task the busy count holds for, ended when this is dropped.
+struct Busy(WeakWindow);
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        if let Some(w) = self.0.upgrade() {
+            w.set_busy(false);
+            w.leave_if_unseen();
         }
     }
 }
@@ -444,4 +554,4 @@ pub fn current() -> Option<Window> {
     CURRENT.with_borrow(Clone::clone)
 }
 
-pub use actions::set_accels;
+pub use actions::{SHORTCUTS, set_accels};

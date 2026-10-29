@@ -88,6 +88,33 @@ impl Repeats {
         self.0.iter().map(|r| r.next).min()
     }
 
+    /// Let go of any repeat mid-tap now, ahead of its time; each taps again
+    /// when its next tap is due.
+    pub(super) fn let_go_now(&mut self, input: &mut dyn super::Input) -> io::Result<()> {
+        let mut result = Ok(());
+        let mut i = 0;
+        while i < self.0.len() {
+            if self.0[i].down {
+                match self.0[i].let_go(input) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        self.0.remove(i);
+                        continue;
+                    }
+                    Err(e) => {
+                        self.0.remove(i);
+                        if result.is_ok() {
+                            result = Err(e);
+                        }
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+        }
+        result
+    }
+
     /// Stop every repeat, letting go of the keys of any mid-tap. Every one
     /// is let go of, whatever fails; the first failure is the one returned.
     pub(super) fn release_all(&mut self, input: &mut dyn super::Input) -> io::Result<()> {

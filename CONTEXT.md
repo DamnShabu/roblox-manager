@@ -17,8 +17,14 @@ Its state is *ok* (Roblox last accepted it), *expired* (Roblox refused it --
 **Keyring** -- the desktop Secret Service. Every read or write unlocks it first;
 `forget` is the one best-effort path that never prompts.
 
-**Leader** -- the account that launches first in a group launch. **Followers**
-(the auto-join list) launch after it, into its **server**.
+**Main account** -- the one account pinned at the top of the table, outside
+every group, whose friends Join a friend lists. Stored as `leader` in
+accounts.json, the word earlier versions used: they launched it first and
+sent its **followers** (`follow`, the auto-join list) into its server. That
+launch is gone; the fields stay so older files read the same.
+
+**View** -- what the table shows, picked in the sidebar: every account,
+those needing attention, running, launching or idle, or one group.
 
 **Group** -- a named set of accounts drawn together, with a game to launch
 them into.
@@ -38,8 +44,10 @@ or a friend's server.
 Cordial profile and starting its **client**; its outcome per account is
 launched, expired or failed (a **launch report**).
 
-**Low-power client** -- a client throttled, FIFO-paced, niced and capped, for
-an account along for the ride.
+**Performance level** -- how much of the machine a client may use: Low (10
+FPS, lowest graphics, niced, throttled), Medium (60 FPS, reduced graphics),
+High (the monitor's refresh rate, the game's own graphics) or Max (the
+monitor's refresh rate, top graphics). A **low-power client** is a Low one.
 
 **Hidden window** -- a client's window unmapped at the manager's request
 (SIGUSR1; SIGUSR2 shows it), the game still running behind it at a capped

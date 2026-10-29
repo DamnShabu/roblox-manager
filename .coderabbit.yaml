@@ -1,0 +1,90 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit reviews every pull request into main. CLAUDE.md is read as the
+# coding guidelines; the path instructions below spell out the rules it
+# should hold each area to.
+language: en-GB
+tone_instructions: >-
+  Be direct and specific. Point to the line and say what breaks and for whom.
+  Skip praise and summaries of what the code already says.
+
+reviews:
+  profile: assertive
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  sequence_diagrams: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/Cargo.lock"
+    - "!packaging/flatpak/*cargo-sources.json"
+    - "!docs/screenshots/**"
+    - "!target/**"
+  path_instructions:
+    - path: "crates/**/*.rs"
+      instructions: |
+        - No `unwrap()` or `expect()` outside tests (the workspace denies them; flag any `#[allow]` around them).
+        - No swallowed errors: no `let _ =` on a Result, no `.ok()` dropping an error, no empty match arms on Err. The one allowed exception is `Keyring::forget`, documented as best-effort.
+        - Every seam into the outside world (Secret Service, Roblox web API, GitHub, PackageKit, processes, Wayland) is a trait with a production adapter and a test adapter. Flag new direct calls that bypass one.
+        - Deep modules with small interfaces. Flag new public items that only exist to be called from one place.
+        - No source file over 600 lines (crates/core/tests/size_limit.rs enforces it); a split should follow a real seam.
+        - Use the words in CONTEXT.md (account, group, main account, macro-ready window, target, ...).
+    - path: "crates/core/**"
+      instructions: |
+        crates/core holds every behaviour and must not depend on GTK, libadwaita or anything that draws.
+    - path: "crates/core/src/**"
+      instructions: |
+        Data files in ~/.local/share/rbxmgr/*.json and keyring attributes must stay readable by this
+        version when an earlier version wrote them. Flag renamed or removed serde fields without
+        `#[serde(default)]` / `alias`, and any change to keyring attribute names.
+    - path: "crates/core/src/{update,cordial}/**"
+      instructions: |
+        This code downloads programs and runs them. The manager's own update is checked against
+        the release's SHA256SUMS before it is used; keep it that way, and flag any new download
+        that is run or installed without a checksum check. Drafts and pre-releases are never
+        offered.
+    - path: "crates/core/src/keyring/**"
+      instructions: |
+        Session cookies (.ROBLOSECURITY) live only in the Secret Service. Flag any path that writes
+        them to disk, logs them or puts them in an error message.
+    - path: ".github/workflows/**"
+      instructions: |
+        Least privilege: `permissions` per job, never broader than the job needs. Every action is
+        pinned to a full commit SHA with a version comment. No `${{ }}` of untrusted input inside
+        `run:`; pass it through `env:`. Checkouts set `persist-credentials: false`.
+    - path: "packaging/**"
+      instructions: |
+        Packaging must stay in step with the Nix build (package.nix, cordial/package.nix) as the
+        Flatpak manifest's header describes. Shell scripts use `set -euo pipefail` and quote every
+        expansion.
+    - path: "**/*.md"
+      instructions: |
+        User docs are written for players, not developers: plain words, British spelling, the
+        names the window uses for buttons and menus.
+  tools:
+    shellcheck:
+      enabled: true
+    actionlint:
+      enabled: true
+    zizmor:
+      enabled: true
+    gitleaks:
+      enabled: true
+    osvScanner:
+      enabled: true
+    markdownlint:
+      enabled: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "**/CLAUDE.md"
+      - CONTEXT.md
+      - docs/development.md
+
+chat:
+  auto_reply: true

@@ -1,11 +1,10 @@
-//! The macros pane's Advanced tab: the Python scripts in the advanced
-//! macros folder, and running them on accounts.
+//! Advanced macros: the Python scripts in their folder, listed in the
+//! sidebar, and running them on accounts.
 
 use std::path::{Path, PathBuf};
 
-use adw::prelude::*;
-use gtk::{Align, gio};
-use rbxmgr_core::macros::script::{self, Python, Script, ScriptRun};
+use gtk::gio;
+use rbxmgr_core::macros::script::{self, Python, ScriptRun};
 use rbxmgr_core::macros::sight::Eyes;
 use rbxmgr_core::macros::sight::screencopy::Screencopy;
 use rbxmgr_core::macros::{Input, StopFlag, VirtualInput, nested};
@@ -13,97 +12,23 @@ use rbxmgr_core::types::{Profile, UserId};
 
 use super::Window;
 use crate::state::MacroRun;
-use crate::ui::accounts::leader::placeholder;
 use crate::ui::macros::images;
-use crate::ui::widgets::{self, Btn, boxed_list, clear, plural, toggle_class};
 use crate::worker;
 
 impl Window {
-    /// The scripts in the folder, each with its Run; drawn with the macro
-    /// cards, so their Runs follow what plays where.
+    /// The scripts in the folder, in the sidebar: looked for afresh, since
+    /// they are files anyone may add or remove meanwhile.
     pub(super) fn draw_scripts(&self) {
-        let list_box = &self.0.ui.scripts_box;
-        clear(list_box);
         let dir = self.services().paths.macro_scripts();
-        let list = boxed_list();
-        match script::scripts(&dir) {
-            Ok(found) if !found.is_empty() => {
-                for s in &found {
-                    list.append(&self.script_row(s));
-                }
-            }
-            Ok(_) => list.append(&placeholder(
-                "text-x-script-symbolic",
-                "No advanced macros yet. Put a Python file in the folder and it shows up here, \
-                 one Run for every selected account.",
-            )),
-            Err(e) => list.append(&placeholder(
-                "dialog-warning-symbolic",
-                &format!("Could not read {}: {e}", dir.display()),
-            )),
-        }
-        let open = adw::ButtonRow::builder()
-            .title("Open the Folder")
-            .start_icon_name("folder-open-symbolic")
-            .action_name("win.open-scripts")
-            .build();
-        list.append(&open);
-        list_box.append(&list);
+        let found =
+            script::scripts(&dir).map_err(|e| format!("Could not read {}: {e}", dir.display()));
+        self.0.ui.sidebar.draw_scripts(found);
     }
 
-    fn script_row(&self, s: &Script) -> adw::ActionRow {
-        let about = s.about.clone().unwrap_or_else(|| "A Python script".to_owned());
-        let row =
-            adw::ActionRow::builder().title(&s.name).subtitle(&about).use_markup(false).build();
-        row.set_subtitle_lines(2);
-        let path = s.path.clone();
-        let edit = Btn::new("flat circular")
-            .icon("document-edit-symbolic")
-            .tip("Open it in your editor")
-            .build(self.act(move |w| w.open_file(&path)));
-        edit.button.set_valign(Align::Center);
-        let name = s.name.clone();
-        let run = Btn::new("flat circular")
-            .icon("media-playback-start-symbolic")
-            .build(self.act(move |w| w.run_script(&name)));
-        run.button.set_valign(Align::Center);
-        row.add_suffix(&edit.button);
-        row.add_suffix(&run.button);
-
-        let (shown, run_name) = (row.clone(), script::run_name(&s.name));
-        self.watch_macros(Box::new(move |st| {
-            let playing = st.macro_runs.values().filter(|(_, m)| *m == run_name).count();
-            toggle_class(&shown, "running", playing > 0);
-            shown.set_subtitle(&if playing > 0 {
-                format!("Playing on {}", plural(playing, "client", "clients"))
-            } else {
-                about.clone()
-            });
-            let (stop, n) = match st.macro_run(&run_name) {
-                MacroRun::Start(fresh) => (false, fresh.len()),
-                MacroRun::Stop => (true, 0),
-                MacroRun::Nothing => (false, 0),
-            };
-            run.set_icon(if stop {
-                "media-playback-stop-symbolic"
-            } else {
-                "media-playback-start-symbolic"
-            });
-            run.button.set_sensitive(stop || n > 0);
-            let tip = if stop {
-                "Stop it everywhere it plays".to_owned()
-            } else if n == 0 {
-                "Select the accounts to run it on".to_owned()
-            } else {
-                format!(
-                    "Run it for {}",
-                    plural(n, "selected account's client", "selected accounts' clients")
-                )
-            };
-            run.button.set_tooltip_text(Some(&tip));
-            widgets::name(&run.button, if stop { "Stop" } else { "Run" });
-        }));
-        row
+    /// A script in the editor the desktop opens Python files with.
+    pub(super) fn edit_script(&self, name: &str) {
+        let path = self.services().paths.macro_scripts().join(script::run_name(name));
+        self.open_file(&path);
     }
 
     /// The advanced macros folder in the file manager, made (with an
@@ -130,7 +55,7 @@ impl Window {
 
     /// Run: the script on every selected account not already running it;
     /// once every selected one runs it, Stop wherever it runs.
-    fn run_script(&self, name: &str) {
+    pub(super) fn run_script(&self, name: &str) {
         let run_name = script::run_name(name);
         let chosen = match self.state().macro_run(&run_name) {
             MacroRun::Start(chosen) => chosen,

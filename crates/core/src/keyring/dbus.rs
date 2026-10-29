@@ -26,6 +26,12 @@ const PROMPT: &str = "org.freedesktop.Secret.Prompt";
 /// needed it gives up.
 const PROMPT_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// How long one call to the service may take. Every call here answers at
+/// once (an unlock hands back a prompt rather than waiting on the user), so
+/// one that does not is a hung keyring daemon, which would otherwise park a
+/// launch or a session check for good.
+const CALL_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// A secret as the Secret Service passes it: (session, parameters, value,
 /// content type).
 type Secret = (OwnedObjectPath, Vec<u8>, Vec<u8>, String);
@@ -37,7 +43,11 @@ pub struct DbusSecrets {
 
 impl DbusSecrets {
     pub fn connect() -> Result<Self, KeyringError> {
-        let conn = Connection::session().map_err(service)?;
+        let conn = zbus::blocking::connection::Builder::session()
+            .map_err(service)?
+            .method_timeout(CALL_TIMEOUT)
+            .build()
+            .map_err(service)?;
         Ok(DbusSecrets { conn })
     }
 
@@ -75,6 +85,24 @@ impl DbusSecrets {
         let (unlocked, _locked): (Vec<OwnedObjectPath>, Vec<OwnedObjectPath>) =
             self.service()?.call("SearchItems", &(as_dict(attrs),)).map_err(service)?;
         Ok(unlocked)
+    }
+
+    /// A delete the service answers with a prompt has not happened: the item
+    /// is still there, so it is an error rather than a quiet success.
+    fn delete_items(
+        &self,
+        items: impl IntoIterator<Item = OwnedObjectPath>,
+    ) -> Result<(), KeyringError> {
+        for item in items {
+            let prompt: OwnedObjectPath =
+                self.proxy(item.as_ref(), ITEM)?.call("Delete", &()).map_err(service)?;
+            if prompt.as_str() != "/" {
+                return Err(KeyringError::Locked(
+                    "the keyring is locked -- unlock it and try again".into(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Run a prompt the service handed back, and wait for its answer.
@@ -121,12 +149,15 @@ impl Secrets for DbusSecrets {
         Ok(secrets.get(&item).map(|(_, _, value, _)| String::from_utf8_lossy(value).into_owned()))
     }
 
-    /// Existing matches are deleted first rather than left to CreateItem's
-    /// replace: that only replaces an item with the *same* attribute set, and
-    /// an entry secret-tool wrote carries an extra xdg:schema, so it would
-    /// survive beside the new one as a stale second answer to every lookup.
+    /// The new item is created before any old one goes, so a store that
+    /// fails (a locked keyring, a D-Bus error) leaves the session that was
+    /// there rather than none. Other matches are then deleted rather than
+    /// left to CreateItem's replace: that only replaces an item with the
+    /// *same* attribute set, and an entry secret-tool wrote carries an extra
+    /// xdg:schema, so it would survive beside the new one as a stale second
+    /// answer to every lookup.
     fn store(&self, attrs: &Attrs, label: &str, secret: &str) -> Result<(), KeyringError> {
-        self.clear(attrs)?;
+        let before = self.search(attrs)?;
         let collection = self.default_collection()?;
         let props: HashMap<&str, Value> = HashMap::from([
             ("org.freedesktop.Secret.Item.Label", Value::from(label)),
@@ -138,7 +169,7 @@ impl Secrets for DbusSecrets {
             secret.as_bytes().to_vec(),
             "text/plain; charset=utf8".to_owned(),
         );
-        let (_item, prompt): (OwnedObjectPath, OwnedObjectPath) = self
+        let (item, prompt): (OwnedObjectPath, OwnedObjectPath) = self
             .proxy(collection.as_ref(), COLLECTION)?
             .call("CreateItem", &(props, value, true))
             .map_err(service)?;
@@ -147,22 +178,11 @@ impl Secrets for DbusSecrets {
                 "the keyring is locked -- unlock it and try again".into(),
             ));
         }
-        Ok(())
+        self.delete_items(before.into_iter().filter(|old| *old != item))
     }
 
-    /// A delete the service answers with a prompt has not happened: the item
-    /// is still there, so it is an error rather than a quiet success.
     fn clear(&self, attrs: &Attrs) -> Result<(), KeyringError> {
-        for item in self.search(attrs)? {
-            let prompt: OwnedObjectPath =
-                self.proxy(item.as_ref(), ITEM)?.call("Delete", &()).map_err(service)?;
-            if prompt.as_str() != "/" {
-                return Err(KeyringError::Locked(
-                    "the keyring is locked -- unlock it and try again".into(),
-                ));
-            }
-        }
-        Ok(())
+        self.delete_items(self.search(attrs)?)
     }
 
     /// The login keyring is not necessarily unlocked: on a machine that

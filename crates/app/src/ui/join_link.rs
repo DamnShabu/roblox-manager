@@ -113,7 +113,7 @@ impl LinkPopup {
             count: lbl("", "caption dimmed"),
             select_all: Btn::new("flat").text("Select all").build(|| {}),
             join: Btn::new("suggested-action pill")
-                .icon("media-playback-start-symbolic")
+                .icon("rm-play-symbolic")
                 .text("Join")
                 .build(|| {}),
             remember: gtk::CheckButton::with_label("Remember these accounts for future links"),
@@ -143,7 +143,7 @@ impl LinkPopup {
         let app_icon = gtk::Image::from_icon_name(if installed {
             crate::APP_ID
         } else {
-            "input-gaming-symbolic"
+            "rm-gamepad-symbolic"
         });
         app_icon.set_pixel_size(28);
         let heading = hbox!(
@@ -164,18 +164,12 @@ impl LinkPopup {
 
         // -- the game ------------------------------------------------------------
         let kind = match self.link.server {
-            Some(_) => hbox!(
-                4,
-                "tag",
-                gtk::Image::from_icon_name("network-server-symbolic"),
-                lbl("Server", "")
-            ),
-            None => hbox!(
-                4,
-                "tag",
-                gtk::Image::from_icon_name("input-gaming-symbolic"),
-                lbl("Game", "")
-            ),
+            Some(_) => {
+                hbox!(4, "tag", gtk::Image::from_icon_name("rm-server-symbolic"), lbl("Server", ""))
+            }
+            None => {
+                hbox!(4, "tag", gtk::Image::from_icon_name("rm-gamepad-symbolic"), lbl("Game", ""))
+            }
         };
         kind.set_halign(Align::Start);
         let known = w.state().game_name(&self.link.place).map(str::to_owned);

@@ -50,6 +50,16 @@ pub enum GithubError {
 
 /// A release's file can be a few hundred megabytes, on whatever line there is.
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(3600);
+/// The newest release's description is a few kilobytes: a check that has
+/// not had it in this long is stuck (a captive portal, a proxy that holds
+/// the connection open), and would otherwise hold Update for the hour above.
+const ASK_TIMEOUT: Duration = Duration::from_secs(30);
+/// No host worth waiting for takes this long to accept a connection.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+/// Far past any file a release here ships (the largest is the Flatpak
+/// bundle, well under a gigabyte): a download growing past it is not one,
+/// and stops before it fills the disk.
+const LARGEST_DOWNLOAD: u64 = 2 << 30;
 
 /// HTTPS to GitHub through ureq.
 pub struct GithubClient {
@@ -61,6 +71,7 @@ impl Default for GithubClient {
         let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .timeout_global(Some(DOWNLOAD_TIMEOUT))
+            .timeout_connect(Some(CONNECT_TIMEOUT))
             // GitHub's API turns away a request without one.
             .user_agent(concat!("roblox-manager/", env!("CARGO_PKG_VERSION")))
             .build();
@@ -73,7 +84,14 @@ impl GithubClient {
     /// are not "latest" to GitHub, so they are never offered.
     pub fn latest(&self, repo: &str) -> Result<Release, GithubError> {
         let url = format!("https://api.github.com/repos/{repo}/releases/latest");
-        let mut resp = self.agent.get(&url).call().map_err(offline)?;
+        let mut resp = self
+            .agent
+            .get(&url)
+            .config()
+            .timeout_global(Some(ASK_TIMEOUT))
+            .build()
+            .call()
+            .map_err(offline)?;
         let status = resp.status().as_u16();
         if status != 200 {
             return Err(GithubError::Status(status));
@@ -92,7 +110,7 @@ impl GithubClient {
         let mut file = File::create(to)
             .map_err(|e| GithubError::Io(format!("could not create {}: {e}", to.display())))?;
         let (_, body) = resp.into_parts();
-        io::copy(&mut body.into_reader(), &mut file)
+        io::copy(&mut body.into_with_config().limit(LARGEST_DOWNLOAD).reader(), &mut file)
             .map_err(|e| GithubError::BrokenOff(e.to_string()))?;
         file.sync_all()
             .map_err(|e| GithubError::Io(format!("could not write {}: {e}", to.display())))

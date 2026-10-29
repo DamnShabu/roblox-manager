@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::sync::{Condvar, Mutex};
 
 use super::*;
+use crate::cordial::Performance;
 use crate::cordial::process::recording::Recording;
 use crate::keyring::MemorySecrets;
 use crate::paths::Paths;
@@ -136,13 +137,14 @@ fn world(n: u64, sessions: &[(&str, &str)], running: &[u64]) -> World {
     let pacing = Pacing {
         leader_timeout: Duration::from_secs(9),
         poll: Duration::from_secs(3),
+        glance: Duration::from_secs(3),
         sleep: Arc::new(move |d| {
             let mut slept = slept2.lock().unwrap();
             slept.push(d);
-            if let Some((n, flag)) = &*stop2.lock().unwrap() {
-                if slept.len() == *n {
-                    flag.set();
-                }
+            if let Some((n, flag)) = &*stop2.lock().unwrap()
+                && slept.len() == *n
+            {
+                flag.set();
             }
         }),
     };
@@ -249,6 +251,14 @@ fn an_account_already_running_is_skipped_and_costs_no_wait() {
 }
 
 #[test]
+fn which_accounts_are_running_is_looked_up_once_per_launch() {
+    let w = world(5, &[], &[2]);
+    w.launch(request(&[1, 2, 3, 4, 5], Mode::Each, Some("77"), None));
+    let pgreps = w.runner.ran().iter().filter(|argv| argv.iter().any(|a| a == "pgrep")).count();
+    assert_eq!(pgreps, 1);
+}
+
+#[test]
 fn expired_and_failed_accounts_are_reported_and_the_rest_still_launch() {
     let w = world(3, &[("a1", "expired"), ("a2", "offline")], &[]);
     let r = w.launch(request(&[1, 2, 3], Mode::Each, Some("77"), None));
@@ -279,6 +289,20 @@ fn a_group_waits_for_the_leaders_server_and_the_rest_join_it() {
 }
 
 #[test]
+fn a_leader_that_names_its_server_in_its_log_is_followed_there_without_presence() {
+    let w = world(3, &[], &[]);
+    let job = "6baeb082-1c5f-4e0b-9c4a-0123456789ab";
+    *w.runner.child_output.lock().unwrap() =
+        Some(format!("  pumping the looper\n[cordial] game: joining server {job} of place 88\n"));
+    let r = w.launch(request(&[1, 2, 3], Mode::Group, Some("77"), None));
+    assert_eq!(launched(&r), [1, 2, 3]);
+    assert_eq!(r.server.as_ref().map(ServerId::as_str), Some(job));
+    assert_eq!(w.started()[1].1, link("88", Some(job)), "followers go where the log said");
+    assert_eq!(*w.roblox.presence_asks.lock().unwrap(), 0, "presence was never needed");
+    assert!(w.slept.lock().unwrap().is_empty(), "nobody waited a poll for it");
+}
+
+#[test]
 fn a_leader_already_running_is_looked_up_at_once() {
     let w = world(2, &[], &[1]);
     w.roblox
@@ -304,11 +328,24 @@ fn with_no_server_in_time_the_followers_get_their_own() {
 
 #[test]
 fn a_failed_leader_launches_nobody_else() {
-    let w = world(2, &[("a1", "expired")], &[]);
-    let r = w.launch(request(&[1, 2], Mode::Group, Some("77"), None));
+    let w = world(3, &[("a1", "expired")], &[]);
+    let r = w.launch(request(&[1, 2, 3], Mode::Group, Some("77"), None));
     assert!(r.launched.is_empty());
     assert_eq!(r.expired, [UserId(1)]);
     assert!(w.logged("nobody has a server to join"));
+    // The followers are in the report, not silently left out of it.
+    let failed: Vec<u64> = r.failed.iter().map(|(id, _)| id.0).collect();
+    assert_eq!(failed, [2, 3]);
+    assert!(r.failed[0].1.contains("a1"), "{:?}", r.failed);
+}
+
+#[test]
+fn a_group_sent_to_the_home_screen_does_not_wait_for_a_server() {
+    let w = world(2, &[], &[]);
+    let r = w.launch(request(&[1, 2], Mode::Group, None, None));
+    assert_eq!(launched(&r), [1, 2]);
+    assert_eq!(*w.roblox.presence_asks.lock().unwrap(), 0);
+    assert!(w.slept.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -340,7 +377,8 @@ fn no_build_is_an_error_and_nothing_starts() {
 fn a_started_client_gets_its_accounts_options() {
     let w = world(1, &[], &[]);
     let mut req = request(&[1], Mode::Each, Some("77"), None);
-    req.accounts[0].opts = ClientOpts { nested: true, low_power: true };
+    req.accounts[0].opts =
+        ClientOpts { nested: true, performance: Performance::Low, display_hz: None };
     w.launch(req);
     let argv = &w.runner.spawned()[0].0;
     assert_eq!(&argv[..2], ["cage", "--"]);

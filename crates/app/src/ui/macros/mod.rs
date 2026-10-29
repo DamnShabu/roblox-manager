@@ -1,10 +1,10 @@
-//! The macros pane: cards, the editor, the help page.
+//! The macros: the editor, the help page, and how a step is drawn.
 
 mod area;
-pub mod card;
 mod clients;
 pub mod editor;
 pub mod help;
 pub mod images;
+pub mod kinds;
 pub mod point;
 mod record;

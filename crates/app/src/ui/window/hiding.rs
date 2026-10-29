@@ -22,6 +22,27 @@ impl Window {
         self.signal_windows(ids, true);
     }
 
+    /// The command bar's Hide: hide the selected windows that can be; when
+    /// none can, show the selected ones that are hidden.
+    pub fn hide_selected(&self) {
+        let (hide, show) = {
+            let s = self.state();
+            let sel: Vec<UserId> = s.accounts.selected().iter().map(|a| a.user_id).collect();
+            let hide: Vec<UserId> = sel.iter().copied().filter(|id| can_hide(&s, *id)).collect();
+            let show: Vec<UserId> = sel
+                .iter()
+                .copied()
+                .filter(|id| s.windows.get(id) == Some(&ClientWindow::Hidden))
+                .collect();
+            (hide, show)
+        };
+        if hide.is_empty() {
+            self.signal_windows(show, false);
+        } else {
+            self.signal_windows(hide, true);
+        }
+    }
+
     pub fn on_show_all(&self) {
         let ids = hidden(&self.state());
         self.signal_windows(ids, false);

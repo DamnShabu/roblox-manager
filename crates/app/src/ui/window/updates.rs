@@ -66,7 +66,7 @@ impl Window {
 
     fn show_available(&self) {
         let s = self.state();
-        let button = &self.0.ui.update_button;
+        let button = &self.0.ui.top.update.button;
         // An app version already installed waits only for Restart.
         let app_left = s.available.app.is_some() && s.available.app != s.restart_to;
         button.set_visible(app_left || s.available.stacked.is_some());

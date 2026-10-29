@@ -89,6 +89,28 @@ impl Keyring {
         Ok(Cookie::new(value))
     }
 
+    /// Several accounts' sessions, in the order asked. A keyring that stays
+    /// locked (its prompt dismissed or unanswered) fails the rest without
+    /// asking again: read one by one, every account would put up a prompt
+    /// of its own, each waited on for minutes.
+    pub fn cookies<'a>(
+        &self,
+        labels: impl IntoIterator<Item = &'a Label>,
+    ) -> Vec<Result<Cookie, KeyringError>> {
+        let mut locked: Option<KeyringError> = None;
+        labels
+            .into_iter()
+            .map(|label| match &locked {
+                Some(e) => Err(e.clone()),
+                None => self.cookie(label).inspect_err(|e| {
+                    if matches!(e, KeyringError::Locked(_)) {
+                        locked = Some(e.clone());
+                    }
+                }),
+            })
+            .collect()
+    }
+
     pub fn set_cookie(&self, label: &Label, cookie: &Cookie) -> Result<(), KeyringError> {
         self.put(&account_attrs(label), &format!("rbxmgr {label}"), cookie.expose())
     }
@@ -191,6 +213,33 @@ mod tests {
         let before = mem.unlock_count();
         k.forget(&some_attrs());
         assert_eq!(mem.unlock_count(), before, "forget must never prompt");
+    }
+
+    #[test]
+    fn a_keyring_that_stays_locked_is_asked_once_for_many_cookies() {
+        let mem = Arc::new(MemorySecrets::locked("the prompt was dismissed"));
+        let k = Keyring::new(Box::new(Arc::clone(&mem)));
+        let labels = [label("a"), label("b"), label("c")];
+        let got = k.cookies(&labels);
+        let refused = KeyringError::Locked("the prompt was dismissed".into());
+        assert_eq!(got, vec![Err(refused.clone()), Err(refused.clone()), Err(refused)]);
+        assert_eq!(mem.unlock_count(), 1, "one prompt, not one per account");
+    }
+
+    #[test]
+    fn many_cookies_read_in_order_with_a_missing_one_named() {
+        let (k, _) = keyring();
+        k.set_cookie(&label("a"), &Cookie::new("ca")).unwrap();
+        k.set_cookie(&label("c"), &Cookie::new("cc")).unwrap();
+        let got = k.cookies(&[label("a"), label("b"), label("c")]);
+        assert_eq!(
+            got,
+            vec![
+                Ok(Cookie::new("ca")),
+                Err(KeyringError::NoCookie(label("b"))),
+                Ok(Cookie::new("cc"))
+            ]
+        );
     }
 
     #[test]

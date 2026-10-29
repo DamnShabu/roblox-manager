@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
+use crate::cordial::Performance;
 use crate::json_file;
 use crate::paths::Paths;
 use crate::roblox::{AccountGames, Game, merge_favorites};
@@ -30,10 +31,12 @@ pub enum AccountError {
     LabelTaken(String),
     #[error("no such account")]
     NoSuchAccount,
-    #[error("the leader can't be in a group")]
+    #[error("the main account stays out of groups")]
     LeaderInGroup,
     #[error("could not save: {0}")]
     Io(String),
+    #[error("could not read the accounts: {0}")]
+    Unreadable(String),
 }
 
 /// What is known about an account's stored session right now.
@@ -69,8 +72,12 @@ impl AccountStore {
     /// layout (the first selected account led, the other selected followed) is
     /// carried over and both files are written.
     pub fn load(paths: &Paths) -> Result<Self, AccountError> {
-        let accounts = json_file::read_owned::<Vec<Value>>(&paths.accounts());
-        let groups = json_file::read_owned::<Vec<Value>>(&paths.groups());
+        // An unreadable file is an error, not an empty list: the first save
+        // would otherwise replace every account with nothing.
+        let unreadable = |e: std::io::Error| AccountError::Unreadable(e.to_string());
+        let accounts =
+            json_file::read_owned::<Vec<Value>>(&paths.accounts()).map_err(unreadable)?;
+        let groups = json_file::read_owned::<Vec<Value>>(&paths.groups()).map_err(unreadable)?;
         let set_aside: Vec<PathBuf> =
             accounts.set_aside.iter().chain(&groups.set_aside).cloned().collect();
         // A groups file that was set aside existed: no first-run migration.
@@ -82,16 +89,18 @@ impl AccountStore {
             model::split_entries(groups.unwrap_or_default());
         let (groups, empty): (Vec<Group>, Vec<Group>) =
             groups.into_iter().partition(|g| !g.id.is_empty());
+        let empty = empty
+            .iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| AccountError::Unreadable(e.to_string()))?;
         let mut store = AccountStore {
             accounts_file: paths.accounts(),
             groups_file: paths.groups(),
             accounts,
             groups,
             unread_accounts,
-            unread_groups: unread_groups
-                .into_iter()
-                .chain(empty.iter().filter_map(|g| serde_json::to_value(g).ok()))
-                .collect(),
+            unread_groups: unread_groups.into_iter().chain(empty).collect(),
             checking: HashSet::new(),
             set_aside,
         };
@@ -109,17 +118,25 @@ impl AccountStore {
     }
 
     pub fn save(&self) -> Result<(), AccountError> {
-        fn entries<T: serde::Serialize>(items: &[T], unread: &[Value]) -> Vec<Value> {
-            items
+        // An entry that does not serialize fails the save rather than
+        // quietly going missing from the file.
+        fn entries<T: serde::Serialize>(
+            items: &[T],
+            unread: &[Value],
+        ) -> Result<Vec<Value>, AccountError> {
+            let mut out = items
                 .iter()
-                .filter_map(|i| serde_json::to_value(i).ok())
-                .chain(unread.iter().cloned())
-                .collect()
+                .map(serde_json::to_value)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| AccountError::Io(e.to_string()))?;
+            out.extend(unread.iter().cloned());
+            Ok(out)
         }
         let io = |e: std::io::Error| AccountError::Io(e.to_string());
-        json_file::write(&self.accounts_file, &entries(&self.accounts, &self.unread_accounts))
+        json_file::write(&self.accounts_file, &entries(&self.accounts, &self.unread_accounts)?)
             .map_err(io)?;
-        json_file::write(&self.groups_file, &entries(&self.groups, &self.unread_groups)).map_err(io)
+        json_file::write(&self.groups_file, &entries(&self.groups, &self.unread_groups)?)
+            .map_err(io)
     }
 
     /// In list order.
@@ -254,9 +271,9 @@ impl AccountStore {
         }
     }
 
-    pub fn set_low_power(&mut self, id: UserId, on: bool) {
+    pub fn set_performance(&mut self, id: UserId, level: Performance) {
         if let Ok(a) = self.get_mut(id) {
-            a.low_power = on;
+            a.set_performance(level);
         }
     }
 

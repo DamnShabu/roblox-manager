@@ -35,7 +35,7 @@ impl MacroDialog {
 
         let button = |ic: &str, tip: &str, on: bool, act: Act| {
             let me = Rc::downgrade(self);
-            let b = Btn::new("flat circular").icon(ic).tip(tip).build(move || {
+            let b = Btn::new("ib sm").icon(ic).tip(tip).build(move || {
                 if let Some(d) = me.upgrade() {
                     act(&d);
                 }
@@ -49,29 +49,29 @@ impl MacroDialog {
             8,
             "",
             lbl(&format!("{number}"), "number dimmed").xalign(1.0),
-            icon("document-open-recent-symbolic").css("dimmed"),
+            icon("rm-timeline-symbolic").css("dimmed"),
             lbl("Timeline", "heading"),
             lbl(&about, "dimmed").hexpand().xalign(0.0),
             button(
-                "document-edit-symbolic",
+                "rm-pencil-symbolic",
                 "Edit its steps as text",
                 true,
                 Box::new(|d| d.view.set_active_name(Some("text")))
             ),
             button(
-                "go-up-symbolic",
+                "rm-chev-up-symbolic",
                 "Move up",
                 number > 1,
                 Box::new(move |d| d.shift(start, true))
             ),
             button(
-                "go-down-symbolic",
+                "rm-chev-down-symbolic",
                 "Move down",
                 number < count,
                 Box::new(move |d| d.shift(start, false))
             ),
             button(
-                "user-trash-symbolic",
+                "rm-trash-symbolic",
                 "Remove the timeline and its steps",
                 true,
                 Box::new(move |d| {

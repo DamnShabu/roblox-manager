@@ -69,6 +69,13 @@ impl AccountStore {
         self.groups.iter().find(|g| g.id == id).map(|g| g.id.as_str())
     }
 
+    /// A group's members as drawn under it, in list order. The leader keeps
+    /// its group (see [`AccountStore::make_leader`]) but is drawn, launched
+    /// and stopped as the leader, never as one of the group.
+    pub fn group_members(&self, gid: &str) -> Vec<&Account> {
+        self.accounts.iter().filter(|a| !a.leader && self.group_of(a) == Some(gid)).collect()
+    }
+
     /// Everyone but the leader, as drawn: group by group, then the
     /// ungrouped, each in list order.
     pub fn visual_order(&self) -> Vec<&Account> {
@@ -140,6 +147,7 @@ impl AccountStore {
             name: "New group".into(),
             place_id: None,
             game: None,
+            universe_id: None,
             open: true,
             extra: Default::default(),
         });
@@ -171,6 +179,18 @@ impl AccountStore {
     pub fn set_group_game(&mut self, id: &str, game: Option<(PlaceId, String)>) {
         if let Some(g) = self.groups.iter_mut().find(|g| g.id == id) {
             (g.place_id, g.game) = game.map_or((None, None), |(p, n)| (Some(p), Some(n)));
+            // Another game's icon is filed elsewhere: looked up again.
+            g.universe_id = None;
+        }
+    }
+
+    /// Remember the universe a group's game files its icon under, when it is
+    /// still the game it was looked up for.
+    pub fn set_group_universe(&mut self, id: &str, place: &PlaceId, universe: &str) {
+        if let Some(g) =
+            self.groups.iter_mut().find(|g| g.id == id && g.place_id.as_ref() == Some(place))
+        {
+            g.universe_id = Some(universe.to_owned());
         }
     }
 
@@ -217,6 +237,19 @@ mod tests {
         assert_eq!(names(s.followers()), ["alt2", "alt4"]);
         s.migrate_layout();
         assert_eq!(names(s.followers()), ["alt2", "alt4"], "it only happens once");
+    }
+
+    #[test]
+    fn a_leader_keeps_its_group_but_is_not_one_of_its_members() {
+        let mut s = store(&[("a", true), ("b", true), ("c", true)], &[("g", "G")]);
+        for id in [1, 2] {
+            s.set_group(UserId(id), Some("g")).unwrap();
+        }
+        s.make_leader(UserId(1));
+        assert_eq!(s.get(UserId(1)).unwrap().group.as_deref(), Some("g"));
+        assert_eq!(names(s.group_members("g")), ["b"]);
+        s.make_leader(UserId(3));
+        assert_eq!(names(s.group_members("g")), ["a", "b"], "back in it once another leads");
     }
 
     #[test]
@@ -318,5 +351,18 @@ mod tests {
         s.delete_group("g1");
         assert_eq!(s.get(UserId(3)).unwrap().group, None);
         assert_eq!(names(s.visual_order()), ["alt2", "alt3", "alt4"]);
+    }
+
+    #[test]
+    fn a_groups_icon_universe_is_kept_only_for_the_game_it_was_looked_up_for() {
+        let mut s = grouped();
+        let gpo = PlaceId::parse("1730877806").unwrap();
+        s.set_group_game("g1", Some((gpo.clone(), "GPO".into())));
+        s.set_group_universe("g1", &PlaceId::parse("1").unwrap(), "9");
+        assert_eq!(s.groups()[0].universe_id, None, "looked up for another game");
+        s.set_group_universe("g1", &gpo, "648454481");
+        assert_eq!(s.groups()[0].universe_id.as_deref(), Some("648454481"));
+        s.set_group_game("g1", Some((PlaceId::parse("2").unwrap(), "Other".into())));
+        assert_eq!(s.groups()[0].universe_id, None, "a new game is looked up again");
     }
 }

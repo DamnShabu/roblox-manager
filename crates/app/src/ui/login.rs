@@ -16,8 +16,10 @@ use rbxmgr_core::roblox::quick_login::{CONFIRM_URL, TIMEOUT};
 use rbxmgr_core::roblox::{QuickLoginError, QuickLoginEvents, QuickLoginStatus, quick_login};
 use rbxmgr_core::types::{Cookie, User};
 
-use super::widgets::{Btn, Fluent, IconButton, LabelFluent, lbl, sentence, toggle_class};
+use super::ds::{self, Variant};
+use super::widgets::{Fluent, LabelFluent, lbl, sentence, toggle_class};
 use super::window::{WeakWindow, Window};
+use crate::ui::panel::Panel;
 use crate::worker::Logger;
 
 /// What the login worker tells the dialog, for the code it was started for.
@@ -28,7 +30,7 @@ enum Event {
 
 pub struct AddAccountDialog {
     window: WeakWindow,
-    dialog: adw::Dialog,
+    dialog: Panel,
     /// The account being signed in again, if any.
     relogin: Option<Account>,
     /// Which code is current; older workers stop at their next poll.
@@ -41,24 +43,24 @@ pub struct AddAccountDialog {
     step2: gtk::Label,
     code_a: gtk::Label,
     code_b: gtk::Label,
-    copy: IconButton,
+    copy: ds::Button,
     expiry: gtk::Label,
     bar: gtk::ProgressBar,
-    pulse: adw::Spinner,
+    pulse: gtk::ProgressBar,
     status: gtk::Label,
     status_box: gtk::Box,
+    /// Where a new account goes once added.
+    put_in: RefCell<Option<String>>,
 }
 
 impl AddAccountDialog {
     pub fn open(w: &Window, relogin: Option<Account>) {
-        let dialog = adw::Dialog::builder()
-            .title(if relogin.is_some() { "Sign In Again" } else { "Add Account" })
-            .content_width(500)
-            .build();
+        let dialog = Panel::new(if relogin.is_some() { "Sign in again" } else { "Add account" })
+            .with_sub("Roblox Quick Login");
         let (tx, rx) = async_channel::unbounded();
         let d = Rc::new_cyclic(|me: &std::rc::Weak<AddAccountDialog>| {
             let me = me.clone();
-            let copy = Btn::new("").text("Copy").icon("edit-copy-symbolic").build(move || {
+            let copy = ds::Button::new("Copy", Variant::Secondary, true).on(move || {
                 if let Some(d) = me.upgrade() {
                     d.copy_code();
                 }
@@ -78,11 +80,12 @@ impl AddAccountDialog {
                 code_a: lbl("···", "login-code").selectable(),
                 code_b: lbl("···", "login-code").selectable(),
                 copy,
-                expiry: lbl("Expires in –:––", "caption dimmed numeric").hexpand(),
-                bar: gtk::ProgressBar::builder().css_classes(["expiry"]).fraction(1.0).build(),
-                pulse: adw::Spinner::new(),
-                status: lbl("Requesting a code…", "").wrapped().hexpand(),
-                status_box: hbox!(10, "login-status"),
+                expiry: lbl("Expires in –:––", "t-caption muted").hexpand(),
+                bar: gtk::ProgressBar::builder().css_classes(["thin", "ok"]).fraction(1.0).build(),
+                pulse: gtk::ProgressBar::builder().css_classes(["thin", "wait"]).build(),
+                status: lbl("Requesting a code…", "t-label").wrapped().hexpand(),
+                status_box: vbox!(8, ""),
+                put_in: RefCell::default(),
             }
         });
         d.assemble();
@@ -111,31 +114,34 @@ impl AddAccountDialog {
             held.take();
         });
         d.request_code();
-        d.dialog.present(Some(w.gtk_window()));
+        d.dialog.present(w);
     }
 
     fn assemble(self: &Rc<Self>) {
         let me = Rc::downgrade(self);
-        let open = Btn::new("suggested-action")
-            .text("Open Quick Login")
-            .icon("adw-external-link-symbolic")
-            .tip("Opens roblox.com/crossdevicelogin with no code in the address: you type the code")
-            .build(move || {
-                if let Some(d) = me.upgrade() {
-                    d.open_page();
-                }
-            });
+        let open = ds::Button::with_icons(
+            "Open Quick Login",
+            Variant::Primary,
+            true,
+            None,
+            Some("arrow-right"),
+        )
+        .tip("Opens roblox.com/crossdevicelogin with no code in the address: you type the code")
+        .on(move || {
+            if let Some(d) = me.upgrade() {
+                d.open_page();
+            }
+        });
         let weak = self.window.clone();
         let link =
-            Btn::new("flat").text("Copy Link").icon("edit-copy-symbolic").tip(CONFIRM_URL).build(
-                move || {
-                    if let Some(w) = weak.upgrade() {
-                        w.gtk_window().clipboard().set_text(CONFIRM_URL);
-                        w.toast("Link copied");
-                    }
-                },
-            );
+            ds::Button::new("Copy link", Variant::Ghost, true).tip(CONFIRM_URL).on(move || {
+                if let Some(w) = weak.upgrade() {
+                    w.gtk_window().clipboard().set_text(CONFIRM_URL);
+                    w.toast("Link copied");
+                }
+            });
         let links = hbox!(8, "", open.button, link.button);
+        self.step1.add_css_class("now");
         let step1 = step(
             &self.step1,
             "Open Quick Login in a browser",
@@ -145,37 +151,38 @@ impl AddAccountDialog {
 
         let me = Rc::downgrade(self);
         let new_code =
-            Btn::new("flat").text("New Code").icon("view-refresh-symbolic").build(move || {
-                if let Some(d) = me.upgrade() {
-                    d.request_code();
-                }
-            });
+            ds::Button::with_icons("New code", Variant::Ghost, true, Some("refresh"), None).on(
+                move || {
+                    if let Some(d) = me.upgrade() {
+                        d.request_code();
+                    }
+                },
+            );
         let code = hbox!(16, "", self.code_a.clone(), self.code_b.clone()).hexpand().centered();
-        let top = hbox!(12, "", code, self.copy.button.clone());
-        let bottom = vbox!(
-            6,
-            "",
-            hbox!(8, "", self.expiry.clone(), new_code.button.centered()),
-            self.bar.clone()
-        );
-        top.set_margin_top(14);
-        for part in [&top, &bottom] {
-            part.set_margin_start(18);
-            part.set_margin_end(14);
-        }
-        bottom.set_margin_bottom(14);
-        let card = vbox!(10, "card", top, bottom);
+        let code_box = hbox!(12, "login-code-box", code, self.copy.button.clone());
+        let expiry = hbox!(8, "", self.expiry.clone(), new_code.button.centered());
+        let card = vbox!(8, "", code_box, expiry, self.bar.clone());
         let step2 = step(&self.step2, "Enter this code there", None, &card);
 
         let c3 = circle("3");
-        self.status_box.append(&self.pulse);
         self.status_box.append(&self.status);
+        self.status_box.append(&self.pulse);
         let step3 = step(
             &c3,
             "Approve the sign-in",
             Some("The account shows up here by itself once you approve."),
             &self.status_box,
         );
+        let me = Rc::downgrade(self);
+        glib::timeout_add_local(Duration::from_millis(120), move || match me.upgrade() {
+            Some(d) if !d.closed.load(Ordering::Relaxed) => {
+                if d.pulse.is_visible() {
+                    d.pulse.pulse();
+                }
+                glib::ControlFlow::Continue
+            }
+            _ => glib::ControlFlow::Break,
+        });
 
         let intro = match &self.relogin {
             Some(a) => format!(
@@ -187,12 +194,69 @@ impl AddAccountDialog {
                      here, and the session is kept in your keyring."
                 .to_owned(),
         };
-        let body = vbox!(22, "", lbl(&intro, "dimmed").wrapped(), step1, step2, step3).margins(24);
-        body.set_margin_top(6);
-        let view = adw::ToolbarView::new();
-        view.add_top_bar(&adw::HeaderBar::new());
-        view.set_content(Some(&body));
-        self.dialog.set_child(Some(&view));
+        let first = ds::sec("", None);
+        first.add_css_class("first");
+        first.append(&lbl(&intro, "t-body-sm muted").wrapped());
+        let steps = ds::sec("", None);
+        steps.set_spacing(20);
+        steps.append(&step1);
+        steps.append(&step2);
+        steps.append(&step3);
+        let body = vbox!(0, "", first, steps);
+        if self.relogin.is_none() {
+            body.append(&self.once_added());
+        }
+        let foot = hbox!(
+            8,
+            "cx-sec",
+            ds::icon("lock").css("muted s14"),
+            lbl("No password is typed here", "t-caption muted")
+        );
+        body.append(&foot);
+        let close = self.dialog.close_button();
+        let art = ds::art_icon("plus", 36);
+        art.add_css_class("av");
+        let head = ds::head(
+            &art,
+            lbl(&self.dialog.title(), "cx-head-title").upcast_ref(),
+            lbl("Roblox Quick Login", "cx-head-sub").upcast_ref(),
+            &[close.upcast()],
+        );
+        let root = vbox!(0, "cx-panel", head);
+        root.append(
+            &gtk::ScrolledWindow::builder()
+                .child(&body)
+                .hscrollbar_policy(gtk::PolicyType::Never)
+                .vexpand(true)
+                .build(),
+        );
+        self.dialog.set_child(Some(&root));
+    }
+
+    /// Where a new account goes once it is added.
+    fn once_added(self: &Rc<Self>) -> gtk::Box {
+        let sec = ds::sec("Once it is added", None);
+        let Some(w) = self.window.upgrade() else { return sec };
+        let groups = {
+            let s = w.state();
+            let groups: Vec<(Option<String>, String)> = std::iter::once((None, "Ungrouped".into()))
+                .chain(s.accounts.groups().iter().map(|g| {
+                    let name =
+                        if g.name.is_empty() { "Untitled group".into() } else { g.name.clone() };
+                    (Some(g.id.clone()), name)
+                }))
+                .collect();
+            groups
+        };
+        let names: Vec<&str> = groups.iter().map(|(_, n)| n.as_str()).collect();
+        let (me, groups) = (Rc::downgrade(self), groups.clone());
+        let pick = ds::select(&names, 0, move |i| {
+            if let Some(d) = me.upgrade() {
+                d.put_in.replace(groups.get(i).and_then(|(g, _)| g.clone()));
+            }
+        });
+        sec.append(&ds::sfield("Put it in", &pick, None));
+        sec
     }
 
     fn open_page(&self) {
@@ -204,6 +268,7 @@ impl AddAccountDialog {
             return;
         }
         done(&self.step1);
+        self.step2.add_css_class("now");
     }
 
     fn copy_code(self: &Rc<Self>) {
@@ -215,12 +280,10 @@ impl AddAccountDialog {
             w.gtk_window().clipboard().set_text(&code);
         }
         done(&self.step2);
-        self.copy.set_icon("object-select-symbolic");
         self.copy.set_text("Copied");
         let me = Rc::downgrade(self);
         glib::timeout_add_local_once(Duration::from_millis(1600), move || {
             if let Some(d) = me.upgrade() {
-                d.copy.set_icon("edit-copy-symbolic");
                 d.copy.set_text("Copy");
             }
         });
@@ -237,7 +300,7 @@ impl AddAccountDialog {
     fn set_status(&self, text: &str, error: bool) {
         self.status.set_label(text);
         self.pulse.set_visible(!error);
-        toggle_class(&self.status_box, "error", error);
+        toggle_class(&self.status, "danger-text", error);
     }
 
     fn on_event(&self, ev: Event) {
@@ -344,6 +407,12 @@ impl AddAccountDialog {
                     if !new {
                         w.state_mut().accounts.add_or_refresh(&user, chrono::Utc::now());
                     }
+                    if new && let Some(d) = me.upgrade() {
+                        let put_in = d.put_in.borrow().clone();
+                        if put_in.is_some() {
+                            w.set_group(user.id, put_in);
+                        }
+                    }
                     w.after_sign_in(&label, &user, new);
                     if let Some(d) = me.upgrade() {
                         d.dialog.close();
@@ -394,6 +463,7 @@ fn circle(n: &str) -> gtk::Label {
 /// A step done: its number becomes a tick.
 fn done(circle: &gtk::Label) {
     circle.set_label("✓");
+    circle.remove_css_class("now");
     circle.add_css_class("done");
 }
 
@@ -404,9 +474,9 @@ fn step(
     help: Option<&str>,
     content: &impl IsA<gtk::Widget>,
 ) -> gtk::Box {
-    let body = vbox!(4, "", lbl(title, "heading")).hexpand();
+    let body = vbox!(4, "", lbl(title, "t-label")).hexpand();
     if let Some(h) = help {
-        body.append(&lbl(h, "caption dimmed").wrapped());
+        body.append(&lbl(h, "t-caption muted").wrapped());
     }
     let content = content.clone().upcast::<gtk::Widget>();
     content.set_margin_top(8);

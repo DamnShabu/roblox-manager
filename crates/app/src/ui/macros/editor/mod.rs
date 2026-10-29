@@ -10,29 +10,33 @@ use rbxmgr_core::macros::grammar::{self, Row};
 
 use super::record::Record;
 use crate::ui::confirm;
-use crate::ui::widgets::{Btn, Fluent, LabelFluent, hotkey_label, keycaps, lbl, sentence};
+use crate::ui::ds::{self, Variant};
+use crate::ui::panel::Panel;
+use crate::ui::widgets::{Fluent, LabelFluent, hotkey_label, keycaps, lbl, sentence};
 use crate::ui::window::{WeakWindow, Window};
 
 pub struct MacroDialog {
     window: WeakWindow,
-    dialog: adw::Dialog,
+    dialog: Panel,
     old: Option<String>,
     rows: RefCell<Vec<Row>>,
     loops: Cell<u32>,
     hotkey: RefCell<Option<String>>,
     capturing: Cell<bool>,
-    name: adw::EntryRow,
+    name: gtk::Entry,
     cap: gtk::Button,
     clear_key: gtk::Button,
     repeat: adw::ToggleGroup,
-    rounds: adw::SpinRow,
+    rounds: gtk::SpinButton,
     count: gtk::Label,
     list: gtk::ListBox,
+    /// The value entry of each step drawn, in the order drawn.
+    entries: RefCell<Vec<gtk::Entry>>,
     /// Steps as rows, or the macro as text to paste or copy.
     view: adw::ToggleGroup,
     views: gtk::Stack,
     text: gtk::TextView,
-    repeat_group: adw::PreferencesGroup,
+    repeat_group: gtk::Box,
     err: gtk::Label,
     /// Steps recorded from a running client.
     record: Rc<Record>,
@@ -61,12 +65,10 @@ impl MacroDialog {
         };
         let (rows, loops) = grammar::rows(&text);
         let new = name.is_none();
-        let dialog = adw::Dialog::builder()
-            .title(if new { "New Macro" } else { "Edit Macro" })
-            .content_width(600)
-            .build();
-        let rounds = adw::SpinRow::with_range(2.0, 9999.0, 1.0);
-        rounds.set_title("Rounds");
+        let dialog = Panel::new(if new { "New macro" } else { "Edit macro" }).for_macros();
+        let rounds = gtk::SpinButton::with_range(2.0, 9999.0, 1.0);
+        rounds.add_css_class("cx-input");
+        rounds.set_valign(Align::Center);
         rounds.set_value(if loops > 1 { f64::from(loops) } else { 10.0 });
         let d = Rc::new(MacroDialog {
             window: w.weak(),
@@ -76,18 +78,22 @@ impl MacroDialog {
             loops: Cell::new(loops),
             hotkey: RefCell::new(hotkey),
             capturing: Cell::new(false),
-            name: adw::EntryRow::builder().title("Name").text(&title).build(),
-            cap: gtk::Button::builder().valign(Align::Center).build(),
+            name: crate::ui::ds::input(&title),
+            cap: gtk::Button::builder()
+                .valign(Align::Center)
+                .css_classes(["ds", "secondary", "sm"])
+                .build(),
             clear_key: gtk::Button::builder()
-                .icon_name("edit-clear-symbolic")
+                .icon_name("rm-x-symbolic")
                 .tooltip_text("No hotkey")
                 .valign(Align::Center)
-                .css_classes(["flat", "circular"])
+                .css_classes(["ib", "sm"])
                 .build(),
             repeat: adw::ToggleGroup::builder().valign(Align::Center).build(),
             rounds,
             count: lbl("", "dimmed"),
             list: crate::ui::widgets::boxed_list(),
+            entries: RefCell::default(),
             view: adw::ToggleGroup::builder().valign(Align::Center).build(),
             views: gtk::Stack::builder().vhomogeneous(false).build(),
             text: gtk::TextView::builder()
@@ -97,7 +103,7 @@ impl MacroDialog {
                 .left_margin(12)
                 .right_margin(12)
                 .build(),
-            repeat_group: adw::PreferencesGroup::builder().title("Playback").build(),
+            repeat_group: gtk::Box::new(gtk::Orientation::Vertical, 4),
             err: lbl("", "error").wrapped().visible(false),
             record: Record::new(w.weak()),
         });
@@ -106,47 +112,35 @@ impl MacroDialog {
         d.dialog.connect_closed(move |_| {
             held.take();
         });
-        d.dialog.present(Some(w.gtk_window()));
+        d.dialog.present(w);
     }
 
     fn assemble(self: &Rc<Self>, new: bool) {
-        // -- header bar: Cancel, the title, Save ------------------------------
-        let header = adw::HeaderBar::builder()
-            .show_end_title_buttons(false)
-            .show_start_title_buttons(false)
-            .build();
-        let cancel = {
-            let dialog = self.dialog.downgrade();
-            Btn::new("").text("_Cancel").build(move || {
-                if let Some(d) = dialog.upgrade() {
-                    d.close();
-                }
-            })
-        };
+        // -- header bar: the name, Cancel, Save --------------------------------
+        let cancel = ds::Button::new("Cancel", Variant::Ghost, true)
+            .tip("Close it; nothing unsaved is kept (Esc)");
+        let dialog = self.dialog.downgrade();
+        cancel.button.connect_clicked(move |_| {
+            if let Some(d) = dialog.upgrade() {
+                d.close();
+            }
+        });
         let me = Rc::downgrade(self);
-        let save = Btn::new("suggested-action").text("_Save").build(move || {
+        let save = ds::Button::new("Save", Variant::Primary, true).on(move || {
             if let Some(d) = me.upgrade() {
                 d.save();
             }
         });
-        header.pack_start(&cancel.button);
-        header.pack_end(&save.button);
-        header.pack_end(
-            &gtk::Button::builder()
-                .icon_name("help-about-symbolic")
-                .tooltip_text("How Macros Work")
-                .action_name("win.macro-help")
-                .build(),
-        );
+        self.name.set_hexpand(true);
+        self.name.set_valign(Align::Center);
+        for b in [&cancel.button, &save.button] {
+            b.set_valign(Align::Center);
+        }
+        self.name.set_tooltip_text(Some("The macro's name"));
+        let header = hbox!(8, "cx-head", self.name.clone(), cancel.button, save.button.clone());
         self.dialog.set_default_widget(Some(&save.button));
 
         // -- name and hotkey ------------------------------------------------------
-        let about = adw::PreferencesGroup::new();
-        about.add(&self.name);
-        let key_row = adw::ActionRow::builder()
-            .title("Hotkey")
-            .subtitle("Runs or stops it on the selected accounts while this window has focus")
-            .build();
         let me = Rc::downgrade(self);
         self.cap.connect_clicked(move |_| {
             if let Some(d) = me.upgrade() {
@@ -161,10 +155,13 @@ impl MacroDialog {
                 d.draw_hotkey();
             }
         });
-        key_row.add_suffix(&self.clear_key);
-        key_row.add_suffix(&self.cap);
-        key_row.set_activatable_widget(Some(&self.cap));
-        about.add(&key_row);
+        let about = ds::sec("", None);
+        about.add_css_class("first");
+        about.append(&ds::field(
+            "Hotkey",
+            &hbox!(4, "", self.cap.clone(), self.clear_key.clone()),
+            Some("Runs or stops it on the selected accounts while this window has focus"),
+        ));
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let me = Rc::downgrade(self);
@@ -184,10 +181,15 @@ impl MacroDialog {
             0 => "until",
             _ => "rounds",
         }));
-        let repeat_row = adw::ActionRow::builder().title("Play the steps").build();
-        repeat_row.add_suffix(&self.repeat);
-        repeat_group.add(&repeat_row);
-        repeat_group.add(&self.rounds);
+        self.repeat.add_css_class("cx-seg");
+        let rounds_label = lbl("rounds", "t-caption muted").centered();
+        self.rounds.bind_property("visible", &rounds_label, "visible").sync_create().build();
+        repeat_group.append(&ds::field(
+            "Playback",
+            &hbox!(8, "", self.repeat.clone(), self.rounds.clone(), rounds_label),
+            Some("Once, a number of rounds, or round after round until stopped"),
+        ));
+        about.append(repeat_group);
         let me = Rc::downgrade(self);
         self.repeat.connect_active_name_notify(move |_| {
             if let Some(d) = me.upgrade() {
@@ -195,41 +197,41 @@ impl MacroDialog {
             }
         });
         let me = Rc::downgrade(self);
-        self.rounds.connect_value_notify(move |r| {
-            if let Some(d) = me.upgrade() {
-                if d.repeat.active_name().as_deref() == Some("rounds") {
-                    d.loops.set(r.value().max(2.0) as u32);
-                }
+        self.rounds.connect_value_changed(move |r| {
+            if let Some(d) = me.upgrade()
+                && d.repeat.active_name().as_deref() == Some("rounds")
+            {
+                d.loops.set(r.value().max(2.0) as u32);
             }
         });
         self.rounds.set_visible(self.repeat.active_name().as_deref() == Some("rounds"));
 
         let steps_group = self.steps_group();
 
-        let page =
-            vbox!(24, "", about, repeat_group.clone(), steps_group, self.err.clone()).margins(18);
+        let err = ds::sec("", None);
+        err.append(&self.err);
+        self.err.bind_property("visible", &err, "visible").sync_create().build();
+        let page = vbox!(0, "", about, steps_group, err);
         if !new {
-            let delete = adw::ButtonRow::builder().title("Delete Macro…").build();
-            delete.add_css_class("destructive-action");
+            let delete =
+                ds::Button::with_icons("Delete macro…", Variant::Ghost, false, Some("trash"), None);
+            delete.button.set_halign(Align::Start);
             let me = Rc::downgrade(self);
-            delete.connect_activated(move |_| {
+            delete.button.connect_clicked(move |_| {
                 if let Some(d) = me.upgrade() {
                     d.delete();
                 }
             });
-            let danger = adw::PreferencesGroup::new();
-            danger.add(&delete);
+            let danger = ds::sec("", None);
+            danger.append(&delete.button);
             page.append(&danger);
         }
-        let clamp = adw::Clamp::builder().maximum_size(640).child(&page).build();
         let scroller = gtk::ScrolledWindow::builder()
-            .child(&clamp)
+            .child(&page)
             .hscrollbar_policy(PolicyType::Never)
-            .propagate_natural_height(true)
+            .vexpand(true)
             .build();
-        let view = adw::ToolbarView::new();
-        view.add_top_bar(&header);
-        view.set_content(Some(&scroller));
+        let view = vbox!(0, "cx-panel", header, scroller);
         self.dialog.set_child(Some(&view));
         self.draw_hotkey();
         self.draw_steps();
@@ -301,7 +303,7 @@ impl MacroDialog {
                 )));
             }
             None => {
-                self.cap.set_label("Set Hotkey…");
+                self.cap.set_label("Set hotkey…");
                 self.cap.set_tooltip_text(Some("Click, then press the keys"));
             }
         }

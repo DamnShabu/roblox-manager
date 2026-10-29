@@ -1,8 +1,8 @@
 # An example to copy from: walks forward, jumps, and clicks a picked image when it shows.
 #
-# Every .py file in this folder is an advanced macro. Select accounts in
-# Roblox Manager and press its Run in the Advanced tab: it runs once for each
-# of them, into that account's macro-ready window. Stop ends it.
+# Every .py file in this folder is an advanced macro, listed under Scripts
+# in Roblox Manager's sidebar. Select accounts and press its ▶: it runs
+# once for each of them, into that account's macro-ready window. Stop ends it.
 #
 # The rbxmgr module is how a script plays: keys, clicks and looks at the
 # window all go through the manager, never into the Roblox client.

@@ -211,6 +211,25 @@ fn a_hand_broken_accounts_file_is_set_aside_not_overwritten() {
 }
 
 #[test]
+fn an_accounts_file_that_cannot_be_read_stops_the_load_rather_than_reading_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::under(dir.path());
+    // groups.json readable, accounts.json not (a directory: the same branch
+    // EACCES and EIO take). Loading empty here would let the next save
+    // replace every account with nothing.
+    json_file::write(&paths.groups(), &json!([])).unwrap();
+    fs::create_dir_all(paths.accounts()).unwrap();
+    assert!(matches!(AccountStore::load(&paths), Err(AccountError::Unreadable(_))));
+    // And a groups.json that cannot be read is no first run to migrate.
+    fs::remove_dir(paths.accounts()).unwrap();
+    fs::remove_file(paths.groups()).unwrap();
+    fs::create_dir_all(paths.groups()).unwrap();
+    json_file::write(&paths.accounts(), &json!([{"name": "a", "user_id": 1}])).unwrap();
+    assert!(AccountStore::load(&paths).is_err());
+    assert!(paths.groups().is_dir());
+}
+
+#[test]
 fn the_accounts_for_join_links_are_remembered_and_replaced() {
     let mut s = store(&[("a", true), ("b", true), ("c", true)], &[]);
     assert!(s.link_accounts().is_empty());
@@ -222,4 +241,27 @@ fn the_accounts_for_join_links_are_remembered_and_replaced() {
     assert_eq!(saved["join_links"], json!(true));
     let unpicked = serde_json::to_value(s.get(UserId(1)).unwrap()).unwrap();
     assert!(unpicked.get("join_links").is_none(), "false is not written");
+}
+
+#[test]
+fn an_earlier_low_power_account_reads_as_low_and_stays_readable_to_them() {
+    let old: Account =
+        serde_json::from_value(json!({"name": "a", "user_id": 1, "low_power": true})).unwrap();
+    assert_eq!(old.performance(), Performance::Low);
+    let plain: Account = serde_json::from_value(json!({"name": "b", "user_id": 2})).unwrap();
+    assert_eq!(plain.performance(), Performance::High);
+    let mut a = plain;
+    a.set_performance(Performance::Low);
+    let written = serde_json::to_value(&a).unwrap();
+    assert_eq!(
+        (written["performance"].as_str(), written["low_power"].as_bool()),
+        (Some("low"), Some(true))
+    );
+    a.set_performance(Performance::Max);
+    let written = serde_json::to_value(&a).unwrap();
+    assert_eq!(written["performance"], "max");
+    assert!(written.get("low_power").is_none(), "an earlier version reads it as not low");
+    let odd: Account =
+        serde_json::from_value(json!({"name": "c", "user_id": 3, "performance": "turbo"})).unwrap();
+    assert_eq!(odd.performance(), Performance::High, "an unknown level is the default");
 }

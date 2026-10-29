@@ -1,0 +1,74 @@
+# The checks every change to main passes: on each pull request, on each push
+# to main, and as the first job of a release (release.yml calls this).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+  # update-flake-lock.yml starts it on its pull request's branch.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - run: nix develop -c cargo fmt --check
+      - run: nix develop -c cargo clippy --all-targets -- -D warnings
+      - run: nix develop -c cargo test
+
+  nix-build:
+    name: nix-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - run: nix flake check
+      - run: nix build .#roblox-manager --print-build-logs
+
+  # The Flatpak builds offline from cargo-sources.json, so a Cargo.lock change
+  # without it (a Dependabot bump, say) only shows when a release fails.
+  flatpak-sources:
+    name: flatpak-sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      - run: packaging/flatpak/update-sources.sh
+      - name: The committed sources match the lock files
+        run: |
+          if ! git diff --exit-code -- packaging/flatpak; then
+            echo "::error::the Flatpak's Cargo sources are out of date: run packaging/flatpak/update-sources.sh and commit the result"
+            exit 1
+          fi
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      # actionlint runs shellcheck over each workflow's run: scripts too.
+      - run: nix shell nixpkgs#actionlint nixpkgs#shellcheck -c actionlint
+      - run: |
+          git ls-files -z '*.sh' packaging/linux/postinst packaging/linux/postrm |
+            xargs -0 nix shell nixpkgs#shellcheck -c shellcheck

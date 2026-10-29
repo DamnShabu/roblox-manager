@@ -1,8 +1,11 @@
 //! Launching and stopping: the game strip and the target, the launch bar,
 //! and each way accounts are started and stopped.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+use adw::prelude::*;
+
+use rbxmgr_core::cordial::Performance;
 use rbxmgr_core::launch::{LaunchAccount, LaunchReport, LaunchRequest, Mode};
 use rbxmgr_core::roblox::FAVORITES_SHOWN;
 use rbxmgr_core::stop::StopFlag;
@@ -11,7 +14,6 @@ use rbxmgr_core::types::{PlaceId, Profile, ServerId, UserId};
 use super::Window;
 use crate::state::{Chip, FriendTarget, Tile};
 use crate::ui::activity;
-use crate::ui::friends::FriendsDialog;
 use crate::ui::widgets::plural;
 
 impl Window {
@@ -35,84 +37,79 @@ impl Window {
             let pick = s.place.clone().or_else(|| s.accounts.last_place().cloned());
             s.place = pick.filter(|p| s.game_list.iter().any(|t| &t.game.place_id == p));
         }
-        self.0.ui.games.draw(&self.state());
+        self.draw_target();
         self.refresh_launch_state();
+    }
+
+    /// The toolbar's target, and the popover's list.
+    pub fn draw_target(&self) {
+        let tb = &self.0.ui.toolbar;
+        crate::ui::target::draw_bar(self, &tb.target_art, &tb.target_name);
+        self.0.ui.target_pop.draw(&self.state());
     }
 
     pub fn pick_game(&self, place: Option<PlaceId>) {
         {
             let mut s = self.state_mut();
             s.friend = None;
+            if let Some(p) = &place {
+                s.picked(p);
+            }
             s.place = place;
         }
-        self.0.ui.games.draw(&self.state());
+        self.draw_target();
         self.refresh_launch_state();
     }
 
+    /// The target popover, on its Friends tab.
     pub fn on_friends(&self) {
-        let of = {
-            let s = self.state();
-            let accounts = &s.accounts;
-            accounts
-                .leader()
-                .or_else(|| accounts.selected().into_iter().next())
-                .or_else(|| accounts.accounts().first())
-                .map(|a| a.user_id)
-        };
-        match of {
-            Some(id) => FriendsDialog::open(self, id),
-            None => self.toast("Add an account first: friends come from your accounts"),
+        if self.state().accounts.accounts().is_empty() {
+            return self.toast("Add an account first: friends come from your accounts");
         }
+        self.0.ui.target_pop.show_friends();
+    }
+
+    /// The target popover, on whichever tab it was.
+    pub fn pick_target(&self) {
+        self.0.ui.toolbar.target.popup();
     }
 
     pub fn join_friend(&self, friend: FriendTarget) {
         let display = friend.display.clone();
         self.state_mut().friend = Some(friend);
-        self.0.ui.games.draw(&self.state());
+        self.draw_target();
         self.refresh_launch_state();
         self.log(&format!("Target: join {display}"));
     }
 
-    /// The launch bar, the accounts' heading and select-all, as the state is.
+    /// The toolbar and the select-all box, as the state is.
     pub fn refresh_launch_state(&self) {
-        let (n, total, leader, followers, target) = {
+        let (title, n, total, shown, shown_selected) = {
             let s = self.state();
             let a = &s.accounts;
-            (
-                a.selected().len(),
-                a.accounts().len(),
-                a.leader().map(|l| l.name.to_string()),
-                a.followers().len(),
-                s.target_label(),
-            )
+            let in_view: Vec<bool> =
+                a.accounts().iter().filter(|x| s.in_view(x)).map(|x| x.selected).collect();
+            let on = in_view.iter().filter(|on| **on).count();
+            (s.view_title(), a.selected().len(), a.accounts().len(), in_view.len(), on)
         };
         let ui = &self.0.ui;
+        let tb = &ui.toolbar;
         self.set_action_enabled("refresh", total > 0);
         self.set_action_enabled("reload-games", total > 0);
         self.set_action_enabled("launch-selected", n >= 1);
-        self.set_action_enabled("launch-group", leader.is_some());
-        ui.btn_each.set_text(&if n == 0 {
-            "Launch Selected".to_owned()
+        tb.title.set_label(&title);
+        tb.count.set_label(&shown.to_string());
+        tb.set_selected(n);
+        tb.launch.set_text(&if n == 0 {
+            "Launch".to_owned()
         } else {
-            format!("Launch {n} Selected")
+            format!("Launch {n} selected")
         });
-        ui.summary.set_label(&leader.map_or_else(
-            || "No leader yet".to_owned(),
-            |l| match followers {
-                0 => format!("{l} leads"),
-                n => format!("{l} leads · {} follow", plural(n, "account", "accounts")),
-            },
-        ));
-        ui.target_text.set_label(&format!("Into {target}"));
-        ui.accounts_meta
-            .set_label(&format!("{} · {n} selected", plural(total, "account", "accounts")));
-        let every = total > 0 && n == total;
-        ui.select_all.set_text(if every { "Select None" } else { "Select All" });
-        ui.select_all.set_icon(if every {
-            "edit-clear-all-symbolic"
-        } else {
-            "edit-select-all-symbolic"
-        });
+        ui.select_quiet.set(true);
+        ui.select_all.set_active(shown > 0 && shown_selected == shown);
+        ui.select_all.set_inconsistent(shown_selected > 0 && shown_selected < shown);
+        ui.select_all.set_sensitive(shown > 0);
+        ui.select_quiet.set(false);
         self.refresh_states();
     }
 
@@ -128,39 +125,13 @@ impl Window {
         self.launch(ids, Mode::Each, Some(target));
     }
 
-    /// Launch as group: the leader, then its auto-join list into its server.
-    /// With a friend as the target everyone goes to the friend's server.
-    pub fn launch_chain(&self) {
-        let (ids, friend, target) = {
-            let s = self.state();
-            let Some(leader) = s.accounts.leader() else {
-                drop(s);
-                return self.toast("Make an account the leader first");
-            };
-            let ids: Vec<UserId> = std::iter::once(leader.user_id)
-                .chain(s.accounts.followers().iter().map(|a| a.user_id))
-                .collect();
-            (ids, s.friend.is_some(), s.target())
-        };
-        if friend {
-            self.launch(ids, Mode::Each, Some(target));
-        } else {
-            self.launch(ids, Mode::Group, None);
-        }
-    }
-
     pub fn launch_group(&self, gid: &str) {
         let found = {
             let s = self.state();
             let a = &s.accounts;
             a.groups().iter().find(|g| g.id == gid).and_then(|g| {
                 let place = g.place_id.clone()?;
-                let ids: Vec<UserId> = a
-                    .visual_order()
-                    .iter()
-                    .filter(|x| a.group_of(x) == Some(gid))
-                    .map(|x| x.user_id)
-                    .collect();
+                let ids: Vec<UserId> = a.group_members(gid).iter().map(|x| x.user_id).collect();
                 let name = if g.name.is_empty() { "group".to_owned() } else { g.name.clone() };
                 let game = g.game.clone().unwrap_or_else(|| place.to_string());
                 Some((ids, place, name, game))
@@ -177,27 +148,14 @@ impl Window {
         }
     }
 
-    /// A row's play: the leader starts its chain; an auto-join account joins
-    /// the leader when that is already running; anyone else goes to the
-    /// target on their own. A running account's play is stop.
+    /// A row's play: the account into the target. A running account's play
+    /// is stop.
     pub fn play_or_stop(&self, id: UserId) {
         if self.state().chip(id) == Chip::Running {
             return self.stop_account(id);
         }
-        let (is_leader, join, target) = {
-            let s = self.state();
-            let leader = s.accounts.leader();
-            let follows = s.accounts.get(id).is_some_and(|a| a.follow.is_some());
-            let join = leader
-                .filter(|l| follows && s.running.contains(&l.user_id) && s.friend.is_none())
-                .map(|l| l.user_id);
-            (leader.is_some_and(|l| l.user_id == id), join, s.target())
-        };
-        match (is_leader, join) {
-            (true, _) => self.launch_chain(),
-            (false, Some(leader)) => self.launch(vec![leader, id], Mode::Group, None),
-            (false, None) => self.launch(vec![id], Mode::Each, Some(target)),
-        }
+        let target = self.state().target();
+        self.launch(vec![id], Mode::Each, Some(target));
     }
 
     /// Start a launch at once, whatever else is running. Only an account
@@ -212,6 +170,7 @@ impl Window {
         mode: Mode,
         target: Option<(Option<PlaceId>, Option<ServerId>)>,
     ) {
+        let display_hz = monitor_hz();
         let (accounts, joining, place, server) = {
             let mut s = self.state_mut();
             let mut accounts = Vec::new();
@@ -222,8 +181,11 @@ impl Window {
                     self.log(&line);
                     continue;
                 }
-                let opts =
-                    rbxmgr_core::cordial::ClientOpts { nested: a.nested, low_power: a.low_power };
+                let opts = rbxmgr_core::cordial::ClientOpts {
+                    nested: a.nested,
+                    performance: a.performance(),
+                    display_hz,
+                };
                 accounts.push(LaunchAccount { id, label: a.name.clone(), opts });
             }
             let leader_skipped = mode == Mode::Group
@@ -252,6 +214,8 @@ impl Window {
             return;
         }
         let ids: Vec<UserId> = accounts.iter().map(|a| a.id).collect();
+        let levels: HashMap<UserId, Performance> =
+            accounts.iter().map(|a| (a.id, a.opts.performance)).collect();
         let stop = StopFlag::default();
         self.state_mut().launches.push((stop.clone(), ids.clone()));
         self.refresh_states();
@@ -259,7 +223,7 @@ impl Window {
             LaunchRequest { accounts, mode, place: place.clone(), server, stop: stop.clone() };
         let (launcher, log) = (self.services().launcher.clone(), self.logger());
         self.run_task(
-            move || launcher.launch(request, &|l| log.line(l)),
+            crate::worker::catching(move || launcher.launch(request, &|l| log.line(l))),
             move |w, result| {
                 {
                     let mut s = w.state_mut();
@@ -268,7 +232,7 @@ impl Window {
                         s.launching.remove(id);
                     }
                     s.joining.retain(|id| !joining.contains(id));
-                    if let Ok(report) = &result {
+                    if let Ok(Ok(report)) = &result {
                         let now = chrono::Utc::now();
                         for id in &report.expired {
                             s.accounts.end_check(*id, Some(false), now);
@@ -277,6 +241,9 @@ impl Window {
                         for (id, user) in &report.launched {
                             s.accounts.record_launch(*id, user, place.as_ref(), now);
                             s.failures.remove(id);
+                            if let Some(level) = levels.get(id) {
+                                s.launched_as.insert(*id, *level);
+                            }
                             match &place {
                                 Some(p) => s.playing.insert(*id, p.clone()),
                                 None => s.playing.remove(id),
@@ -288,8 +255,13 @@ impl Window {
                     }
                 }
                 match result {
-                    Ok(report) => w.tell_report(&report),
-                    Err(e) => {
+                    Ok(Ok(report)) => w.tell_report(&report),
+                    Err(crashed) => {
+                        w.surface();
+                        w.log(&format!("Launch failed: {crashed}"));
+                        w.toast_with("The launch stopped short", "Details", activity::open_log);
+                    }
+                    Ok(Err(e)) => {
                         w.surface();
                         w.log(&format!("Launch failed: {e}"));
                         w.toast_with(
@@ -347,26 +319,36 @@ impl Window {
         self.stop_profiles(label.to_string(), [Profile::of(id)].into_iter().collect());
     }
 
+    /// The command bar's Stop: every selected account's client at once.
+    pub fn stop_selected(&self) {
+        let which: HashSet<Profile> = {
+            let s = self.state();
+            s.accounts
+                .selected()
+                .iter()
+                .filter(|a| s.running.contains(&a.user_id) || s.launching.contains(&a.user_id))
+                .map(|a| Profile::of(a.user_id))
+                .collect()
+        };
+        if !which.is_empty() {
+            self.stop_profiles("the selected accounts".to_owned(), which);
+        }
+    }
+
     /// A group header's Shut down: every member's client at once.
     pub fn stop_group(&self, gid: &str) {
-        let found = {
+        // Its members as drawn: the leader keeps its group but is not one of
+        // them, and stopping the group must not stop the leader.
+        let (found, ids) = {
             let s = self.state();
             let a = &s.accounts;
-            a.groups().iter().find(|g| g.id == gid).map(|g| {
+            let ids: Vec<UserId> = a.group_members(gid).iter().map(|x| x.user_id).collect();
+            let found = a.groups().iter().find(|g| g.id == gid).map(|g| {
                 let name = if g.name.is_empty() { "group".to_owned() } else { g.name.clone() };
-                let members: HashSet<Profile> = a
-                    .accounts()
-                    .iter()
-                    .filter(|x| a.group_of(x) == Some(gid))
-                    .map(|x| Profile::of(x.user_id))
-                    .collect();
+                let members: HashSet<Profile> = ids.iter().map(|id| Profile::of(*id)).collect();
                 (name, members)
-            })
-        };
-        let ids: Vec<UserId> = {
-            let s = self.state();
-            let a = &s.accounts;
-            a.accounts().iter().filter(|x| a.group_of(x) == Some(gid)).map(|x| x.user_id).collect()
+            });
+            (found, ids)
         };
         if self.state().stop_launches(Some(&ids)) > 0 {
             self.log("Stopping the launch under way");
@@ -378,14 +360,21 @@ impl Window {
 
     fn stop_profiles(&self, label: String, which: HashSet<Profile>) {
         let profiles = self.services().profiles.clone();
-        let log = self.logger();
+        let weak = self.weak();
         crate::worker::run(
-            move || match profiles.stop(&which) {
-                Ok(0) => log.line(format!("{label}: was not running")),
-                Ok(_) => log.line(format!("Shut down {label}")),
-                Err(e) => log.line(format!("{label}: could not stop -- {e}")),
+            move || profiles.stop(&which),
+            move |stopped| {
+                let Some(w) = weak.upgrade() else { return };
+                match stopped {
+                    Ok(0) => w.log(&format!("{label}: was not running")),
+                    Ok(_) => w.log(&format!("Shut down {label}")),
+                    Err(e) => {
+                        w.log(&format!("{label}: could not stop -- {e}"));
+                        w.toast(&format!("Could not stop {label}"));
+                    }
+                }
+                w.poll_running();
             },
-            |()| {},
         );
     }
 
@@ -400,13 +389,35 @@ impl Window {
             }
             s.accounts.accounts().iter().map(|a| Profile::of(a.user_id)).collect()
         };
-        let (cordial, log) = (self.services().profiles.clone(), self.logger());
+        let (cordial, weak) = (self.services().profiles.clone(), self.weak());
         crate::worker::run(
-            move || match cordial.stop(&profiles) {
-                Ok(n) => log.line(format!("Stopped {n} client(s)")),
-                Err(e) => log.line(format!("Could not stop the clients: {e}")),
+            move || cordial.stop(&profiles),
+            move |stopped| {
+                let Some(w) = weak.upgrade() else { return };
+                match stopped {
+                    Ok(n) => w.log(&format!("Stopped {n} client(s)")),
+                    Err(e) => {
+                        w.log(&format!("Could not stop the clients: {e}"));
+                        w.toast("Could not stop the clients");
+                    }
+                }
+                w.poll_running();
             },
-            |()| {},
         );
     }
+}
+
+/// The fastest refresh rate among the desktop's monitors, which High and Max
+/// clients run at. Read here rather than by the client: a macro-ready one
+/// sees only its cage's output, never the monitor's.
+/// The refresh rate of the fastest monitor, which High and Max run at.
+pub fn monitor_hz() -> Option<u32> {
+    use gtk::prelude::*;
+    let monitors = gtk::gdk::Display::default()?.monitors();
+    (0..monitors.n_items())
+        .filter_map(|i| monitors.item(i)?.downcast::<gtk::gdk::Monitor>().ok())
+        .filter_map(|m| u32::try_from(m.refresh_rate()).ok())
+        .map(|millihertz| (millihertz + 500) / 1000)
+        .filter(|hz| *hz > 0)
+        .max()
 }

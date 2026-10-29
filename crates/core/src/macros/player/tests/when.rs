@@ -109,3 +109,52 @@ fn a_when_that_exits_cuts_the_round_short_from_the_middle_of_a_wait() {
         "{reports:?}"
     );
 }
+
+#[test]
+fn a_when_leaves_a_key_the_steps_are_holding_down() {
+    let m = "press w\nwait 1\nwhen color 0 0 #ff0000\ndo tap w\ndo press w\nloop 1\n";
+    let (got, sent, _) = play_seeing(m, Duration::from_millis(200), &StopFlag::default());
+    got.unwrap();
+    let w = keys::key_code("w").unwrap();
+    assert_eq!(sent, [Sent::Key(w, true), Sent::Key(w, false)], "down once, up at the round's end");
+}
+
+#[test]
+fn a_repeat_caught_mid_tap_is_let_go_of_before_a_when_plays() {
+    let m = "repeat e 1 0.5\nwait 1\nwhen color 0 0 #ff0000\ndo tap f\nloop 1\n";
+    let (got, sent, _) = play_seeing(m, Duration::ZERO, &StopFlag::default());
+    got.unwrap();
+    let (e, f) = (keys::key_code("e").unwrap(), keys::key_code("f").unwrap());
+    let f_down = sent.iter().position(|s| *s == Sent::Key(f, true)).unwrap();
+    let e_ups = sent[..f_down].iter().filter(|s| **s == Sent::Key(e, false)).count();
+    let e_downs = sent[..f_down].iter().filter(|s| **s == Sent::Key(e, true)).count();
+    assert_eq!(e_downs, e_ups, "e is not held through the when: {sent:?}");
+}
+
+#[test]
+fn a_when_leaves_a_key_a_hold_is_holding_down() {
+    let m = "hold w 1\nwhen color 0 0 #ff0000\ndo tap w\ndo hold w 0.1\nloop 1\n";
+    let (got, sent, _) = play_seeing(m, Duration::from_millis(200), &StopFlag::default());
+    got.unwrap();
+    let w = keys::key_code("w").unwrap();
+    assert_eq!(sent, [Sent::Key(w, true), Sent::Key(w, false)], "down once, up at the hold's end");
+}
+
+#[test]
+fn a_when_glides_from_where_the_steps_left_the_pointer_and_hands_it_back() {
+    let m = "move to 100 100\nwait 1\nmove to 300 100 0.1\nwhen color 0 0 #ff0000\n\
+             do move to 200 100 0.1\nloop 1\n";
+    let (got, sent, _) = play_seeing(m, Duration::from_millis(200), &StopFlag::default());
+    got.unwrap();
+    let xs: Vec<i32> = sent
+        .iter()
+        .filter_map(|s| match s {
+            Sent::MoveTo(x, _) => Some(*x),
+            _ => None,
+        })
+        .collect();
+    let at_200 = xs.iter().position(|&x| x == 200).unwrap();
+    assert!(at_200 > 1, "the when glided rather than jumped: {xs:?}");
+    assert!(xs[1..at_200].iter().all(|&x| x > 100 && x < 200), "{xs:?}");
+    assert!(xs[at_200 + 1] > 200 && xs[at_200 + 1] < 300, "the steps glide on from 200: {xs:?}");
+}

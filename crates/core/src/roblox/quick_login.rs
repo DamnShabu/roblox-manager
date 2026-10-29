@@ -19,10 +19,20 @@ pub const CONFIRM_URL: &str = "https://www.roblox.com/crossdevicelogin/confirmco
 pub const POLL: Duration = Duration::from_secs(3);
 pub const TIMEOUT: Duration = Duration::from_secs(180);
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct QuickLoginCode {
     pub code: String,
+    /// With the code, redeems a session: never printed.
     pub private_key: String,
+}
+
+impl std::fmt::Debug for QuickLoginCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QuickLoginCode")
+            .field("code", &self.code)
+            .field("private_key", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -84,7 +94,17 @@ pub fn quick_login(
         events.tick((TIMEOUT - waited).as_secs());
         sleep(POLL);
         waited += POLL;
-        let status = roblox.quick_login_status(&code).map_err(QuickLoginError::Status)?;
+        // One failed poll (a dropped connection, a 429, a 5xx) is no verdict
+        // on the code: giving up would make the user start over with a new
+        // one, often after they have already typed this one in.
+        let status = match roblox.quick_login_status(&code) {
+            Ok(status) => status,
+            Err(e) if passing(&e) => {
+                events.log(format!("Could not check the code this time ({e}); trying again"));
+                continue;
+            }
+            Err(e) => return Err(QuickLoginError::Status(e)),
+        };
         events.status(&status);
         match status {
             QuickLoginStatus::Validated => {
@@ -100,6 +120,15 @@ pub fn quick_login(
         }
     }
     Err(QuickLoginError::CodeExpired)
+}
+
+/// An error that says nothing about the code itself.
+fn passing(e: &RobloxError) -> bool {
+    match e {
+        RobloxError::Offline(_) => true,
+        RobloxError::Http { status, .. } => *status == 429 || *status >= 500,
+        RobloxError::Expired | RobloxError::BadResponse(_) => false,
+    }
 }
 
 pub(super) fn create(t: &dyn Transport) -> Result<QuickLoginCode, RobloxError> {
@@ -280,5 +309,27 @@ mod tests {
     fn a_create_without_a_code_is_an_error() {
         let t = Canned::new().answer(200, "{}");
         assert!(matches!(run(t, None).0, Err(QuickLoginError::Create(_))));
+    }
+
+    #[test]
+    fn a_failed_poll_is_tried_again_rather_than_ending_the_flow() {
+        let t = Canned::new()
+            .answer(200, CREATED)
+            .answer(503, "busy")
+            .answer(429, "slow down")
+            .answer(200, r#"{"status": "Cancelled"}"#);
+        assert_eq!(run(t, None).0.unwrap_err(), QuickLoginError::Rejected);
+    }
+
+    #[test]
+    fn a_poll_refused_outright_still_ends_the_flow() {
+        let t = Canned::new().answer(200, CREATED).answer(400, "bad code");
+        assert!(matches!(run(t, None).0, Err(QuickLoginError::Status(_))));
+    }
+
+    #[test]
+    fn the_private_key_is_never_printed() {
+        let code = QuickLoginCode { code: "C".into(), private_key: "secret-key".into() };
+        assert!(!format!("{code:?}").contains("secret-key"));
     }
 }
