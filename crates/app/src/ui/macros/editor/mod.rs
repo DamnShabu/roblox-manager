@@ -214,6 +214,7 @@ impl MacroDialog {
             if let Some(d) = me.upgrade() {
                 if d.repeat.active_name().as_deref() == Some("rounds") {
                     d.loops.set(r.value().max(2.0) as u32);
+                    d.retime();
                 }
             }
         });

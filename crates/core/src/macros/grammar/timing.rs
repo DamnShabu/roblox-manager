@@ -2,6 +2,7 @@
 //! editor draws its steps along. A range, as the waits are.
 
 use super::{Parsed, Row, Step, TYPE_GAP, lines, step};
+use crate::macros::lanes;
 
 /// Seconds, the least and the most.
 pub type Span = (f64, f64);
@@ -9,7 +10,7 @@ pub type Span = (f64, f64);
 /// How long `row` keeps the round from going on: (0, 0) for a row that
 /// takes no time, plays out of turn (a `when` and its `do`s), plays beside
 /// the steps after it (a repeat), or does not parse yet.
-pub fn span(row: &Row) -> Span {
+fn span(row: &Row) -> Span {
     if matches!(row.kind.as_str(), "Note" | "At" | "When" | "Do") {
         return (0.0, 0.0);
     }
@@ -43,19 +44,45 @@ fn last(times: impl Iterator<Item = f64>) -> Span {
 }
 
 /// When each row starts, from the round's start, and when the round ends:
-/// the rows' spans one after another.
+/// the rows' spans one after another. A timeline lasts until its last step
+/// has played, if that is later than its length; a repeat plays beside the
+/// steps after it, but the round lasts until it has.
 pub fn starts(rows: &[Row]) -> (Vec<Span>, Span) {
     let mut at = (0.0, 0.0);
+    // The latest a repeat keeps the round going.
+    let mut held = (0.0f64, 0.0f64);
     let starts = rows
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(i, row)| {
             let start = at;
-            let (lo, hi) = span(row);
+            let (mut lo, mut hi) = span(row);
+            match row.kind.as_str() {
+                "Timeline" => {
+                    let block = &rows[i..i + lanes::block(rows, i)];
+                    let played = lanes::of_rows(block).0.secs;
+                    (lo, hi) = (lo.max(played), hi.max(played));
+                }
+                "Repeat" => {
+                    let (rlo, rhi) = repeated(row);
+                    held = (held.0.max(at.0 + rlo), held.1.max(at.1 + rhi));
+                }
+                _ => {}
+            }
             at = (at.0 + lo, at.1 + hi);
             start
         })
         .collect();
-    (starts, at)
+    (starts, (at.0.max(held.0), at.1.max(held.1)))
+}
+
+/// How long a repeat row taps for, or (0, 0).
+fn repeated(row: &Row) -> Span {
+    let text = super::to_text(std::slice::from_ref(row), 0);
+    match lines(&text).next().map(|line| step(&line)) {
+        Some(Ok(Parsed::Step(Step::Repeat { lo, hi, .. }))) => (lo, hi),
+        _ => (0.0, 0.0),
+    }
 }
 
 /// A time on the timeline: "0 s", "2.5 s", "1:30", or a range of them,
@@ -106,6 +133,15 @@ mod tests {
         }
         assert_eq!(span(&row("Hold", "w 1-2")), (1.0, 2.0));
         assert_eq!(span(&row("Timeline", "3.5")), (3.5, 3.5));
+    }
+
+    #[test]
+    fn a_timeline_lasts_until_its_last_step_and_a_repeat_holds_the_round() {
+        let rows = [row("Timeline", ""), row("At", "1 hold w 2"), row("Key", "e")];
+        let (starts, _) = starts(&rows);
+        assert!(starts[2].0 >= 3.0, "{starts:?}");
+        let (_, end) = super::starts(&[row("Repeat", "e 10"), row("Key", "f")]);
+        assert_eq!(end, (10.0, 10.0));
     }
 
     #[test]
