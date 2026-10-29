@@ -209,7 +209,7 @@ fn halve(image: &Image) -> Image {
     for (y, out) in rgb.chunks_exact_mut(w * 3).enumerate() {
         let top = &image.rgb[2 * y * row..2 * y * row + row];
         let bottom = &image.rgb[(2 * y + 1) * row..(2 * y + 2) * row];
-        for (x, o) in out.chunks_exact_mut(3).enumerate() {
+        for (x, o) in out.as_chunks_mut::<3>().0.iter_mut().enumerate() {
             let i = x * 6;
             for c in 0..3 {
                 let sum = u16::from(top[i + c])
@@ -260,8 +260,11 @@ fn mismatches(frame: &Image, template: &Image, left: usize, top: usize, limit: u
         let f = (top + row) * fw + left * 3;
         let a = frame.rgb.get(f..f + tw)?;
         let b = template.rgb.get(row * tw..(row + 1) * tw)?;
-        let far = |(p, q): (&[u8], &[u8])| p.iter().zip(q).any(|(c, d)| c.abs_diff(*d) > TOLERANCE);
-        unlike += a.chunks_exact(3).zip(b.chunks_exact(3)).filter(|&pq| far(pq)).count() as u32;
+        let far =
+            |(p, q): (&[u8; 3], &[u8; 3])| p.iter().zip(q).any(|(c, d)| c.abs_diff(*d) > TOLERANCE);
+        unlike +=
+            a.as_chunks::<3>().0.iter().zip(b.as_chunks::<3>().0).filter(|&pq| far(pq)).count()
+                as u32;
         if unlike > limit {
             return None;
         }

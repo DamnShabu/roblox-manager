@@ -11,10 +11,10 @@ pub(super) fn default_for(text: &str, mime: &str) -> Option<String> {
         let line = line.trim();
         if let Some(name) = header(line) {
             section = name;
-        } else if section == DEFAULTS {
-            if let Some(ids) = value(line, mime) {
-                return ids.split(';').map(str::trim).find(|id| !id.is_empty()).map(str::to_owned);
-            }
+        } else if section == DEFAULTS
+            && let Some(ids) = value(line, mime)
+        {
+            return ids.split(';').map(str::trim).find(|id| !id.is_empty()).map(str::to_owned);
         }
     }
     None
@@ -37,15 +37,15 @@ fn associations(text: &str, mime: &str) -> Vec<String> {
         let line = line.trim();
         if let Some(name) = header(line) {
             section = name;
-        } else if section == ADDED {
-            if let Some(ids) = value(line, mime) {
-                return ids
-                    .split(';')
-                    .map(str::trim)
-                    .filter(|id| !id.is_empty())
-                    .map(str::to_owned)
-                    .collect();
-            }
+        } else if section == ADDED
+            && let Some(ids) = value(line, mime)
+        {
+            return ids
+                .split(';')
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+                .collect();
         }
     }
     Vec::new()

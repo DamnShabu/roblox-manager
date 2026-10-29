@@ -59,10 +59,10 @@ impl Recorder {
     }
 
     fn note(&self, sent: Sent) {
-        if let Some((at, stop)) = &self.stop_on {
-            if *at == sent {
-                stop.set();
-            }
+        if let Some((at, stop)) = &self.stop_on
+            && *at == sent
+        {
+            stop.set();
         }
         self.sent.borrow_mut().push(sent);
     }
