@@ -5,6 +5,7 @@
   "hash": "sha256-LEvDvI5gayfVtW+0n7TyQKSSjDyiVu5umTl6lm572uU=",
   "version": "0.20.1",
   "patches": [
-    "0002-cordial-fetch-cli.patch"
+    "0002-cordial-fetch-cli.patch",
+    "0003-zip-9-rustls.patch"
   ]
 }
